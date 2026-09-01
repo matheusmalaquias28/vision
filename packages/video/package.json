@@ -1,0 +1,17 @@
+{
+  "name": "@vision/video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/exports.ts",
+  "types": "src/exports.ts",
+  "dependencies": {
+    "@remotion/layout-utils": "^4.0.519",
+    "@vision/recipe": "*",
+    "react": "^19.0.0",
+    "remotion": "4.0.519"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.8"
+  }
+}

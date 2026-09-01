@@ -1,0 +1,24 @@
+{
+  "name": "@vision/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@remotion/bundler": "4.0.519",
+    "@remotion/renderer": "4.0.519",
+    "@vision/recipe": "*",
+    "@vision/video": "*",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "multer": "^2.3.0",
+    "openai": "^4.80.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.4.0"
+  }
+}
