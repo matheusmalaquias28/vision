@@ -61,6 +61,27 @@ export function sourceToOutput(
 }
 
 /**
+ * Id novo derivado de `base` que não colide com `taken` (e passa a ocupá-lo).
+ * Remove sufixos "b"/"bN" acumulados para não gerar "seg_01bbbb...".
+ */
+function freshSegmentId(base: string, taken: Set<string>): string {
+  const root = base.replace(/(b\d*)+$/, "") || base;
+  let id = `${root}b`;
+  for (let n = 2; taken.has(id); n++) id = `${root}b${n}`;
+  taken.add(id);
+  return id;
+}
+
+/** O instante de um clipe bruto está presente no vídeo final? */
+export function isSourceTimeKept(
+  segments: Segment[],
+  sourceId: string,
+  sourceTime: number
+): boolean {
+  return sourceToOutput(segments, sourceId, sourceTime) !== null;
+}
+
+/**
  * Remove o intervalo [cutStart, cutEnd] de um clipe específico,
  * dividindo segmentos quando o corte cai no meio de um.
  */
@@ -70,6 +91,7 @@ export function applyCutToSegments(
   cutStart: number,
   cutEnd: number
 ): Segment[] {
+  const taken = new Set(segments.map((s) => s.id));
   const result: Segment[] = [];
   for (const s of segments) {
     if (
@@ -86,15 +108,76 @@ export function applyCutToSegments(
     };
     const right: Segment = {
       ...s,
-      id: `${s.id}b`,
       sourceStart: Math.max(cutEnd, s.sourceStart),
     };
     const keepLeft = segmentDuration(left) >= MIN_SEGMENT_SECONDS;
     const keepRight = segmentDuration(right) >= MIN_SEGMENT_SECONDS;
     if (keepLeft) result.push(left);
-    if (keepRight) result.push(!keepLeft ? { ...right, id: s.id } : right);
+    // sobra direita herda o id quando é a única parte que restou
+    if (keepRight) {
+      result.push(keepLeft ? { ...right, id: freshSegmentId(s.id, taken) } : right);
+    }
   }
   return result;
+}
+
+/**
+ * Inverso de applyCutToSegments: devolve à timeline o trecho [start, end] de
+ * um clipe. Entra logo após o segmento da mesma fonte que começa antes dele
+ * (ordem do bruto) e funde com vizinhos da mesma fonte que se tocam —
+ * buracos menores que MIN_SEGMENT_SECONDS também são fechados.
+ */
+export function restoreSourceRange(
+  segments: Segment[],
+  sourceId: string,
+  start: number,
+  end: number
+): Segment[] {
+  const from = Math.max(0, start);
+  if (end - from < MIN_SEGMENT_SECONDS) return segments;
+  const taken = new Set(segments.map((s) => s.id));
+  const restored: Segment = {
+    id: freshSegmentId(`${sourceId.replace(/^src_/, "seg_")}`, taken),
+    sourceId,
+    sourceStart: from,
+    sourceEnd: end,
+  };
+  const sameSource = segments
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => s.sourceId === sourceId);
+  const before = sameSource.filter(({ s }) => s.sourceStart <= from);
+  const insertAt =
+    before.length > 0
+      ? before[before.length - 1].i + 1
+      : sameSource.length > 0
+        ? sameSource[0].i
+        : segments.length;
+  const withRestored = [
+    ...segments.slice(0, insertAt),
+    restored,
+    ...segments.slice(insertAt),
+  ];
+  const merged: Segment[] = [];
+  for (const s of withRestored) {
+    const prev = merged[merged.length - 1];
+    if (
+      prev &&
+      prev.sourceId === s.sourceId &&
+      prev.sourceStart <= s.sourceStart &&
+      s.sourceStart <= prev.sourceEnd + MIN_SEGMENT_SECONDS
+    ) {
+      // o segmento original preserva seu id; o restaurado é absorvido
+      const keepId = prev === restored ? s.id : prev.id;
+      merged[merged.length - 1] = {
+        ...prev,
+        id: keepId,
+        sourceEnd: Math.max(prev.sourceEnd, s.sourceEnd),
+      };
+      continue;
+    }
+    merged.push(s);
+  }
+  return merged;
 }
 
 export function applyAcceptedCut(
@@ -102,4 +185,43 @@ export function applyAcceptedCut(
   cut: Pick<SuggestedCut, "sourceId" | "sourceStart" | "sourceEnd">
 ): Segment[] {
   return applyCutToSegments(segments, cut.sourceId, cut.sourceStart, cut.sourceEnd);
+}
+
+/**
+ * Insere um clipe (segmento próprio) na sequência, no instante do vídeo final
+ * `atOutputSeconds`. Se o ponto cai no meio de um segmento, ele é dividido e o
+ * clipe entra entre as duas metades (empurra o restante pra frente). Nas bordas
+ * (0, fim, ou entre segmentos) apenas insere sem dividir.
+ */
+export function insertClipSegment(
+  segments: Segment[],
+  clip: Segment,
+  atOutputSeconds: number
+): Segment[] {
+  const total = outputDuration(segments);
+  const at = Math.max(0, Math.min(atOutputSeconds, total));
+  const taken = new Set([...segments.map((s) => s.id), clip.id]);
+  const result: Segment[] = [];
+  let acc = 0;
+  let inserted = false;
+  for (const s of segments) {
+    const dur = segmentDuration(s);
+    if (!inserted && at > acc && at < acc + dur) {
+      // divide o segmento no ponto de inserção
+      const splitRaw = s.sourceStart + (at - acc);
+      result.push({ ...s, sourceEnd: splitRaw });
+      result.push(clip);
+      result.push({ ...s, id: freshSegmentId(s.id, taken), sourceStart: splitRaw });
+      inserted = true;
+    } else {
+      if (!inserted && at <= acc) {
+        result.push(clip);
+        inserted = true;
+      }
+      result.push(s);
+    }
+    acc += dur;
+  }
+  if (!inserted) result.push(clip); // at no fim (ou timeline vazia) → anexa
+  return result;
 }

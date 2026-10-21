@@ -10,10 +10,14 @@ import { mediaDir, musicDir, projectDir, projectsDir, recipePath, toRecipePath }
 import { createProject, loadRecipe, saveRecipe, slugify } from "./project";
 import { enhanceAudio } from "./pipeline/enhance";
 import { generateNarration } from "./pipeline/narration";
+import { probeVideo } from "./pipeline/probe";
 import { defaultSilenceOptions, suggestCuts } from "./pipeline/silence";
+import { suggestMotions } from "./pipeline/motions";
+import { suggestSmartCuts } from "./pipeline/smartCuts";
 import { transcribeProject } from "./pipeline/transcribe";
 import { getWaveforms } from "./pipeline/waveform";
 import { enqueueRender, getJob } from "./render/queue";
+import { loadCatalog } from "./library/catalog";
 import { applyTemplate, TEMPLATES } from "./templates";
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -122,6 +126,31 @@ app.post("/api/projects/:id/silence", async (req, res, next) => {
   }
 });
 
+// Pausas, vícios e repetições (determinístico) + retomadas (IA, opcional)
+app.post("/api/projects/:id/smart-cuts", async (req, res, next) => {
+  try {
+    const updated = await suggestSmartCuts(loadRecipe(req.params.id), {
+      ai: req.body?.ai !== false,
+    });
+    saveRecipe(updated);
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Plano de motions da IA (entra como pendente; o operador aceita/rejeita)
+app.post("/api/projects/:id/motions/suggest", async (req, res, next) => {
+  try {
+    const instructions = String(req.body?.instructions ?? "").trim();
+    const updated = await suggestMotions(loadRecipe(req.params.id), instructions);
+    saveRecipe(updated);
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/api/projects/:id/enhance", async (req, res, next) => {
   try {
     const updated = await enhanceAudio(loadRecipe(req.params.id));
@@ -202,6 +231,9 @@ app.get("/api/director-jobs/:jobId", (req, res) => {
   res.json(job);
 });
 
+// ─── Biblioteca de assets ───────────────────────────────────────────
+app.get("/api/library", (_req, res) => res.json(loadCatalog()));
+
 // ─── Templates ───────────────────────────────────────────────────────
 app.get("/api/templates", (_req, res) => res.json(TEMPLATES));
 
@@ -238,6 +270,43 @@ app.post(
       fs.copyFileSync(req.file.path, destAbs);
       fs.rmSync(req.file.path, { force: true });
       res.json({ file: toRecipePath(destAbs), name: safeName });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Registra um vídeo como nova fonte (para inserir como clipe na sequência).
+// Copia + faz probe; devolve o Source pronto. O cliente insere o segmento e
+// salva a receita. probeVideo rejeita arquivos sem trilha de vídeo (imagens).
+app.post(
+  "/api/projects/:id/sources",
+  upload.single("asset"),
+  async (req, res, next) => {
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: "campo 'asset' é obrigatório" });
+        return;
+      }
+      const id = String(req.params.id);
+      loadRecipe(id);
+      const srcId = `src_${Date.now().toString(36)}`;
+      const ext = path.extname(req.file.originalname).toLowerCase() || ".mp4";
+      const destAbs = path.join(projectDir(id), `source-${srcId}${ext}`);
+      fs.copyFileSync(req.file.path, destAbs);
+      fs.rmSync(req.file.path, { force: true });
+      const probe = await probeVideo(destAbs);
+      res.json({
+        source: {
+          id: srcId,
+          file: toRecipePath(destAbs),
+          durationInSeconds: probe.durationInSeconds,
+          width: probe.width,
+          height: probe.height,
+          fps: probe.fps,
+          enhancedAudio: null,
+        },
+      });
     } catch (err) {
       next(err);
     }

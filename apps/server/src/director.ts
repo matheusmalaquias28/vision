@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { applyAcceptedCut, outputDuration, type Recipe } from "@vision/recipe";
+import { outputDuration, reviewSuggestions, type Recipe } from "@vision/recipe";
 import { musicDir } from "./paths";
 import { enhanceAudio } from "./pipeline/enhance";
 import { generateNarration } from "./pipeline/narration";
@@ -144,25 +144,15 @@ export async function directProject(
   }
 
   // 4. Cortes de silêncio (sugere E aplica — decisão do diretor, reversível
-  //    na timeline porque as sugestões ficam registradas como aceitas)
+  //    na timeline porque as sugestões ficam registradas como aceitas).
+  //    Só silêncios: retomadas/vícios continuam pendentes para o operador.
   if (plan.removeSilences) {
     onProgress("Cortando silêncios");
     r = await suggestCuts(r, defaultSilenceOptions);
-    let segments = r.timeline.segments;
-    for (const cut of r.timeline.suggestedCuts) {
-      const next = applyAcceptedCut(segments, cut);
-      if (next.length > 0) segments = next;
-    }
-    r = {
-      ...r,
-      timeline: {
-        segments,
-        suggestedCuts: r.timeline.suggestedCuts.map((c) => ({
-          ...c,
-          status: "accepted" as const,
-        })),
-      },
-    };
+    const silenceIds = r.timeline.suggestedCuts
+      .filter((c) => c.reason === "silence" && c.status === "pending")
+      .map((c) => c.id);
+    r = reviewSuggestions(r, silenceIds, true);
   }
 
   // 5. Música
@@ -203,6 +193,11 @@ export async function directProject(
           end: Math.min(5, outputDuration(r.timeline.segments)),
           position: "top" as const,
           layout: "overlay" as const,
+          blend: "normal" as const,
+          opacity: 1,
+          scale: 0.4,
+          assetId: null,
+          mediaDurationSeconds: null,
         },
       ],
     };

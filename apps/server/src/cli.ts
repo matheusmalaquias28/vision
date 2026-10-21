@@ -1,12 +1,27 @@
 import "./env";
 import path from "node:path";
 import { Command } from "commander";
-import { outputDuration } from "@vision/recipe";
+import {
+  ASSET_TYPE_LABEL,
+  CUT_REASON_LABEL,
+  MOTION_LABEL,
+  motionSummary,
+  outputDuration,
+  placeMotions,
+  reviewMotions,
+  type AssetType,
+  type SuggestedCut,
+} from "@vision/recipe";
 import { acceptCuts, pendingCutIds, rejectCuts } from "./cuts";
+import { loadCatalog } from "./library/catalog";
+import { importPack } from "./library/importPack";
+import { tagAssets } from "./library/tagAssets";
 import {
   defaultSilenceOptions,
   suggestCuts,
 } from "./pipeline/silence";
+import { suggestMotions } from "./pipeline/motions";
+import { suggestSmartCuts } from "./pipeline/smartCuts";
 import { transcribeProject } from "./pipeline/transcribe";
 import { createProject, loadRecipe, saveRecipe } from "./project";
 import { renderRecipe } from "./render/renderJob";
@@ -16,6 +31,11 @@ program.name("vision").description("VISION — editor de vídeo com IA (CLI)");
 
 function fmt(s: number): string {
   return `${s.toFixed(2)}s`;
+}
+
+function fmtCut(c: SuggestedCut): string {
+  const note = c.note ? `  ${c.note}` : "";
+  return `  ${c.id}  ${CUT_REASON_LABEL[c.reason].padEnd(9)} ${fmt(c.sourceStart)} → ${fmt(c.sourceEnd)}  (confiança ${c.confidence})${note}`;
 }
 
 program
@@ -83,6 +103,104 @@ program
   });
 
 program
+  .command("smart-cuts")
+  .description("Sugere cortes pela transcrição: pausas, vícios, repetições e retomadas (IA)")
+  .argument("<projectId>")
+  .option("--no-ai", "só os detectores determinísticos (sem chamada ao LLM)")
+  .action(async (projectId: string, opts: { ai: boolean }) => {
+    const updated = await suggestSmartCuts(loadRecipe(projectId), { ai: opts.ai });
+    saveRecipe(updated);
+    const pending = updated.timeline.suggestedCuts.filter((c) => c.status === "pending");
+    console.log(`${pending.length} sugestão(ões) pendente(s):`);
+    for (const c of pending) console.log(fmtCut(c));
+    console.log(`Revise com: npm run cli -- cuts ${projectId} --accept <ids...>`);
+  });
+
+program
+  .command("motions")
+  .description("IA sugere motions da biblioteca ancorados na fala (entram como pendentes)")
+  .argument("<projectId>")
+  .option("--instructions <texto>", "pedido extra para a IA (ex.: 'mais zooms, sem emoji')", "")
+  .option("--accept-all", "aceita todas as sugestões pendentes")
+  .action(async (projectId: string, opts: { instructions: string; acceptAll?: boolean }) => {
+    let recipe = loadRecipe(projectId);
+    if (opts.acceptAll) {
+      const ids = recipe.motions.filter((m) => m.status === "pending").map((m) => m.id);
+      recipe = reviewMotions(recipe, ids, true);
+      saveRecipe(recipe);
+      console.log(`Aceito(s): ${ids.join(", ") || "(nenhum pendente)"}`);
+      return;
+    }
+    recipe = await suggestMotions(recipe, opts.instructions);
+    saveRecipe(recipe);
+    const placed = placeMotions(recipe, true).filter((p) => p.motion.status === "pending");
+    console.log(`${placed.length} motion(s) sugerido(s):`);
+    for (const { motion: m, outputStart } of placed) {
+      console.log(
+        `  ${m.id}  ${fmt(outputStart).padStart(7)}  ${MOTION_LABEL[m.kind].padEnd(13)} ${motionSummary(m)}  — ${m.note}`
+      );
+    }
+  });
+
+const library = program.command("library").description("Biblioteca de assets (packs)");
+
+library
+  .command("import")
+  .description("Importa um pack (pasta com subpastas por categoria) para media/library")
+  .argument("<pasta>")
+  .option("--only <tipos>", "só estes tipos, separados por vírgula (ex.: sfx,transition)")
+  .option("-j, --jobs <n>", "conversões em paralelo", "4")
+  .action(async (dir: string, opts: { only?: string; jobs: string }) => {
+    const started = Date.now();
+    let lastPct = -1;
+    const report = await importPack(dir, {
+      only: opts.only ? (opts.only.split(",").map((s) => s.trim()) as AssetType[]) : undefined,
+      concurrency: Number(opts.jobs),
+      onProgress: (done, total, label) => {
+        const pct = Math.floor((done / total) * 100);
+        if (pct !== lastPct) {
+          lastPct = pct;
+          console.log(`  ${pct}% (${done}/${total}) ${label}`);
+        }
+      },
+    });
+    const secs = Math.round((Date.now() - started) / 1000);
+    console.log(
+      `Pack "${report.packId}": ${report.imported} importado(s), ${report.reused} reaproveitado(s), ${report.failed.length} falha(s) em ${secs}s`
+    );
+    for (const f of report.failed) console.log(`  FALHOU ${f.file}: ${f.error}`);
+  });
+
+library
+  .command("tag")
+  .description("Descreve assets visuais com IA de visão (para busca e para a IA de edição)")
+  .option("--only <tipos>", "só estes tipos (ex.: icon,character)")
+  .option("--force", "refaz também os que já têm descrição")
+  .option("--limit <n>", "no máximo n itens (teste)")
+  .action(async (opts: { only?: string; force?: boolean; limit?: string }) => {
+    const r = await tagAssets({
+      force: opts.force,
+      limit: opts.limit ? Number(opts.limit) : undefined,
+      only: opts.only ? (opts.only.split(",").map((s) => s.trim()) as AssetType[]) : undefined,
+      onProgress: (done, total) => console.log(`  ${done}/${total}`),
+    });
+    console.log(`${r.tagged} descrito(s), ${r.failed} sem resposta`);
+  });
+
+library
+  .command("stats")
+  .description("Resumo do catálogo por tipo")
+  .action(() => {
+    const catalog = loadCatalog();
+    const byType = new Map<string, number>();
+    for (const a of catalog.assets) byType.set(a.type, (byType.get(a.type) ?? 0) + 1);
+    console.log(`${catalog.assets.length} assets em ${catalog.packs.length} pack(s)`);
+    for (const [t, n] of [...byType].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${ASSET_TYPE_LABEL[t as AssetType].padEnd(16)} ${n}`);
+    }
+  });
+
+program
   .command("cuts")
   .description("Lista, aceita ou rejeita sugestões de corte")
   .argument("<projectId>")
@@ -123,11 +241,7 @@ program
       );
       if (pending.length > 0) {
         console.log(`Sugestões pendentes:`);
-        for (const c of pending) {
-          console.log(
-            `  ${c.id}  ${fmt(c.sourceStart)} → ${fmt(c.sourceEnd)}  (confiança ${c.confidence})`
-          );
-        }
+        for (const c of pending) console.log(fmtCut(c));
       }
     }
   );

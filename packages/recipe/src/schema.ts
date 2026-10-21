@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BLEND_MODES } from "./library";
 
 const seconds = z.number().finite().min(0);
 
@@ -48,15 +49,25 @@ export const SegmentSchema = z
     message: "segment: duração deve ser positiva",
   });
 
+/**
+ * silence: ffmpeg silencedetect · pause: buraco entre palavras da transcrição
+ * filler: vício de linguagem · repeat: palavra repetida em sequência
+ * retake: retomada/começo falso (sugerido pela IA)
+ */
+export const CUT_REASONS = ["silence", "pause", "filler", "repeat", "retake"] as const;
+export type CutReason = (typeof CUT_REASONS)[number];
+
 export const SuggestedCutSchema = z
   .object({
     id: z.string().min(1),
     sourceId: z.string().min(1),
     sourceStart: seconds,
     sourceEnd: seconds,
-    reason: z.literal("silence"),
+    reason: z.enum(CUT_REASONS),
     confidence: z.number().min(0).max(1),
     status: z.enum(["pending", "accepted", "rejected"]).default("pending"),
+    /** Explicação curta para o operador (ex.: texto cortado, motivo da IA) */
+    note: z.string().default(""),
   })
   .refine((s) => s.sourceEnd > s.sourceStart, {
     message: "suggestedCut: duração deve ser positiva",
@@ -113,7 +124,21 @@ export const OverlaySchema = z
     /** null = até o fim do vídeo */
     end: seconds.nullable().default(null),
     position: z.enum(["top", "center", "bottom"]).default("top"),
-    layout: z.enum(["overlay", "pip", "split-bottom"]).default("overlay"),
+    /**
+     * overlay: destaque central · pip: janela no canto · split-bottom: metade
+     * de baixo · fullscreen: cobre o quadro (fundos, transições, molduras)
+     * · sticker: elemento solto sobre o vídeo (ícones, personagens)
+     */
+    layout: z.enum(["overlay", "pip", "split-bottom", "fullscreen", "sticker"]).default("overlay"),
+    /** Mescla com o vídeo: screen some o preto (luz), multiply some o branco */
+    blend: z.enum(BLEND_MODES).default("normal"),
+    opacity: z.number().min(0).max(1).default(1),
+    /** Largura do sticker como fração da largura do quadro */
+    scale: z.number().min(0.05).max(1).default(0.4),
+    /** Item da biblioteca de origem (null = upload avulso) */
+    assetId: z.string().nullable().default(null),
+    /** Duração da mídia; overlay mais longo que isso repete em loop */
+    mediaDurationSeconds: z.number().positive().nullable().default(null),
   })
   .refine((o) => (o.kind === "title" ? o.text.length > 0 : o.file !== null), {
     message: "overlay: title exige text; image/video exigem file",
@@ -126,6 +151,81 @@ export const SfxSchema = z.object({
   at: seconds,
   volume: z.number().min(0).max(1).default(0.8),
 });
+
+/**
+ * Biblioteca fechada de motions: a IA escolhe QUAL e QUANDO, nunca escreve
+ * animação. Visual herda fonte e cor de destaque do estilo da legenda.
+ */
+export const MOTION_KINDS = ["zoom", "keyword", "emoji", "lowerThird", "counter", "flash"] as const;
+export type MotionKind = (typeof MOTION_KINDS)[number];
+
+const motionBase = {
+  id: z.string().min(1),
+  /** Âncora no clipe BRUTO (em geral o início de uma palavra): acompanha cortes */
+  sourceId: z.string().min(1),
+  sourceTime: seconds,
+  /** Duração no tempo do vídeo final, a partir da âncora */
+  durationSeconds: z.number().min(0.1).max(15).default(1.5),
+  /** Só "accepted" vai para o render; "pending" aparece como prévia no editor */
+  status: z.enum(["pending", "accepted", "rejected"]).default("accepted"),
+  origin: z.enum(["ai", "manual"]).default("manual"),
+  note: z.string().default(""),
+};
+
+export const MotionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...motionBase,
+    kind: z.literal("zoom"),
+    params: z
+      .object({
+        scale: z.number().min(1).max(1.6).default(1.15),
+        /** punch: entra seco (ênfase) · smooth: aproxima devagar (explicação) */
+        style: z.enum(["punch", "smooth"]).default("punch"),
+      })
+      .default({}),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("keyword"),
+    params: z.object({
+      text: z.string().min(1).max(40),
+      position: z.enum(["top", "center"]).default("top"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("emoji"),
+    params: z.object({
+      emoji: z.string().min(1).max(16),
+      position: z.enum(["top", "center", "side"]).default("side"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("lowerThird"),
+    params: z.object({
+      title: z.string().min(1).max(40),
+      subtitle: z.string().max(60).default(""),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("counter"),
+    params: z.object({
+      from: z.number().default(0),
+      to: z.number(),
+      decimals: z.number().int().min(0).max(2).default(0),
+      prefix: z.string().max(8).default(""),
+      suffix: z.string().max(12).default(""),
+      label: z.string().max(40).default(""),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("flash"),
+    params: z.object({ color: z.string().default("#FFFFFF") }).default({}),
+  }),
+]);
 
 export const EffectsSchema = z.object({
   /** Zoom rápido (punch-in) no início de cada segmento */
@@ -155,6 +255,7 @@ export const RecipeSchema = z
     }),
     overlays: z.array(OverlaySchema).default([]),
     sfx: z.array(SfxSchema).default([]),
+    motions: z.array(MotionSchema).default([]),
     audio: AudioSchema.default({}),
     effects: EffectsSchema.default({}),
     render: RenderSchema,
@@ -176,6 +277,15 @@ export const RecipeSchema = z
           code: z.ZodIssueCode.custom,
           message: `suggestedCut aponta para fonte inexistente "${c.sourceId}"`,
           path: ["timeline", "suggestedCuts", i],
+        });
+      }
+    });
+    r.motions.forEach((m, i) => {
+      if (!ids.has(m.sourceId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `motion aponta para fonte inexistente "${m.sourceId}"`,
+          path: ["motions", i],
         });
       }
     });
@@ -201,6 +311,8 @@ export type Narration = z.infer<typeof NarrationSchema>;
 export type Source = z.infer<typeof SourceSchema>;
 export type Overlay = z.infer<typeof OverlaySchema>;
 export type Sfx = z.infer<typeof SfxSchema>;
+export type Motion = z.infer<typeof MotionSchema>;
+export type MotionOf<K extends MotionKind> = Extract<Motion, { kind: K }>;
 export type Recipe = z.infer<typeof RecipeSchema>;
 
 export function parseRecipe(data: unknown): Recipe {

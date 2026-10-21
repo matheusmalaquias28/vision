@@ -7,7 +7,13 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { outputToSource, sourceToOutput, type Recipe, type Word } from "@vision/recipe";
+import {
+  isSourceTimeKept,
+  outputToSource,
+  sourceToOutput,
+  type Recipe,
+  type Word,
+} from "@vision/recipe";
 import { useGoogleFont } from "./fonts";
 
 /** Tempo que o bloco continua visível depois da última palavra (s) */
@@ -68,7 +74,16 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
         })
       : 1;
 
-  const lines = chunkWords(block.words, style.wordsPerLine);
+  // palavras removidas no editor de texto somem da legenda (o bloco fica)
+  const visibleWords =
+    block.sourceId === null
+      ? block.words
+      : block.words.filter((w) =>
+          isSourceTimeKept(recipe.timeline.segments, block.sourceId!, (w.start + w.end) / 2)
+        );
+  if (visibleWords.length === 0) return null;
+
+  const lines = chunkWords(visibleWords, style.wordsPerLine);
   const maxWidthPx = (width * style.maxWidthPct) / 100;
 
   // auto-ajuste: mede cada linha e reduz a fonte até a maior caber
@@ -95,7 +110,9 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
           color: active ? style.highlightColor : style.textColor,
           transform: active ? "scale(1.08)" : "scale(1)",
           display: "inline-block",
-          margin: "0 0.14em",
+          // o contorno cresce strokeWidth/2 para cada lado e come o espaço
+          // entre palavras ("CÉSARMAGALHÃES"); compensa na margem
+          margin: `0 calc(0.14em + ${style.strokeWidthPx / 2}px)`,
         }}
       >
         {word.text}

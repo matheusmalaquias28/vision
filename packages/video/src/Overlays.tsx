@@ -2,6 +2,8 @@ import React from "react";
 import {
   AbsoluteFill,
   Img,
+  interpolate,
+  Loop,
   OffthreadVideo,
   Sequence,
   spring,
@@ -55,25 +57,105 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
   );
 };
 
-const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
+/** Imagem ou vídeo do overlay; vídeo mais curto que o overlay repete em loop */
+const Media: React.FC<{ overlay: Overlay; fit: "cover" | "contain" }> = ({ overlay, fit }) => {
+  const { fps } = useVideoConfig();
   if (!overlay.file) return null;
   const src = mediaSrc(overlay.file);
-  const media =
-    overlay.kind === "video" ? (
-      <OffthreadVideo
-        src={src}
-        pauseWhenBuffering
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    ) : (
-      <Img src={src} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+  // sticker não tem altura fixa: a mídia define a altura pela própria proporção
+  const natural = fit === "contain";
+  const style: React.CSSProperties = natural
+    ? { width: "100%", height: "auto", display: "block" }
+    : { width: "100%", height: "100%", objectFit: fit };
+  if (overlay.kind !== "video") return <Img src={src} style={style} />;
+  // WebM da biblioteca tem canal alfa (personagens recortados, transições chroma)
+  const video = (
+    <OffthreadVideo
+      src={src}
+      muted
+      pauseWhenBuffering
+      transparent={/\.webm$/i.test(overlay.file)}
+      style={style}
+    />
+  );
+  const media = overlay.mediaDurationSeconds;
+  return media ? (
+    // layout="none": sem isso o Loop envolve em AbsoluteFill e o sticker colapsa a 0px
+    <Loop
+      durationInFrames={Math.max(1, Math.round(media * fps))}
+      layout={natural ? "none" : "absolute-fill"}
+    >
+      {video}
+    </Loop>
+  ) : (
+    video
+  );
+};
+
+/** Elemento solto (ícone, personagem): entra com pop, sai com fade */
+const Sticker: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames } = useVideoConfig();
+  const enter = spring({ frame, fps, config: { damping: 13, stiffness: 190 } });
+  const exit = interpolate(frame, [durationInFrames - 6, durationInFrames], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  // % de top relativo à ALTURA do quadro (não usar padding-top %: é da largura)
+  const top = overlay.position === "top" ? "8%" : overlay.position === "center" ? "30%" : undefined;
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top,
+          bottom: overlay.position === "bottom" ? 0 : undefined,
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: `${overlay.scale * 100}%`,
+            opacity: overlay.opacity * exit,
+            transform: `scale(${interpolate(enter, [0, 1], [0.5, 1])})`,
+            transformOrigin: overlay.position === "bottom" ? "50% 100%" : "50% 50%",
+            mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
+          }}
+        >
+          <Media overlay={overlay} fit="contain" />
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
+  if (!overlay.file) return null;
+
+  if (overlay.layout === "sticker") return <Sticker overlay={overlay} />;
+
+  if (overlay.layout === "fullscreen") {
+    // fundos/transições/molduras: cobrem o quadro e mesclam com o vídeo
+    return (
+      <AbsoluteFill
+        style={{
+          opacity: overlay.opacity,
+          mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
+        }}
+      >
+        <Media overlay={overlay} fit="cover" />
+      </AbsoluteFill>
     );
+  }
+
+  const media = <Media overlay={overlay} fit="cover" />;
 
   if (overlay.layout === "split-bottom") {
     // metade de baixo da tela para o overlay; o vídeo principal fica em cima
-    return (
-      <AbsoluteFill style={{ top: "50%" }}>{media}</AbsoluteFill>
-    );
+    return <AbsoluteFill style={{ top: "50%" }}>{media}</AbsoluteFill>;
   }
   if (overlay.layout === "pip") {
     return (
@@ -97,9 +179,7 @@ const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
   }
   // "overlay": imagem/vídeo em destaque no centro (ex: b-roll, print)
   return (
-    <AbsoluteFill
-      style={{ alignItems: "center", justifyContent: "center" }}
-    >
+    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
       <div
         style={{
           width: "86%",
@@ -127,12 +207,10 @@ export const Overlays: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
             key={o.id}
             from={Math.round(o.start * fps)}
             durationInFrames={durationInFrames}
+            premountFor={Math.round(fps * 1.5)}
           >
             {o.kind === "title" ? (
-              <TitleOverlay
-                overlay={o}
-                fontFamily={recipe.captions.style.fontFamily}
-              />
+              <TitleOverlay overlay={o} fontFamily={recipe.captions.style.fontFamily} />
             ) : (
               <MediaOverlay overlay={o} />
             )}

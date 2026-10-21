@@ -122,6 +122,16 @@ describe("RecipeSchema v2", () => {
     expect(RecipeSchema.safeParse(raw).success).toBe(false);
   });
 
+  it("aceita os novos motivos de corte e aplica note padrão", () => {
+    const raw = validRecipe() as any;
+    raw.timeline.suggestedCuts[0].reason = "retake";
+    const r = parseRecipe(raw);
+    expect(r.timeline.suggestedCuts[0].reason).toBe("retake");
+    expect(r.timeline.suggestedCuts[0].note).toBe("");
+    raw.timeline.suggestedCuts[0].reason = "qualquer";
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
+  });
+
   it("aplica defaults (overlays, sfx, effects, narração)", () => {
     const raw = validRecipe() as any;
     delete raw.overlays;
@@ -181,5 +191,29 @@ describe("migrateRecipeData v1→v2", () => {
   it("não toca em receitas v2", () => {
     const r = validRecipe();
     expect(migrateRecipeData(r)).toBe(r);
+  });
+});
+
+describe("migrateRecipeData: reparo de ids de segmento", () => {
+  it("renomeia ids duplicados e mantém o resto intacto", () => {
+    const raw = {
+      version: 2,
+      timeline: {
+        segments: [
+          { id: "seg_01", sourceStart: 0, sourceEnd: 1 },
+          { id: "seg_01b", sourceStart: 2, sourceEnd: 3 },
+          { id: "seg_01b", sourceStart: 4, sourceEnd: 5 },
+          { id: "seg_01b", sourceStart: 6, sourceEnd: 7 },
+        ],
+      },
+    };
+    const out = migrateRecipeData(raw) as typeof raw;
+    expect(out.timeline.segments.map((s) => s.id)).toEqual(["seg_01", "seg_01b", "seg_01b_2", "seg_01b_3"]);
+    expect(out.timeline.segments.map((s) => s.sourceStart)).toEqual([0, 2, 4, 6]);
+  });
+
+  it("receita sem duplicados passa intacta (mesma referência)", () => {
+    const raw = { version: 2, timeline: { segments: [{ id: "a" }, { id: "b" }] } };
+    expect(migrateRecipeData(raw)).toBe(raw);
   });
 });

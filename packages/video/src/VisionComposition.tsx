@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   AbsoluteFill,
   Audio,
@@ -8,8 +8,9 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import type { Recipe, Segment, Source } from "@vision/recipe";
+import { placeMotions, zoomScaleAt, type Recipe, type Segment, type Source } from "@vision/recipe";
 import { Captions } from "./Captions";
+import { Motions } from "./Motions";
 import { Music } from "./Music";
 import { Overlays } from "./Overlays";
 import { SfxTrack } from "./Sfx";
@@ -58,8 +59,24 @@ const SegmentVideo: React.FC<{
   );
 };
 
-export const VisionComposition: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
+// type (não interface): o Composition do Remotion exige props indexáveis
+export type VisionCompositionProps = {
+  recipe: Recipe;
+  /** Editor: mostra motions sugeridos (pendentes) como prévia. Render: false. */
+  previewPending?: boolean;
+};
+
+export const VisionComposition: React.FC<VisionCompositionProps> = ({
+  recipe,
+  previewPending = false,
+}) => {
   const { fps } = useVideoConfig();
+  const frame = useCurrentFrame();
+  const placed = useMemo(
+    () => placeMotions(recipe, previewPending),
+    [recipe, previewPending]
+  );
+  const zoom = zoomScaleAt(placed, frame / fps);
   const sourcesById = new Map(recipe.sources.map((s) => [s.id, s]));
 
   let cursor = 0;
@@ -94,8 +111,12 @@ export const VisionComposition: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }}>
-      {sequences}
+      {/* origem um pouco acima do centro: enquadra rosto em vídeo vertical */}
+      <AbsoluteFill style={{ transform: `scale(${zoom})`, transformOrigin: "50% 40%" }}>
+        {sequences}
+      </AbsoluteFill>
       <Overlays recipe={recipe} />
+      <Motions placed={placed} style={recipe.captions.style} />
       <Captions recipe={recipe} />
       {recipe.audio.music ? <Music music={recipe.audio.music} /> : null}
       {recipe.audio.narration ? (

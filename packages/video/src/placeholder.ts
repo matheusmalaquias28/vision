@@ -26,6 +26,7 @@ export const placeholderRecipe: Recipe = {
   },
   overlays: [],
   sfx: [],
+  motions: [],
   effects: { punchIn: false },
   captions: {
     style: {

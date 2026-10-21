@@ -3,6 +3,7 @@ import path from "node:path";
 import OpenAI from "openai";
 import {
   groupWordsIntoBlocks,
+  spreadCollapsedWords,
   type CaptionBlock,
   type Recipe,
   type Word,
@@ -58,16 +59,21 @@ export async function transcribeAudioFile(audioPath: string): Promise<Word[]> {
     model: "whisper-1",
     response_format: "verbose_json",
     timestamp_granularities: ["word"],
+    // o Whisper "limpa" hesitações por padrão; um prompt com disfluências
+    // faz ele transcrevê-las — e aí viram sugestões de corte de vício
+    prompt: "Ééé... então, tipo, hum, deixa eu ver... ahn, né? Eh, o que eu ia dizer.",
   });
   const rawWords = (response as unknown as { words?: WhisperWord[] }).words;
   if (!rawWords) return [];
-  return rawWords
-    .map((w) => ({
-      text: w.word.trim(),
-      start: Math.round(w.start * 1000) / 1000,
-      end: Math.round(Math.max(w.end, w.start) * 1000) / 1000,
-    }))
-    .filter((w) => w.text.length > 0);
+  return spreadCollapsedWords(
+    rawWords
+      .map((w) => ({
+        text: w.word.trim(),
+        start: Math.round(w.start * 1000) / 1000,
+        end: Math.round(Math.max(w.end, w.start) * 1000) / 1000,
+      }))
+      .filter((w) => w.text.length > 0)
+  );
 }
 
 /** Transcreve todas as fontes e grava os blocos (com sourceId) na receita */

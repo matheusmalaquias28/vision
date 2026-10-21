@@ -1,6 +1,8 @@
-import type { Recipe } from "@vision/recipe";
+import { outputDuration, placeMotions, type Recipe } from "@vision/recipe";
 import React, { useEffect, useRef, useState } from "react";
 import { getRenderJob, putRecipe, startRender, type RenderJob } from "../api";
+import { Section } from "../ui/controls";
+import { Icon } from "./Icon";
 
 interface RenderPanelProps {
   recipe: Recipe;
@@ -8,11 +10,7 @@ interface RenderPanelProps {
   onSaved: () => void;
 }
 
-export const RenderPanel: React.FC<RenderPanelProps> = ({
-  recipe,
-  dirty,
-  onSaved,
-}) => {
+export const RenderPanel: React.FC<RenderPanelProps> = ({ recipe, dirty, onSaved }) => {
   const [job, setJob] = useState<RenderJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -51,27 +49,61 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
     }
   };
 
+  const duration = outputDuration(recipe.timeline.segments);
+  const motionsIn = placeMotions(recipe, false).length;
+  const pendingCuts = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending").length;
+  const pendingMotions = recipe.motions.filter((m) => m.status === "pending").length;
+  const progress = Math.round((job?.progress ?? 0) * 100);
+
   return (
-    <section className="panel">
-      <h2>Render</h2>
-      <button className="primary" disabled={rendering} onClick={render}>
-        {rendering
-          ? `Renderizando ${Math.round((job?.progress ?? 0) * 100)}%`
-          : "Renderizar vídeo final"}
-      </button>
-      {job?.status === "done" && job.outputPath && (
-        <p>
-          <a
-            href={`/${job.outputPath.replace(/^media\//, "")}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir vídeo renderizado
-          </a>
-        </p>
+    <Section title="Exportar vídeo final">
+      <dl className="export-summary">
+        <dt>Formato</dt>
+        <dd>
+          {recipe.render.width}×{recipe.render.height} · {recipe.render.fps}fps · H.264
+        </dd>
+        <dt>Duração</dt>
+        <dd>{duration.toFixed(1)}s</dd>
+        <dt>Trechos</dt>
+        <dd>{recipe.timeline.segments.length}</dd>
+        <dt>Motions</dt>
+        <dd>{motionsIn} aceitos</dd>
+      </dl>
+
+      {(pendingCuts > 0 || pendingMotions > 0) && (
+        <div className="warn-box">
+          Sem revisão:{" "}
+          {[
+            pendingCuts > 0 ? `${pendingCuts} ${pendingCuts === 1 ? "corte" : "cortes"}` : "",
+            pendingMotions > 0 ? `${pendingMotions} ${pendingMotions === 1 ? "motion" : "motions"}` : "",
+          ]
+            .filter(Boolean)
+            .join(" e ")}
+          . Sugestões pendentes não entram no vídeo.
+        </div>
       )}
-      {job?.status === "error" && <p className="error">{job.error}</p>}
-      {error && <p className="error">{error}</p>}
-    </section>
+
+      <button className="primary btn-block" disabled={rendering} onClick={render}>
+        <Icon name="export" size={15} />
+        {rendering ? `Renderizando ${progress}%` : dirty ? "Salvar e renderizar" : "Renderizar"}
+      </button>
+      {rendering && (
+        <div className="progress" aria-label="Progresso do render">
+          <span style={{ width: `${progress}%` }} />
+        </div>
+      )}
+      {job?.status === "done" && job.outputPath && (
+        <a
+          className="file-btn"
+          href={`/${job.outputPath.replace(/\\/g, "/").replace(/^.*?media\//, "")}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Icon name="film" size={14} /> Abrir vídeo renderizado
+        </a>
+      )}
+      {job?.status === "error" && <p className="note error">{job.error}</p>}
+      {error && <p className="note error">{error}</p>}
+    </Section>
   );
 };

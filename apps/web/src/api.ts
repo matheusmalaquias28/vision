@@ -1,4 +1,4 @@
-import type { Recipe } from "@vision/recipe";
+import type { Catalog, Recipe, Source } from "@vision/recipe";
 
 export interface ProjectSummary {
   id: string;
@@ -101,6 +101,15 @@ export const uploadAsset = (id: string, file: File) => {
   );
 };
 
+/** Sobe um vídeo, faz probe e devolve o Source pronto para virar segmento */
+export const addSourceClip = (id: string, file: File) => {
+  const fd = new FormData();
+  fd.append("asset", file);
+  return fetch(`/api/projects/${id}/sources`, { method: "POST", body: fd }).then(
+    (r) => json<{ source: Source }>(r)
+  );
+};
+
 export const getRecipe = (id: string) =>
   fetch(`/api/projects/${id}/recipe`).then((r) => json<Recipe>(r));
 
@@ -120,6 +129,22 @@ export const detectSilence = (id: string) =>
   fetch(`/api/projects/${id}/silence`, { method: "POST" }).then((r) =>
     json<Recipe>(r)
   );
+
+/** Pausas, vícios e repetições + retomadas (ai=true chama o LLM) */
+export const suggestSmartCutsApi = (id: string, ai = true) =>
+  fetch(`/api/projects/${id}/smart-cuts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ai }),
+  }).then((r) => json<Recipe>(r));
+
+/** Plano de motions da IA (pendentes); instructions = pedido extra do editor */
+export const suggestMotionsApi = (id: string, instructions = "") =>
+  fetch(`/api/projects/${id}/motions/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instructions }),
+  }).then((r) => json<Recipe>(r));
 
 export interface WaveformData {
   binsPerSecond: number;
@@ -141,3 +166,8 @@ export const startRender = (id: string) =>
 
 export const getRenderJob = (jobId: string) =>
   fetch(`/api/render-jobs/${jobId}`).then((r) => json<RenderJob>(r));
+
+export const getLibrary = () => fetch("/api/library").then((r) => json<Catalog>(r));
+
+/** URL servida de um arquivo de media/ (o servidor expõe media/ na raiz) */
+export const mediaUrl = (file: string) => "/" + file.replace(/^media\//, "");

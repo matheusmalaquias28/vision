@@ -12,6 +12,7 @@ export default defineConfig({
       "/api": API,
       "/projects": API,
       "/music": API,
+      "/library": API,
     },
   },
 });

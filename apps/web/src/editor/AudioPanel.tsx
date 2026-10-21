@@ -7,6 +7,13 @@ import {
   listSfx,
   type MusicTrack,
 } from "../api";
+import { Prop, ScrubNumber, Section, Select, Slider, Toggle } from "../ui/controls";
+import { Icon } from "./Icon";
+
+const pct = {
+  format: (v: number) => String(Math.round(v * 100)),
+  parse: (s: string) => Number(s) / 100,
+};
 
 interface AudioPanelProps {
   recipe: Recipe;
@@ -28,6 +35,7 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const music = recipe.audio.music;
+  const noEnhanced = recipe.sources.every((s) => s.enhancedAudio === null);
 
   useEffect(() => {
     listMusic().then(setTracks).catch(() => setTracks([]));
@@ -46,6 +54,26 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   };
 
+  const setAudio = (patch: Partial<Recipe["audio"]>) =>
+    onChange({ ...recipe, audio: { ...recipe.audio, ...patch } });
+
+  const setMusic = (patch: Partial<NonNullable<Recipe["audio"]["music"]>>) => {
+    if (music) setAudio({ music: { ...music, ...patch } });
+  };
+
+  const selectTrack = (file: string) => {
+    if (file === "") return setAudio({ music: null });
+    setAudio({
+      music: {
+        file,
+        volume: music?.volume ?? 0.15,
+        fadeInSeconds: music?.fadeInSeconds ?? 1,
+        fadeOutSeconds: music?.fadeOutSeconds ?? 2,
+        startOffsetSeconds: music?.startOffsetSeconds ?? 0,
+      },
+    });
+  };
+
   const addSfx = (file: string) => {
     onChange({
       ...recipe,
@@ -61,217 +89,168 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
     });
   };
 
-  const setMusic = (patch: Partial<NonNullable<Recipe["audio"]["music"]>>) => {
-    if (!music) return;
-    onChange({
-      ...recipe,
-      audio: { ...recipe.audio, music: { ...music, ...patch } },
-    });
-  };
-
-  const selectTrack = (file: string) => {
-    if (file === "") {
-      onChange({ ...recipe, audio: { ...recipe.audio, music: null } });
-      return;
-    }
-    onChange({
-      ...recipe,
-      audio: {
-        ...recipe.audio,
-        music: {
-          file,
-          volume: music?.volume ?? 0.15,
-          fadeInSeconds: music?.fadeInSeconds ?? 1,
-          fadeOutSeconds: music?.fadeOutSeconds ?? 2,
-          startOffsetSeconds: music?.startOffsetSeconds ?? 0,
-        },
-      },
-    });
-  };
-
   return (
-    <section className="panel">
-      <h2>Áudio</h2>
-      <label className="field">
-        Música de fundo
-        <select
-          value={music?.file ?? ""}
-          onChange={(e) => selectTrack(e.target.value)}
-        >
-          <option value="">(sem música)</option>
-          {tracks.map((t) => (
-            <option key={t.file} value={t.file}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {music && (
-        <>
-          <label className="field">
-            Volume da música: {Math.round(music.volume * 100)}%
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={music.volume}
-              onChange={(e) => setMusic({ volume: Number(e.target.value) })}
-            />
-          </label>
-          <div className="field-row">
-            <label className="field">
-              Fade in (s)
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={music.fadeInSeconds}
-                onChange={(e) =>
-                  setMusic({ fadeInSeconds: Math.max(0, Number(e.target.value)) })
-                }
-              />
-            </label>
-            <label className="field">
-              Fade out (s)
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={music.fadeOutSeconds}
-                onChange={(e) =>
-                  setMusic({ fadeOutSeconds: Math.max(0, Number(e.target.value)) })
-                }
-              />
-            </label>
-            <label className="field">
-              Offset da faixa (s)
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={music.startOffsetSeconds}
-                onChange={(e) =>
-                  setMusic({
-                    startOffsetSeconds: Math.max(0, Number(e.target.value)),
-                  })
-                }
-              />
-            </label>
-          </div>
-        </>
-      )}
-      <label className="field">
-        Volume da fala original: {Math.round(recipe.audio.originalVolume * 100)}%
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={recipe.audio.originalVolume}
-          onChange={(e) =>
-            onChange({
-              ...recipe,
-              audio: { ...recipe.audio, originalVolume: Number(e.target.value) },
-            })
-          }
-        />
-      </label>
-
-      <div className="field-row">
-        <label className="field checkbox-field">
-          <span>
-            <input
-              type="checkbox"
-              checked={recipe.audio.useEnhanced}
-              disabled={recipe.sources.every((s) => s.enhancedAudio === null)}
-              onChange={(e) =>
-                onChange({
-                  ...recipe,
-                  audio: { ...recipe.audio, useEnhanced: e.target.checked },
-                })
-              }
-            />{" "}
-            Usar áudio tratado
-          </span>
-        </label>
-        <button
-          disabled={busy !== null}
-          onClick={() => runServer("enhance", () => enhanceAudioApi(recipe.projectId))}
-        >
-          {busy === "enhance" ? "Tratando..." : "Tratar áudio (ruído + volume)"}
-        </button>
-      </div>
-
-      {sfxFiles.length > 0 && (
-        <label className="field">
-          Efeito sonoro no playhead ({playheadSeconds.toFixed(1)}s)
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) addSfx(e.target.value);
-            }}
+    <>
+      <Section title="Fala">
+        <Prop label="Volume">
+          <Slider
+            value={recipe.audio.originalVolume}
+            min={0}
+            max={1}
+            step={0.01}
+            unit="%"
+            {...pct}
+            onChange={(v) => setAudio({ originalVolume: v })}
+          />
+        </Prop>
+        <Prop label="Áudio tratado" hint="Redução de ruído + volume normalizado">
+          <Toggle
+            checked={recipe.audio.useEnhanced}
+            disabled={noEnhanced}
+            onChange={(v) => setAudio({ useEnhanced: v })}
+            label="Usar áudio tratado"
+          />
+          <button
+            className="sm"
+            disabled={busy !== null}
+            onClick={() => runServer("enhance", () => enhanceAudioApi(recipe.projectId))}
           >
-            <option value="">+ adicionar SFX...</option>
-            {sfxFiles.map((s) => (
-              <option key={s.file} value={s.file}>
-                {s.name}
+            <Icon name="wand" size={13} />
+            {busy === "enhance" ? "Tratando…" : noEnhanced ? "Tratar" : "Tratar de novo"}
+          </button>
+        </Prop>
+      </Section>
+
+      <Section title="Música de fundo">
+        <Prop label="Faixa">
+          <Select value={music?.file ?? ""} onChange={(e) => selectTrack(e.target.value)}>
+            <option value="">Sem música</option>
+            {tracks.map((t) => (
+              <option key={t.file} value={t.file}>
+                {t.name}
               </option>
             ))}
-          </select>
-        </label>
-      )}
-      {recipe.sfx.length > 0 && (
-        <p className="muted">
-          {recipe.sfx.length} SFX na timeline —{" "}
-          <button
-            className="link-btn"
-            onClick={() => onChange({ ...recipe, sfx: [] })}
-          >
-            limpar todos
-          </button>
-        </p>
-      )}
+          </Select>
+        </Prop>
+        {tracks.length === 0 && (
+          <p className="note">Coloque arquivos de áudio em media/music para aparecerem aqui.</p>
+        )}
+        {music && (
+          <>
+            <Prop label="Volume">
+              <Slider
+                value={music.volume}
+                min={0}
+                max={1}
+                step={0.01}
+                unit="%"
+                {...pct}
+                onChange={(v) => setMusic({ volume: v })}
+              />
+            </Prop>
+            <Prop label="Fade in / out">
+              <ScrubNumber
+                value={music.fadeInSeconds}
+                min={0}
+                max={10}
+                step={0.5}
+                unit="s"
+                pxPerStep={10}
+                onChange={(v) => setMusic({ fadeInSeconds: v })}
+              />
+              <ScrubNumber
+                value={music.fadeOutSeconds}
+                min={0}
+                max={10}
+                step={0.5}
+                unit="s"
+                pxPerStep={10}
+                onChange={(v) => setMusic({ fadeOutSeconds: v })}
+              />
+            </Prop>
+            <Prop label="Começar a faixa em" hint="Pula o início da música">
+              <ScrubNumber
+                value={music.startOffsetSeconds}
+                min={0}
+                step={1}
+                unit="s"
+                onChange={(v) => setMusic({ startOffsetSeconds: v })}
+              />
+            </Prop>
+          </>
+        )}
+      </Section>
 
-      <label className="field">
-        Narração (TTS)
+      <Section title="Efeitos sonoros" defaultOpen={recipe.sfx.length > 0}>
+        {sfxFiles.length > 0 ? (
+          <Prop label="No playhead">
+            <Select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) addSfx(e.target.value);
+              }}
+            >
+              <option value="">+ Adicionar em {playheadSeconds.toFixed(1)}s</option>
+              {sfxFiles.map((s) => (
+                <option key={s.file} value={s.file}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </Prop>
+        ) : (
+          <p className="note">Coloque arquivos de áudio em media/sfx para aparecerem aqui.</p>
+        )}
+        {recipe.sfx.length > 0 && (
+          <div className="row">
+            <span className="note">{recipe.sfx.length} na timeline</span>
+            <span className="spacer" />
+            <button className="sm danger" onClick={() => onChange({ ...recipe, sfx: [] })}>
+              Limpar todos
+            </button>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Narração (TTS)" defaultOpen={recipe.audio.narration !== null}>
         <textarea
-          rows={3}
-          placeholder="Roteiro da narração em pt-BR..."
+          rows={4}
+          placeholder="Roteiro da narração em pt-BR…"
           value={script}
           onChange={(e) => setScript(e.target.value)}
         />
-      </label>
-      <div className="field-row">
-        <button
-          disabled={busy !== null || script.trim().length === 0}
-          onClick={() =>
-            runServer("narration", () =>
-              generateNarrationApi(recipe.projectId, script.trim())
-            )
-          }
-        >
-          {busy === "narration" ? "Gerando..." : "Gerar narração + legenda"}
-        </button>
-        {recipe.audio.narration && (
+        <div className="row">
+          {recipe.audio.narration && (
+            <button
+              className="sm danger"
+              onClick={() =>
+                onChange({
+                  ...recipe,
+                  audio: { ...recipe.audio, narration: null },
+                  captions: {
+                    ...recipe.captions,
+                    blocks: recipe.captions.blocks.filter((b) => b.sourceId !== null),
+                  },
+                })
+              }
+            >
+              Remover narração
+            </button>
+          )}
+          <span className="spacer" />
           <button
-            className="danger"
+            className="sm primary"
+            disabled={busy !== null || script.trim().length === 0}
             onClick={() =>
-              onChange({
-                ...recipe,
-                audio: { ...recipe.audio, narration: null },
-                captions: {
-                  ...recipe.captions,
-                  blocks: recipe.captions.blocks.filter((b) => b.sourceId !== null),
-                },
-              })
+              runServer("narration", () => generateNarrationApi(recipe.projectId, script.trim()))
             }
           >
-            Remover narração
+            <Icon name="mic" size={13} />
+            {busy === "narration" ? "Gerando…" : "Gerar narração + legenda"}
           </button>
-        )}
-      </div>
-      {error && <p className="error">{error}</p>}
-    </section>
+        </div>
+      </Section>
+      {error && <p className="note error" style={{ padding: "8px 12px" }}>{error}</p>}
+    </>
   );
 };

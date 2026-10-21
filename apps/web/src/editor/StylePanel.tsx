@@ -1,5 +1,15 @@
 import { regroupBlocks, type Recipe } from "@vision/recipe";
-import React from "react";
+import React, { useEffect, useState } from "react";
+import {
+  ColorField,
+  Prop,
+  ScrubNumber,
+  Section,
+  Segmented,
+  Select,
+  Slider,
+  Toggle,
+} from "../ui/controls";
 
 const GOOGLE_FONTS = [
   "Archivo Black",
@@ -41,18 +51,27 @@ export const StylePanel: React.FC<StylePanelProps> = ({ recipe, onChange }) => {
     });
   };
 
-  const customFont = !GOOGLE_FONTS.includes(style.fontFamily);
+  const [customFont, setCustomFont] = useState(!GOOGLE_FONTS.includes(style.fontFamily));
+  const [fontDraft, setFontDraft] = useState(style.fontFamily);
+  useEffect(() => setFontDraft(style.fontFamily), [style.fontFamily]);
+  // fontFamily vazio é inválido no schema: só grava nome não vazio
+  const commitFont = () => {
+    const name = fontDraft.trim();
+    if (name) setStyle({ fontFamily: name });
+    else setFontDraft(style.fontFamily);
+  };
 
   return (
-    <section className="panel">
-      <h2>Estilo da legenda</h2>
-      <div className="field-row">
-        <label className="field">
-          Fonte (Google Fonts)
-          <select
+    <>
+      <Section title="Texto">
+        <Prop label="Fonte">
+          <Select
             value={customFont ? "__custom" : style.fontFamily}
             onChange={(e) => {
-              if (e.target.value !== "__custom") {
+              if (e.target.value === "__custom") {
+                setCustomFont(true);
+              } else {
+                setCustomFont(false);
                 setStyle({ fontFamily: e.target.value });
               }
             }}
@@ -62,160 +81,124 @@ export const StylePanel: React.FC<StylePanelProps> = ({ recipe, onChange }) => {
                 {f}
               </option>
             ))}
-            <option value="__custom">Outra...</option>
-          </select>
-        </label>
-        <label className="field">
-          Nome exato da fonte
-          <input
-            value={style.fontFamily}
-            onChange={(e) => setStyle({ fontFamily: e.target.value })}
-            placeholder="ex: Luckiest Guy"
-          />
-        </label>
-      </div>
-      <label className="field">
-        Tamanho: {style.fontSizePx}px
-        <input
-          type="range"
-          min={32}
-          max={140}
-          step={2}
-          value={style.fontSizePx}
-          onChange={(e) => setStyle({ fontSizePx: Number(e.target.value) })}
-        />
-      </label>
-      <div className="field-row">
-        <label className="field">
-          Cor da letra
-          <input
-            type="color"
-            value={style.textColor}
-            onChange={(e) => setStyle({ textColor: e.target.value })}
-          />
-        </label>
-        <label className="field">
-          Cor de destaque
-          <input
-            type="color"
-            value={style.highlightColor}
-            onChange={(e) => setStyle({ highlightColor: e.target.value })}
-          />
-        </label>
-        <label className="field">
-          Posição
-          <select
-            value={style.position}
-            onChange={(e) =>
-              setStyle({ position: e.target.value as "center" | "bottom-third" })
-            }
-          >
-            <option value="bottom-third">Terço inferior</option>
-            <option value="center">Centro</option>
-          </select>
-        </label>
-      </div>
-      <div className="field-row">
-        <label className="field checkbox-field">
-          <span>
+            <option value="__custom">Outra do Google Fonts…</option>
+          </Select>
+        </Prop>
+        {customFont && (
+          <Prop label="Nome exato">
             <input
-              type="checkbox"
-              checked={style.uppercase}
-              onChange={(e) => setStyle({ uppercase: e.target.checked })}
-            />{" "}
-            CAIXA ALTA
-          </span>
-        </label>
-        <label className="field">
-          Palavras por linha (0 = auto)
-          <input
-            type="number"
-            min={0}
-            max={8}
-            value={style.wordsPerLine}
-            onChange={(e) =>
-              setStyle({
-                wordsPerLine: Math.max(0, Math.min(8, Number(e.target.value))),
-              })
-            }
+              value={fontDraft}
+              onChange={(e) => setFontDraft(e.target.value)}
+              onBlur={commitFont}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              placeholder="ex.: Luckiest Guy"
+            />
+          </Prop>
+        )}
+        <Prop label="Tamanho">
+          <Slider
+            value={style.fontSizePx}
+            min={32}
+            max={140}
+            step={2}
+            unit="px"
+            onChange={(v) => setStyle({ fontSizePx: v })}
           />
-        </label>
-        <label className="field">
-          Largura máx: {style.maxWidthPct}%
-          <input
-            type="range"
-            min={40}
-            max={100}
-            step={5}
-            value={style.maxWidthPct}
-            onChange={(e) => setStyle({ maxWidthPct: Number(e.target.value) })}
-          />
-        </label>
-      </div>
-      <div className="field-row">
-        <label className="field">
-          Contorno: {style.strokeWidthPx}px
-          <input
-            type="range"
+        </Prop>
+        <Prop label="Caixa alta">
+          <Toggle checked={style.uppercase} onChange={(v) => setStyle({ uppercase: v })} label="Caixa alta" />
+        </Prop>
+        <Prop label="Cor">
+          <ColorField value={style.textColor} onChange={(v) => setStyle({ textColor: v })} />
+        </Prop>
+        <Prop label="Destaque" hint="Cor da palavra sendo falada">
+          <ColorField value={style.highlightColor} onChange={(v) => setStyle({ highlightColor: v })} />
+        </Prop>
+      </Section>
+
+      <Section title="Contorno">
+        <Prop label="Espessura">
+          <Slider
+            value={style.strokeWidthPx}
             min={0}
             max={30}
             step={1}
-            value={style.strokeWidthPx}
-            onChange={(e) => setStyle({ strokeWidthPx: Number(e.target.value) })}
+            unit="px"
+            onChange={(v) => setStyle({ strokeWidthPx: v })}
           />
-        </label>
-        <label className="field">
-          Cor do contorno
-          <input
-            type="color"
-            value={style.strokeColor}
-            onChange={(e) => setStyle({ strokeColor: e.target.value })}
+        </Prop>
+        <Prop label="Cor">
+          <ColorField value={style.strokeColor} onChange={(v) => setStyle({ strokeColor: v })} />
+        </Prop>
+      </Section>
+
+      <Section title="Layout e animação">
+        <Prop label="Posição">
+          <Segmented
+            value={style.position}
+            options={[
+              { value: "bottom-third", label: "Terço inferior" },
+              { value: "center", label: "Centro" },
+            ]}
+            onChange={(v) => setStyle({ position: v })}
           />
-        </label>
-      </div>
-      <div className="field-row">
-        <label className="field checkbox-field">
-          <span>
-            <input
-              type="checkbox"
-              checked={style.animation === "pop"}
-              onChange={(e) =>
-                setStyle({ animation: e.target.checked ? "pop" : "none" })
-              }
-            />{" "}
-            Animação de entrada (pop)
-          </span>
-        </label>
-        <label className="field checkbox-field">
-          <span>
-            <input
-              type="checkbox"
-              checked={style.autoFit}
-              onChange={(e) => setStyle({ autoFit: e.target.checked })}
-            />{" "}
-            Ajustar tamanho à largura
-          </span>
-        </label>
-      </div>
-      <div className="field-row regroup-row">
-        <label className="field">
-          Palavras por bloco
-          <input
-            type="number"
+        </Prop>
+        <Prop label="Largura máx.">
+          <Slider
+            value={style.maxWidthPct}
+            min={40}
+            max={100}
+            step={5}
+            unit="%"
+            onChange={(v) => setStyle({ maxWidthPct: v })}
+          />
+        </Prop>
+        <Prop label="Palavras/linha" hint="0 = automático">
+          <ScrubNumber
+            value={style.wordsPerLine}
+            min={0}
+            max={8}
+            step={1}
+            pxPerStep={12}
+            format={(v) => (v === 0 ? "auto" : String(v))}
+            parse={(s) => (s === "auto" ? 0 : Number(s))}
+            onChange={(v) => setStyle({ wordsPerLine: v })}
+          />
+        </Prop>
+        <Prop label="Ajustar à largura">
+          <Toggle checked={style.autoFit} onChange={(v) => setStyle({ autoFit: v })} label="Ajustar à largura" />
+        </Prop>
+        <Prop label="Entrada">
+          <Segmented
+            value={style.animation}
+            options={[
+              { value: "pop", label: "Pop" },
+              { value: "none", label: "Nenhuma" },
+            ]}
+            onChange={(v) => setStyle({ animation: v })}
+          />
+        </Prop>
+        <Prop label="Palavras/bloco">
+          <ScrubNumber
+            value={style.maxWordsPerBlock}
             min={1}
             max={8}
-            value={style.maxWordsPerBlock}
-            onChange={(e) =>
-              setStyle({
-                maxWordsPerBlock: Math.max(1, Math.min(8, Number(e.target.value))),
-              })
-            }
+            step={1}
+            pxPerStep={12}
+            onChange={(v) => setStyle({ maxWordsPerBlock: v })}
           />
-        </label>
-        <button onClick={regroup} disabled={recipe.captions.blocks.length === 0}>
-          Reagrupar blocos
-        </button>
-      </div>
-    </section>
+          <button
+            className="sm"
+            onClick={regroup}
+            disabled={recipe.captions.blocks.length === 0}
+            title="Redivide os blocos existentes com esse número de palavras"
+          >
+            Reagrupar
+          </button>
+        </Prop>
+      </Section>
+    </>
   );
 };

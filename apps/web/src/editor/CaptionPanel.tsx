@@ -1,5 +1,7 @@
 import type { CaptionBlock, Recipe, SourceTime, Word } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
+import { Prop, ScrubNumber, Section } from "../ui/controls";
+import { Icon } from "./Icon";
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100;
@@ -71,11 +73,7 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
     const sameCount = newTexts.length === block.words.length;
     const words = sameCount
       ? block.words.map((w, i) => ({ ...w, text: newTexts[i] }))
-      : retimeWords(
-          newTexts,
-          block.words[0].start,
-          block.words[block.words.length - 1].end
-        );
+      : retimeWords(newTexts, block.words[0].start, block.words[block.words.length - 1].end);
     replaceBlock({ ...block, words });
   };
 
@@ -108,10 +106,7 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
     shiftBlock(snapTarget - block.words[0].start);
   };
 
-  const updateWord = (
-    wordIndex: number,
-    patch: Partial<{ text: string; start: number; end: number }>
-  ) => {
+  const updateWord = (wordIndex: number, patch: Partial<{ text: string; start: number; end: number }>) => {
     if (!block) return;
     replaceBlock({
       ...block,
@@ -130,10 +125,7 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
     if (!block) return;
     onChange({
       ...recipe,
-      captions: {
-        ...recipe.captions,
-        blocks: blocks.filter((b) => b.id !== block.id),
-      },
+      captions: { ...recipe.captions, blocks: blocks.filter((b) => b.id !== block.id) },
     });
     onSelect(null);
   };
@@ -145,97 +137,94 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
   };
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Legenda</h2>
-        <span className="block-nav">
-          <button title="Bloco anterior" onClick={() => nav(-1)}>
-            ◀
-          </button>
-          <span className="muted">
-            {block ? `${index + 1}/${blocks.length}` : `${blocks.length} blocos`}
-          </span>
-          <button title="Próximo bloco" onClick={() => nav(1)}>
-            ▶
-          </button>
-        </span>
-      </div>
+    <Section
+      title={block ? `Bloco ${index + 1} de ${blocks.length}` : "Bloco de legenda"}
+      actions={
+        blocks.length > 0 && (
+          <>
+            <button className="sm icon ghost" title="Bloco anterior" onClick={() => nav(-1)}>
+              <Icon name="chevronLeft" size={14} />
+            </button>
+            <button className="sm icon ghost" title="Próximo bloco" onClick={() => nav(1)}>
+              <Icon name="chevronRight" size={14} />
+            </button>
+          </>
+        )
+      }
+    >
       {!block ? (
-        <p className="muted">
+        <p className="empty-hint">
           {blocks.length === 0
-            ? "Sem legendas ainda. Use o botão Transcrever."
-            : "Clique num bloco na timeline (ou use as setas acima)."}
+            ? "Sem legendas ainda. Transcrever gera os blocos automaticamente."
+            : "Clique num bloco roxo na timeline, ou use as setas acima."}
         </p>
       ) : (
         <>
-          <label className="field">
-            Texto do bloco ({block.words[0].start.toFixed(2)}s →{" "}
-            {block.words[block.words.length - 1].end.toFixed(2)}s)
-            <input
-              className="block-text"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onBlur={commitText}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-            />
-          </label>
-          <div className="button-row">
-            <button title="Adiantar 0.1s" onClick={() => shiftBlock(-0.1)}>
-              ⏪ 0.1s
+          <input
+            className="block-text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commitText}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+          <Prop label="Tempo">
+            <span className="timing">
+              {block.words[0].start.toFixed(2)}s → {block.words[block.words.length - 1].end.toFixed(2)}s
+              {block.sourceId === null ? " · narração" : ""}
+            </span>
+          </Prop>
+          <Prop label="Deslocar">
+            <button className="sm" title="Adiantar 0.1s" onClick={() => shiftBlock(-0.1)}>
+              <Icon name="rewind" size={12} /> 0.1s
             </button>
-            <button title="Atrasar 0.1s" onClick={() => shiftBlock(0.1)}>
-              0.1s ⏩
+            <button className="sm" title="Atrasar 0.1s" onClick={() => shiftBlock(0.1)}>
+              0.1s <Icon name="forward" size={12} />
             </button>
             <button
+              className="sm"
               title="Move o bloco para começar onde o playhead está (precisa estar sobre o mesmo clipe)"
               disabled={snapTarget === null}
               onClick={snapToPlayhead}
             >
-              Início no playhead
+              <Icon name="anchor" size={12} /> Playhead
             </button>
-            <button className="danger" onClick={removeBlock}>
-              Remover
-            </button>
-          </div>
+          </Prop>
           <details className="fine-tune">
-            <summary>Ajuste fino por palavra</summary>
-            <div className="word-list">
+            <summary className="link-btn">Ajuste fino por palavra</summary>
+            <div className="word-table">
               {block.words.map((word, i) => (
                 <div key={i} className="word-row">
-                  <input
-                    className="word-text"
-                    value={word.text}
-                    onChange={(e) => updateWord(i, { text: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    step={0.01}
-                    min={0}
+                  <input value={word.text} onChange={(e) => updateWord(i, { text: e.target.value })} />
+                  <ScrubNumber
                     value={word.start}
-                    onChange={(e) =>
-                      updateWord(i, { start: round2(Number(e.target.value)) })
-                    }
-                  />
-                  <input
-                    type="number"
-                    step={0.01}
                     min={0}
-                    value={word.end}
-                    onChange={(e) =>
-                      updateWord(i, { end: round2(Number(e.target.value)) })
-                    }
+                    step={0.01}
+                    pxPerStep={3}
+                    onChange={(v) => updateWord(i, { start: v })}
                   />
-                  <button title="Remover palavra" onClick={() => removeWord(i)}>
-                    ✕
+                  <ScrubNumber
+                    value={word.end}
+                    min={0}
+                    step={0.01}
+                    pxPerStep={3}
+                    onChange={(v) => updateWord(i, { end: v })}
+                  />
+                  <button className="sm icon ghost" title="Remover palavra" onClick={() => removeWord(i)}>
+                    <Icon name="x" size={13} />
                   </button>
                 </div>
               ))}
             </div>
           </details>
+          <div className="row row-end">
+            <button className="sm danger" onClick={removeBlock}>
+              <Icon name="trash" size={13} /> Remover bloco
+            </button>
+          </div>
         </>
       )}
-    </section>
+    </Section>
   );
 };

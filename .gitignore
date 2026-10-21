@@ -4,3 +4,4 @@ media/projects/
 dist/
 *.log
 .env.local
+media/library/

@@ -1,4 +1,4 @@
-import type { Recipe, SuggestedCut } from "@vision/recipe";
+import { mergeSuggestions, type CutCandidate, type Recipe } from "@vision/recipe";
 import { fromRecipePath } from "../paths";
 import { ffmpegPath, run } from "./ffbin";
 
@@ -52,12 +52,16 @@ export async function detectSilences(
   return ranges;
 }
 
-/** Roda a detecção em todas as fontes e grava as sugestões na receita */
+/**
+ * Roda a detecção em todas as fontes e grava as sugestões na receita.
+ * Só substitui silêncios pendentes — sugestões de outros motivos e as já
+ * revisadas pelo operador ficam intactas.
+ */
 export async function suggestCuts(
   recipe: Recipe,
   opts: SilenceOptions = defaultSilenceOptions
 ): Promise<Recipe> {
-  const suggestions: SuggestedCut[] = [];
+  const candidates: CutCandidate[] = [];
   for (const source of recipe.sources) {
     const ranges = await detectSilences(fromRecipePath(source.file), opts);
     for (const r of ranges) {
@@ -65,8 +69,7 @@ export async function suggestCuts(
       const cutEnd = r.end - opts.paddingSeconds;
       if (cutEnd - cutStart < 0.3) continue;
       const silenceDur = r.end - r.start;
-      suggestions.push({
-        id: `sug_${String(suggestions.length + 1).padStart(2, "0")}`,
+      candidates.push({
         sourceId: source.id,
         sourceStart: Math.round(cutStart * 1000) / 1000,
         sourceEnd: Math.round(cutEnd * 1000) / 1000,
@@ -76,12 +79,9 @@ export async function suggestCuts(
             Math.min(0.95, 0.6 + (silenceDur - opts.minSilenceSeconds) * 0.15) *
               100
           ) / 100,
-        status: "pending",
+        note: `${silenceDur.toFixed(1)}s de silêncio`,
       });
     }
   }
-  return {
-    ...recipe,
-    timeline: { ...recipe.timeline, suggestedCuts: suggestions },
-  };
+  return mergeSuggestions(recipe, candidates, ["silence"]);
 }
