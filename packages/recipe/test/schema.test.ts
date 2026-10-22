@@ -68,8 +68,10 @@ function validRecipe() {
         layout: "overlay",
       },
     ],
-    sfx: [{ id: "sfx_01", file: "media/sfx/whoosh.mp3", at: 10, volume: 0.8 }],
-    audio: { originalVolume: 1, useEnhanced: false, music: null, narration: null },
+    audioClips: [
+      { id: "sfx_01", kind: "sfx", file: "media/sfx/whoosh.mp3", start: 10, duration: 1.2, volume: 0.8 },
+    ],
+    audio: { originalVolume: 1, useEnhanced: false, narration: null },
     effects: { punchIn: true },
     render: { width: 1080, height: 1920, fps: 30, codec: "h264" },
   };
@@ -132,15 +134,15 @@ describe("RecipeSchema v2", () => {
     expect(RecipeSchema.safeParse(raw).success).toBe(false);
   });
 
-  it("aplica defaults (overlays, sfx, effects, narração)", () => {
+  it("aplica defaults (overlays, audioClips, effects, narração)", () => {
     const raw = validRecipe() as any;
     delete raw.overlays;
-    delete raw.sfx;
+    delete raw.audioClips;
     delete raw.effects;
     raw.audio = {};
     const r = parseRecipe(raw);
     expect(r.overlays).toEqual([]);
-    expect(r.sfx).toEqual([]);
+    expect(r.audioClips).toEqual([]);
     expect(r.effects.punchIn).toBe(false);
     expect(r.audio.narration).toBeNull();
   });
@@ -215,5 +217,80 @@ describe("migrateRecipeData: reparo de ids de segmento", () => {
   it("receita sem duplicados passa intacta (mesma referência)", () => {
     const raw = { version: 2, timeline: { segments: [{ id: "a" }, { id: "b" }] } };
     expect(migrateRecipeData(raw)).toBe(raw);
+  });
+});
+
+describe("migrateRecipeData: música e sfx viram audioClips", () => {
+  it("converte audio.music (loop até o fim) e sfx (instantes)", () => {
+    const raw = validRecipe() as any;
+    delete raw.audioClips;
+    raw.sfx = [{ id: "sfx_01", file: "media/sfx/whoosh.mp3", at: 3, volume: 0.5 }];
+    raw.audio = {
+      ...raw.audio,
+      music: { file: "media/music/a.mp3", volume: 0.1, fadeInSeconds: 1, fadeOutSeconds: 2, startOffsetSeconds: 4 },
+    };
+    const r = parseRecipe(migrateRecipeData(raw));
+    const total = raw.timeline.segments.reduce((a: number, s: any) => a + s.sourceEnd - s.sourceStart, 0);
+    expect(r.audioClips).toEqual([
+      expect.objectContaining({ kind: "music", file: "media/music/a.mp3", start: 0, duration: total, offset: 4, volume: 0.1, loop: true }),
+      expect.objectContaining({ id: "sfx_01", kind: "sfx", start: 3, volume: 0.5 }),
+    ]);
+    expect((r.audio as any).music).toBeUndefined();
+  });
+
+  it("receita já migrada passa direto", () => {
+    const raw = validRecipe();
+    expect(migrateRecipeData(raw)).toBe(raw);
+  });
+});
+
+describe("layerOrder", () => {
+  it("padrão: legenda na frente, vídeo no fundo", () => {
+    expect(parseRecipe(validRecipe()).layerOrder).toEqual(["captions", "motions", "overlays", "video"]);
+  });
+
+  it("aceita outra ordem, mas não camada repetida ou faltando", () => {
+    const raw = validRecipe() as any;
+    raw.layerOrder = ["captions", "motions", "video", "overlays"];
+    expect(parseRecipe(raw).layerOrder[3]).toBe("overlays");
+    raw.layerOrder = ["captions", "captions", "video", "overlays"];
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
+    raw.layerOrder = ["captions", "video", "overlays"];
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
+  });
+});
+
+describe("captions.style.fontWeight", () => {
+  it("padrão 900 (peso que as legendas sempre usaram)", () => {
+    expect(parseRecipe(validRecipe()).captions.style.fontWeight).toBe(900);
+  });
+
+  it("aceita só pesos CSS de 100 em 100", () => {
+    const raw = validRecipe() as any;
+    raw.captions.style = { ...raw.captions.style, fontWeight: 300 };
+    expect(parseRecipe(raw).captions.style.fontWeight).toBe(300);
+    raw.captions.style.fontWeight = 350;
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
+    raw.captions.style.fontWeight = 1000;
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
+  });
+});
+
+describe("placement (posição livre arrastada no preview)", () => {
+  it("padrão null em legenda, overlays e motions", () => {
+    const r = parseRecipe(validRecipe());
+    expect(r.captions.style.placement).toBeNull();
+    expect(r.overlays.every((o) => o.placement === null)).toBe(true);
+  });
+
+  it("aceita x/y em % do quadro e recusa fora de 0–100", () => {
+    const raw = validRecipe() as any;
+    raw.captions.style = { ...raw.captions.style, placement: { x: 50, y: 72.5 } };
+    raw.overlays[0].placement = { x: 10, y: 90 };
+    const r = parseRecipe(raw);
+    expect(r.captions.style.placement).toEqual({ x: 50, y: 72.5 });
+    expect(r.overlays[0].placement).toEqual({ x: 10, y: 90 });
+    raw.overlays[0].placement = { x: 120, y: 50 };
+    expect(RecipeSchema.safeParse(raw).success).toBe(false);
   });
 });

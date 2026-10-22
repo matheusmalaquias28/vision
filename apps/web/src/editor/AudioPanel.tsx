@@ -1,4 +1,4 @@
-import type { Recipe } from "@vision/recipe";
+import { createAudioClip, outputDuration, type AudioClip, type Recipe } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import {
   enhanceAudioApi,
@@ -21,6 +21,9 @@ interface AudioPanelProps {
   onChange: (recipe: Recipe) => void;
   /** Substitui a receita por uma versão vinda do servidor (limpa o dirty) */
   onServerUpdate: (recipe: Recipe) => void;
+  /** Clipe de música/SFX selecionado na timeline */
+  selectedClipId: string | null;
+  onSelectClip: (id: string | null) => void;
 }
 
 export const AudioPanel: React.FC<AudioPanelProps> = ({
@@ -28,13 +31,17 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   playheadSeconds,
   onChange,
   onServerUpdate,
+  selectedClipId,
+  onSelectClip,
 }) => {
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [sfxFiles, setSfxFiles] = useState<MusicTrack[]>([]);
   const [script, setScript] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const music = recipe.audio.music;
+  const selected = recipe.audioClips.find((c) => c.id === selectedClipId) ?? null;
+  const musicCount = recipe.audioClips.filter((c) => c.kind === "music").length;
+  const sfxCount = recipe.audioClips.length - musicCount;
   const noEnhanced = recipe.sources.every((s) => s.enhancedAudio === null);
 
   useEffect(() => {
@@ -57,36 +64,24 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   const setAudio = (patch: Partial<Recipe["audio"]>) =>
     onChange({ ...recipe, audio: { ...recipe.audio, ...patch } });
 
-  const setMusic = (patch: Partial<NonNullable<Recipe["audio"]["music"]>>) => {
-    if (music) setAudio({ music: { ...music, ...patch } });
-  };
-
-  const selectTrack = (file: string) => {
-    if (file === "") return setAudio({ music: null });
-    setAudio({
-      music: {
-        file,
-        volume: music?.volume ?? 0.15,
-        fadeInSeconds: music?.fadeInSeconds ?? 1,
-        fadeOutSeconds: music?.fadeOutSeconds ?? 2,
-        startOffsetSeconds: music?.startOffsetSeconds ?? 0,
-      },
-    });
-  };
-
-  const addSfx = (file: string) => {
+  const setClip = (patch: Partial<AudioClip>) => {
+    if (!selected) return;
     onChange({
       ...recipe,
-      sfx: [
-        ...recipe.sfx,
-        {
-          id: `sfx_${Date.now().toString(36)}`,
-          file,
-          at: Math.round(playheadSeconds * 100) / 100,
-          volume: 0.8,
-        },
-      ],
+      audioClips: recipe.audioClips.map((c) => (c.id === selected.id ? { ...c, ...patch } : c)),
     });
+  };
+
+  const addClip = (kind: AudioClip["kind"], file: string) => {
+    const clip = createAudioClip({
+      id: `aud_${Date.now().toString(36)}`,
+      kind,
+      file,
+      start: playheadSeconds,
+      videoDuration: outputDuration(recipe.timeline.segments),
+    });
+    onChange({ ...recipe, audioClips: [...recipe.audioClips, clip] });
+    onSelectClip(clip.id);
   };
 
   return (
@@ -121,73 +116,104 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
         </Prop>
       </Section>
 
-      <Section title="Música de fundo">
-        <Prop label="Faixa">
-          <Select value={music?.file ?? ""} onChange={(e) => selectTrack(e.target.value)}>
-            <option value="">Sem música</option>
-            {tracks.map((t) => (
-              <option key={t.file} value={t.file}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        </Prop>
-        {tracks.length === 0 && (
+      {selected && (
+        <Section title={selected.kind === "music" ? "Música selecionada" : "Efeito selecionado"}>
+          <p className="note clip-file" title={selected.file}>
+            {selected.file.split("/").pop()} · {selected.start.toFixed(2)}s, {selected.duration.toFixed(2)}s
+          </p>
+          <Prop label="Volume">
+            <Slider
+              value={selected.volume}
+              min={0}
+              max={1}
+              step={0.01}
+              unit="%"
+              {...pct}
+              onChange={(v) => setClip({ volume: v })}
+            />
+          </Prop>
+          <Prop label="Fade in / out">
+            <ScrubNumber
+              value={selected.fadeInSeconds}
+              min={0}
+              max={Math.min(10, selected.duration)}
+              step={0.5}
+              unit="s"
+              pxPerStep={10}
+              onChange={(v) => setClip({ fadeInSeconds: v })}
+            />
+            <ScrubNumber
+              value={selected.fadeOutSeconds}
+              min={0}
+              max={Math.min(10, selected.duration)}
+              step={0.5}
+              unit="s"
+              pxPerStep={10}
+              onChange={(v) => setClip({ fadeOutSeconds: v })}
+            />
+          </Prop>
+          <Prop label="Começar o arquivo em" hint="Pula o início do arquivo (o mesmo que aparar a borda esquerda)">
+            <ScrubNumber
+              value={selected.offset}
+              min={0}
+              step={0.5}
+              unit="s"
+              onChange={(v) => setClip({ offset: v })}
+            />
+          </Prop>
+          <Prop label="Repetir" hint="Recomeça o arquivo se o clipe for mais longo que ele">
+            <Toggle checked={selected.loop} onChange={(v) => setClip({ loop: v })} label="Repetir em loop" />
+          </Prop>
+          <div className="row">
+            <span className="note">Arraste na timeline para mover ou aparar · C corta · Ctrl+D duplica</span>
+            <span className="spacer" />
+            <button
+              className="sm danger"
+              onClick={() => {
+                onChange({ ...recipe, audioClips: recipe.audioClips.filter((c) => c.id !== selected.id) });
+                onSelectClip(null);
+              }}
+            >
+              <Icon name="trash" size={13} />
+              Remover
+            </button>
+          </div>
+        </Section>
+      )}
+
+      <Section title="Música de fundo" defaultOpen={!selected}>
+        {tracks.length > 0 ? (
+          <Prop label="No playhead">
+            <Select
+              value=""
+              onChange={(e) => {
+                if (e.target.value) addClip("music", e.target.value);
+              }}
+            >
+              <option value="">+ Adicionar em {playheadSeconds.toFixed(1)}s</option>
+              {tracks.map((t) => (
+                <option key={t.file} value={t.file}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Prop>
+        ) : (
           <p className="note">Coloque arquivos de áudio em media/music para aparecerem aqui.</p>
         )}
-        {music && (
-          <>
-            <Prop label="Volume">
-              <Slider
-                value={music.volume}
-                min={0}
-                max={1}
-                step={0.01}
-                unit="%"
-                {...pct}
-                onChange={(v) => setMusic({ volume: v })}
-              />
-            </Prop>
-            <Prop label="Fade in / out">
-              <ScrubNumber
-                value={music.fadeInSeconds}
-                min={0}
-                max={10}
-                step={0.5}
-                unit="s"
-                pxPerStep={10}
-                onChange={(v) => setMusic({ fadeInSeconds: v })}
-              />
-              <ScrubNumber
-                value={music.fadeOutSeconds}
-                min={0}
-                max={10}
-                step={0.5}
-                unit="s"
-                pxPerStep={10}
-                onChange={(v) => setMusic({ fadeOutSeconds: v })}
-              />
-            </Prop>
-            <Prop label="Começar a faixa em" hint="Pula o início da música">
-              <ScrubNumber
-                value={music.startOffsetSeconds}
-                min={0}
-                step={1}
-                unit="s"
-                onChange={(v) => setMusic({ startOffsetSeconds: v })}
-              />
-            </Prop>
-          </>
-        )}
+        <p className="note">
+          {musicCount > 0 ? `${musicCount} na timeline · ` : ""}Ou arraste uma música da Biblioteca direto
+          para a trilha.
+        </p>
       </Section>
 
-      <Section title="Efeitos sonoros" defaultOpen={recipe.sfx.length > 0}>
+      <Section title="Efeitos sonoros" defaultOpen={sfxCount > 0 && !selected}>
         {sfxFiles.length > 0 ? (
           <Prop label="No playhead">
             <Select
               value=""
               onChange={(e) => {
-                if (e.target.value) addSfx(e.target.value);
+                if (e.target.value) addClip("sfx", e.target.value);
               }}
             >
               <option value="">+ Adicionar em {playheadSeconds.toFixed(1)}s</option>
@@ -201,11 +227,16 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
         ) : (
           <p className="note">Coloque arquivos de áudio em media/sfx para aparecerem aqui.</p>
         )}
-        {recipe.sfx.length > 0 && (
+        {sfxCount > 0 && (
           <div className="row">
-            <span className="note">{recipe.sfx.length} na timeline</span>
+            <span className="note">{sfxCount} na timeline</span>
             <span className="spacer" />
-            <button className="sm danger" onClick={() => onChange({ ...recipe, sfx: [] })}>
+            <button
+              className="sm danger"
+              onClick={() =>
+                onChange({ ...recipe, audioClips: recipe.audioClips.filter((c) => c.kind !== "sfx") })
+              }
+            >
               Limpar todos
             </button>
           </div>

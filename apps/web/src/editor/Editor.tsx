@@ -1,11 +1,24 @@
 import { type PlayerRef } from "@remotion/player";
-import { outputToSource, overlayFromAsset, type Asset, type Recipe } from "@vision/recipe";
+import {
+  createAudioClip,
+  duplicateAudioClip,
+  duplicateSegment,
+  outputDuration,
+  outputToSource,
+  overlayFromAsset,
+  type Asset,
+  CUT_PACES,
+  type AudioClip,
+  type CutPace,
+  type Recipe,
+} from "@vision/recipe";
 import { recipeMetadata } from "@vision/video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyTemplateApi,
   detectSilence,
   getRecipe,
+  getFilmstrip,
   getWaveform,
   listTemplates,
   putRecipe,
@@ -13,6 +26,7 @@ import {
   suggestSmartCutsApi,
   transcribe,
   type ProjectSummary,
+  type ProjectFilmstrips,
   type ProjectWaveforms,
   type TemplateInfo,
 } from "../api";
@@ -27,8 +41,10 @@ import { OverlayPanel } from "./OverlayPanel";
 import { PlayerPanel } from "./PlayerPanel";
 import { RenderPanel } from "./RenderPanel";
 import { StylePanel } from "./StylePanel";
-import { Timeline } from "./Timeline";
+import { Timeline, type TimelineTool } from "./Timeline";
 import { TranscriptPanel } from "./TranscriptPanel";
+import { Logo } from "../ui/Logo";
+import { DragLayer } from "./DragLayer";
 
 /** Passos de desfazer guardados */
 const HISTORY_LIMIT = 100;
@@ -36,6 +52,17 @@ const HISTORY_LIMIT = 100;
 const HISTORY_COALESCE_MS = 400;
 
 const TL_HEIGHT_KEY = "vision.timelineHeight";
+const CUT_PACE_KEY = "vision.cutPace";
+
+/** Ritmo preferido do operador (vale para todos os projetos neste navegador) */
+function readCutPace(): CutPace {
+  try {
+    const v = window.localStorage.getItem(CUT_PACE_KEY);
+    return CUT_PACES.find((p) => p === v) ?? "normal";
+  } catch {
+    return "normal";
+  }
+}
 const TL_MIN = 170;
 
 type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "exportar";
@@ -43,9 +70,9 @@ type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "exportar";
 function readTimelineHeight(): number {
   try {
     const v = Number(window.localStorage.getItem(TL_HEIGHT_KEY));
-    return v >= TL_MIN ? v : 280;
+    return v >= TL_MIN ? v : 350;
   } catch {
-    return 280;
+    return 350;
   }
 }
 
@@ -73,8 +100,13 @@ export const Editor: React.FC<EditorProps> = ({
   const [selectedCaption, setSelectedCaption] = useState<string | null>(null);
   const [selectedOverlay, setSelectedOverlay] = useState<string | null>(null);
   const [selectedMotion, setSelectedMotion] = useState<string | null>(null);
+  const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
+  const [selectedAudioClip, setSelectedAudioClip] = useState<string | null>(null);
+  const [tool, setTool] = useState<TimelineTool>("select");
+  const [cutPace, setCutPace] = useState<CutPace>(readCutPace);
   const [previewPending, setPreviewPending] = useState(true);
   const [waveforms, setWaveforms] = useState<ProjectWaveforms | null>(null);
+  const [filmstrips, setFilmstrips] = useState<ProjectFilmstrips | null>(null);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [tab, setTab] = useState<InspectorTab>("motions");
   const [leftTab, setLeftTab] = useState<"texto" | "biblioteca">("texto");
@@ -138,6 +170,9 @@ export const Editor: React.FC<EditorProps> = ({
     getWaveform(projectId)
       .then(setWaveforms)
       .catch(() => setWaveforms(null));
+    getFilmstrip(projectId)
+      .then(setFilmstrips)
+      .catch(() => setFilmstrips(null));
     listTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, [projectId]);
 
@@ -168,9 +203,68 @@ export const Editor: React.FC<EditorProps> = ({
     [totalFrames]
   );
 
+  // o que está selecionado na timeline, lido pelos atalhos sem recriar o listener
+  const selectionRef = useRef({ segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay });
+  selectionRef.current = { segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay };
+
+  /** Delete: apaga o item selecionado. false = nada para apagar */
+  const deleteSelection = useCallback((): boolean => {
+    const r = recipeRef.current;
+    const sel = selectionRef.current;
+    if (!r) return false;
+    if (sel.audio) {
+      commit({ ...r, audioClips: r.audioClips.filter((c) => c.id !== sel.audio) }, false);
+      setSelectedAudioClip(null);
+    } else if (sel.segment) {
+      // a timeline precisa de ao menos um trecho
+      if (r.timeline.segments.length <= 1) return false;
+      const segments = r.timeline.segments.filter((x) => x.id !== sel.segment);
+      commit({ ...r, timeline: { ...r.timeline, segments } }, false);
+      setSelectedSegment(null);
+    } else if (sel.overlay) {
+      commit({ ...r, overlays: r.overlays.filter((o) => o.id !== sel.overlay) }, false);
+      setSelectedOverlay(null);
+    } else {
+      return false;
+    }
+    setDirty(true);
+    return true;
+  }, [commit]);
+
+  /** Ctrl+D: cópia do item selecionado logo depois dele (e a cópia fica selecionada) */
+  const duplicateSelection = useCallback(() => {
+    const r = recipeRef.current;
+    const sel = selectionRef.current;
+    if (!r) return;
+    const id = Date.now().toString(36);
+    if (sel.audio) {
+      const clip = r.audioClips.find((c) => c.id === sel.audio);
+      if (!clip) return;
+      const copy: AudioClip = duplicateAudioClip(clip, `aud_${id}`);
+      commit({ ...r, audioClips: [...r.audioClips, copy] }, false);
+      setSelectedAudioClip(copy.id);
+    } else if (sel.segment) {
+      const segments = duplicateSegment(r.timeline.segments, sel.segment);
+      const copy = segments[segments.findIndex((x) => x.id === sel.segment) + 1];
+      commit({ ...r, timeline: { ...r.timeline, segments } }, false);
+      setSelectedSegment(copy.id);
+    } else if (sel.overlay) {
+      const o = r.overlays.find((x) => x.id === sel.overlay);
+      // overlay até o fim do vídeo não tem "depois"
+      if (!o || o.end === null) return;
+      const copy = { ...o, id: `ov_${id}`, start: o.end, end: o.end + (o.end - o.start) };
+      commit({ ...r, overlays: [...r.overlays, copy] }, false);
+      setSelectedOverlay(copy.id);
+    } else {
+      return;
+    }
+    setDirty(true);
+  }, [commit]);
+
   // Atalhos globais (fora de campos de texto):
   // espaço play/pause · Ctrl+Z/Shift+Z/Y desfazer/refazer · Ctrl+S salvar
   // ←/→ 1 frame (Shift = 1s) · Home/End início/fim
+  // V seleção · C corte · Esc solta · Delete apaga · Ctrl+D duplica
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -193,6 +287,26 @@ export const Editor: React.FC<EditorProps> = ({
         e.preventDefault();
         if (key === "y" || e.shiftKey) redo();
         else undo();
+        return;
+      }
+      if (mod && key === "d") {
+        e.preventDefault(); // senão o navegador abre "adicionar favorito"
+        duplicateSelection();
+        return;
+      }
+      if (!mod && !e.altKey && (key === "c" || key === "v")) {
+        setTool(key === "c" ? "blade" : "select");
+        return;
+      }
+      if (e.key === "Escape") {
+        setTool("select");
+        setSelectedSegment(null);
+        setSelectedAudioClip(null);
+        return;
+      }
+      // o editor por texto trata ⌫ antes (e marca defaultPrevented)
+      if ((e.key === "Delete" || e.key === "Backspace") && !e.defaultPrevented) {
+        if (deleteSelection()) e.preventDefault();
         return;
       }
       const current = playerRef.current?.getCurrentFrame() ?? 0;
@@ -219,7 +333,7 @@ export const Editor: React.FC<EditorProps> = ({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, save, seekFrame, fps, totalFrames]);
+  }, [undo, redo, save, seekFrame, fps, totalFrames, deleteSelection, duplicateSelection]);
 
   useEffect(() => {
     const player = playerRef.current;
@@ -277,7 +391,44 @@ export const Editor: React.FC<EditorProps> = ({
   };
   const selectOverlay = (id: string | null) => {
     setSelectedOverlay(id);
-    if (id) setTab("midia");
+    if (id) {
+      setSelectedSegment(null);
+      setSelectedAudioClip(null);
+      setTab("midia");
+    }
+  };
+  // alvo arrastado no preview leva o inspetor ao painel do elemento
+  const [captionPicked, setCaptionPicked] = useState(false);
+  const selectFromPreview = (target: string) => {
+    const id = target.slice(target.indexOf(":") + 1);
+    setCaptionPicked(target === "caption");
+    if (target === "caption") setTab("legenda");
+    else if (target.startsWith("overlay:")) selectOverlay(id);
+    else if (target.startsWith("motion:")) selectMotion(id);
+  };
+  const previewTarget = captionPicked && tab === "legenda"
+    ? "caption"
+    : tab === "midia" && selectedOverlay
+      ? `overlay:${selectedOverlay}`
+      : tab === "motions" && selectedMotion
+        ? `motion:${selectedMotion}`
+        : null;
+
+  // trecho de vídeo, clipe de áudio e overlay: um selecionado por vez (Delete/Ctrl+D agem nele)
+  const selectSegment = (id: string | null) => {
+    setSelectedSegment(id);
+    if (id) {
+      setSelectedAudioClip(null);
+      setSelectedOverlay(null);
+    }
+  };
+  const selectAudioClip = (id: string | null) => {
+    setSelectedAudioClip(id);
+    if (id) {
+      setSelectedSegment(null);
+      setSelectedOverlay(null);
+      setTab("audio");
+    }
   };
   const selectMotion = (id: string | null) => {
     setSelectedMotion(id);
@@ -336,28 +487,19 @@ export const Editor: React.FC<EditorProps> = ({
   /** Item da biblioteca → receita, no instante `at` do vídeo final */
   const addAsset = (asset: Asset, at: number = playheadOutput) => {
     const t = Math.round(at * 100) / 100;
-    if (asset.type === "sfx") {
-      update({
-        ...recipe,
-        sfx: [...recipe.sfx, { id: `sfx_${Date.now().toString(36)}`, file: asset.file, at: t, volume: 0.8 }],
+    if (asset.type === "sfx" || asset.type === "music") {
+      const clip = createAudioClip({
+        id: `aud_${Date.now().toString(36)}`,
+        kind: asset.type,
+        file: asset.file,
+        start: t,
+        videoDuration: outputDuration(recipe.timeline.segments),
+        mediaDurationSeconds: asset.durationSeconds,
+        assetId: asset.id,
       });
-      return;
-    }
-    if (asset.type === "music") {
-      const m = recipe.audio.music;
-      update({
-        ...recipe,
-        audio: {
-          ...recipe.audio,
-          music: {
-            file: asset.file,
-            volume: m?.volume ?? 0.12,
-            fadeInSeconds: m?.fadeInSeconds ?? 1,
-            fadeOutSeconds: m?.fadeOutSeconds ?? 2,
-            startOffsetSeconds: 0,
-          },
-        },
-      });
+      commit({ ...recipe, audioClips: [...recipe.audioClips, clip] }, false);
+      setDirty(true);
+      selectAudioClip(clip.id);
       return;
     }
     const overlay = overlayFromAsset(asset, t, recipe.timeline.segments, `ov_${Date.now().toString(36)}`);
@@ -387,11 +529,13 @@ export const Editor: React.FC<EditorProps> = ({
   };
 
   return (
-    <div className="editor" style={{ "--tl-h": `${tlHeight}px` } as React.CSSProperties}>
+    <div className="editor" style={{
+        "--tl-h": `${tlHeight}px`,
+        "--viewer-aspect": meta.width / meta.height,
+      } as React.CSSProperties}>
       <header className="topbar">
         <button className="brand" title="Voltar à tela inicial" onClick={onHome}>
-          <span className="brand-mark" />
-          VISION
+          <Logo />
         </button>
         <span className="topbar-sep" />
         <div className="popover-anchor" ref={projectMenuRef}>
@@ -450,19 +594,41 @@ export const Editor: React.FC<EditorProps> = ({
             <span className="step-num">{hasTranscript ? <Icon name="check" size={10} /> : 1}</span>
             Transcrever
           </button>
-          <button
-            className={`step ${hasCutSuggestions ? "done" : ""}`}
-            disabled={busy !== null || !hasTranscript}
-            title={
-              hasTranscript
-                ? "Pausas, vícios, repetições e retomadas (IA). Nada é aplicado sem você aceitar."
-                : "Transcreva o vídeo antes"
-            }
-            onClick={() => step("cortes", () => suggestSmartCutsApi(projectId))}
-          >
-            <span className="step-num">{hasCutSuggestions ? <Icon name="check" size={10} /> : 2}</span>
-            Sugerir cortes
-          </button>
+          <span className="step-group">
+            <button
+              className={`step ${hasCutSuggestions ? "done" : ""}`}
+              disabled={busy !== null || !hasTranscript}
+              title={
+                hasTranscript
+                  ? "Pausas, vícios, muletas, repetições e retomadas (IA). Nada é aplicado sem você aceitar."
+                  : "Transcreva o vídeo antes"
+              }
+              onClick={() => step("cortes", () => suggestSmartCutsApi(projectId, cutPace))}
+            >
+              <span className="step-num">{hasCutSuggestions ? <Icon name="check" size={10} /> : 2}</span>
+              Sugerir cortes
+            </button>
+            <Select
+              className="pace-select"
+              value={cutPace}
+              disabled={busy !== null}
+              aria-label="Ritmo dos cortes"
+              title="Quanto silêncio sobra entre as frases. Rode Sugerir cortes de novo para aplicar."
+              onChange={(e) => {
+                const pace = e.target.value as CutPace;
+                setCutPace(pace);
+                try {
+                  window.localStorage.setItem(CUT_PACE_KEY, pace);
+                } catch {
+                  // armazenamento indisponível: vale só nesta sessão
+                }
+              }}
+            >
+              <option value="suave">Ritmo suave</option>
+              <option value="normal">Ritmo normal</option>
+              <option value="acelerado">Ritmo acelerado</option>
+            </Select>
+          </span>
           <button
             className={`step ${recipe.motions.length > 0 ? "done" : ""}`}
             disabled={busy !== null || !hasTranscript}
@@ -539,7 +705,7 @@ export const Editor: React.FC<EditorProps> = ({
         </button>
       </header>
 
-      <div>
+      <div className="editor-banners">
         {error && (
           <div className="banner">
             {error}
@@ -564,20 +730,6 @@ export const Editor: React.FC<EditorProps> = ({
           <LibraryPanel playheadSeconds={playheadOutput} onAdd={(a) => addAsset(a)} head={leftTabs} />
         )}
 
-        <section className="dock viewer">
-          <header className="dock-head">
-            <span className="dock-title">Viewer</span>
-            <span className="dock-meta">
-              {meta.width}×{meta.height} · {meta.fps}fps
-            </span>
-            <span className="spacer" />
-            <label className="viewer-toggle" title="Mostra motions sugeridos antes de aceitar">
-              Prévia das sugestões
-              <Toggle checked={previewPending} onChange={setPreviewPending} label="Prévia das sugestões" />
-            </label>
-          </header>
-          <PlayerPanel recipe={recipe} playerRef={playerRef} previewPending={previewPending} />
-        </section>
 
         <section className="dock inspector">
           <Tabs
@@ -625,6 +777,8 @@ export const Editor: React.FC<EditorProps> = ({
                 playheadSeconds={playheadOutput}
                 onChange={update}
                 onServerUpdate={serverUpdate}
+                selectedClipId={selectedAudioClip}
+                onSelectClip={selectAudioClip}
               />
             )}
             {tab === "midia" && (
@@ -657,6 +811,7 @@ export const Editor: React.FC<EditorProps> = ({
       <Timeline
         recipe={recipe}
         waveforms={waveforms}
+        filmstrips={filmstrips}
         playheadSeconds={playheadOutput}
         selectedCaption={selectedCaption}
         selectedOverlay={selectedOverlay}
@@ -667,7 +822,35 @@ export const Editor: React.FC<EditorProps> = ({
         onSelectOverlay={selectOverlay}
         onSelectMotion={selectMotion}
         onDropAsset={addAsset}
+        tool={tool}
+        onToolChange={setTool}
+        selectedSegment={selectedSegment}
+        selectedAudioClip={selectedAudioClip}
+        onSelectSegment={selectSegment}
+        onSelectAudioClip={selectAudioClip}
       />
+
+      <section className="dock viewer">
+        <header className="dock-head">
+          <span className="dock-title">Viewer</span>
+          <span className="dock-meta">
+            {meta.width}×{meta.height} · {meta.fps}fps
+          </span>
+          <span className="spacer" />
+          <label className="viewer-toggle" title="Mostra motions sugeridos antes de aceitar">
+            Prévia das sugestões
+            <Toggle checked={previewPending} onChange={setPreviewPending} label="Prévia das sugestões" />
+          </label>
+        </header>
+        <PlayerPanel recipe={recipe} playerRef={playerRef} previewPending={previewPending} />
+        <DragLayer
+          recipe={recipe}
+          playerRef={playerRef}
+          selected={previewTarget}
+          onChange={update}
+          onSelect={selectFromPreview}
+        />
+      </section>
     </div>
   );
 };

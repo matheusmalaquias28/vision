@@ -1,0 +1,3 @@
+# scripts e configs do servidor Linux: sempre LF (bash quebra com \r)
+*.sh text eol=lf
+deploy/** text eol=lf

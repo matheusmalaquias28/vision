@@ -5,8 +5,7 @@ import {
   outputDuration,
   outputToSource,
   restoreSourceRange,
-  sourceToOutput,
-} from "../src/time";
+  sourceToOutput, splitSegmentAt, duplicateSegment } from "../src/time";
 import type { Segment } from "../src/schema";
 
 const segments: Segment[] = [
@@ -142,5 +141,34 @@ describe("insertClipSegment", () => {
   it("anexa no fim quando at >= duração", () => {
     expect(insertClipSegment(segments, clip, 20)).toEqual([...segments, clip]);
     expect(insertClipSegment(segments, clip, 999)).toEqual([...segments, clip]);
+  });
+});
+
+describe("splitSegmentAt", () => {
+  const segs = [
+    { id: "seg_01", sourceId: "src_01", sourceStart: 0, sourceEnd: 4 },
+    { id: "seg_02", sourceId: "src_01", sourceStart: 10, sourceEnd: 16 },
+  ];
+
+  it("divide o segmento sob o instante do vídeo final", () => {
+    const out = splitSegmentAt(segs, 6);
+    expect(out).toHaveLength(3);
+    expect(out[1]).toMatchObject({ id: "seg_02", sourceStart: 10, sourceEnd: 12 });
+    expect(out[2]).toMatchObject({ sourceId: "src_01", sourceStart: 12, sourceEnd: 16 });
+    expect(new Set(out.map((s) => s.id)).size).toBe(3);
+  });
+
+  it("não divide na borda entre segmentos", () => {
+    expect(splitSegmentAt(segs, 4)).toBe(segs);
+  });
+});
+
+describe("duplicateSegment", () => {
+  it("insere a cópia logo depois, com id novo", () => {
+    const segs = [{ id: "seg_01", sourceId: "src_01", sourceStart: 0, sourceEnd: 4 }];
+    const out = duplicateSegment(segs, "seg_01");
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatchObject({ sourceStart: 0, sourceEnd: 4 });
+    expect(out[1].id).not.toBe("seg_01");
   });
 });

@@ -10,6 +10,7 @@ import {
 } from "@vision/recipe";
 import { fromRecipePath, projectDir } from "../paths";
 import { ffmpegPath, runOrThrow } from "./ffbin";
+import { refineTranscriptTimings } from "./silence";
 
 const WHISPER_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -102,5 +103,7 @@ export async function transcribeProject(recipe: Recipe): Promise<Recipe> {
     ...b,
     id: `cap_${String(i + 1).padStart(2, "0")}`,
   }));
-  return { ...recipe, captions: { ...recipe.captions, blocks } };
+  // tempos das palavras ajustados aos silêncios reais (legenda em sincronia
+  // e pausas visíveis para a sugestão de cortes)
+  return refineTranscriptTimings({ ...recipe, captions: { ...recipe.captions, blocks } });
 }

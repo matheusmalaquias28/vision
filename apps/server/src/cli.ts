@@ -3,6 +3,7 @@ import path from "node:path";
 import { Command } from "commander";
 import {
   ASSET_TYPE_LABEL,
+  CUT_PACES,
   CUT_REASON_LABEL,
   MOTION_LABEL,
   motionSummary,
@@ -10,6 +11,7 @@ import {
   placeMotions,
   reviewMotions,
   type AssetType,
+  type CutPace,
   type SuggestedCut,
 } from "@vision/recipe";
 import { acceptCuts, pendingCutIds, rejectCuts } from "./cuts";
@@ -107,8 +109,11 @@ program
   .description("Sugere cortes pela transcrição: pausas, vícios, repetições e retomadas (IA)")
   .argument("<projectId>")
   .option("--no-ai", "só os detectores determinísticos (sem chamada ao LLM)")
-  .action(async (projectId: string, opts: { ai: boolean }) => {
-    const updated = await suggestSmartCuts(loadRecipe(projectId), { ai: opts.ai });
+  .option("--pace <ritmo>", `silêncio entre frases: ${CUT_PACES.join(" | ")}`, "normal")
+  .action(async (projectId: string, opts: { ai: boolean; pace: string }) => {
+    const pace = CUT_PACES.find((p) => p === opts.pace);
+    if (!pace) throw new Error(`--pace deve ser ${CUT_PACES.join(", ")}`);
+    const updated = await suggestSmartCuts(loadRecipe(projectId), { ai: opts.ai, pace: pace as CutPace });
     saveRecipe(updated);
     const pending = updated.timeline.suggestedCuts.filter((c) => c.status === "pending");
     console.log(`${pending.length} sugestão(ões) pendente(s):`);

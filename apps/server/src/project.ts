@@ -32,7 +32,9 @@ function uniqueProjectId(base: string): string {
 export async function createProject(
   videoAbsPaths: string[],
   requestedId?: string,
-  briefing = ""
+  briefing = "",
+  /** Nome original de cada arquivo (upload); padrão: o nome no disco */
+  names?: string[]
 ): Promise<Recipe> {
   if (videoAbsPaths.length === 0) {
     throw new Error("Nenhum vídeo enviado");
@@ -58,6 +60,7 @@ export async function createProject(
     sources.push({
       id: srcId,
       file: toRecipePath(destAbs),
+      name: names?.[i] ?? path.basename(videoAbsPaths[i]),
       durationInSeconds: probe.durationInSeconds,
       width: probe.width,
       height: probe.height,
@@ -84,8 +87,8 @@ export async function createProject(
     },
     captions: { style: {}, blocks: [] },
     overlays: [],
-    sfx: [],
-    audio: { originalVolume: 1, useEnhanced: false, music: null, narration: null },
+    audioClips: [],
+    audio: { originalVolume: 1, useEnhanced: false, narration: null },
     effects: { punchIn: false },
     // saída sempre vertical 9:16; o vídeo é enquadrado com objectFit cover
     render: {

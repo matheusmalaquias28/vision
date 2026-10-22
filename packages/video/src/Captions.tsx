@@ -15,6 +15,7 @@ import {
   type Word,
 } from "@vision/recipe";
 import { useGoogleFont } from "./fonts";
+import { AtPoint, dragProps } from "./Positioned";
 
 /** Tempo que o bloco continua visível depois da última palavra (s) */
 const BLOCK_HOLD_SECONDS = 0.3;
@@ -32,7 +33,7 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
   const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const { style, blocks } = recipe.captions;
-  useGoogleFont(style.fontFamily);
+  useGoogleFont(style.fontFamily, style.fontWeight);
 
   const outputTime = frame / fps;
   const st = outputToSource(recipe.timeline.segments, outputTime);
@@ -93,7 +94,7 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
       const text = line.map((w) => w.text).join(" ");
       const fitted = fitText({
         fontFamily: `'${style.fontFamily}', 'Arial Black', sans-serif`,
-        fontWeight: "900",
+        fontWeight: String(style.fontWeight),
         text: style.uppercase ? text.toUpperCase() : text,
         withinWidth: maxWidthPx,
       });
@@ -120,6 +121,34 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
     );
   };
 
+  const caption = (
+    <div
+      {...dragProps("caption")}
+      style={{
+        maxWidth: `${style.maxWidthPct}%`,
+        textAlign: "center",
+        fontFamily: `'${style.fontFamily}', 'Arial Black', sans-serif`,
+        fontWeight: style.fontWeight,
+        fontSize,
+        lineHeight: 1.25,
+        textTransform: style.uppercase ? "uppercase" : "none",
+        // contorno estilo TikTok: o stroke é pintado ATRÁS do preenchimento
+        WebkitTextStroke:
+          style.strokeWidthPx > 0
+            ? `${style.strokeWidthPx}px ${style.strokeColor}`
+            : undefined,
+        paintOrder: "stroke",
+        textShadow: "0 4px 16px rgba(0,0,0,0.5)",
+        transform: `scale(${interpolate(enter, [0, 1], [0.85, 1])}) translateY(${interpolate(enter, [0, 1], [40, 0])}px)`,
+      }}
+    >
+      {lines.map((line, li) => (
+        <div key={li}>{line.map((w, wi) => renderWord(w, wi))}</div>
+      ))}
+    </div>
+  );
+
+  if (style.placement) return <AtPoint at={style.placement}>{caption}</AtPoint>;
   return (
     <AbsoluteFill
       style={{
@@ -128,29 +157,7 @@ export const Captions: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
         paddingBottom: style.position === "bottom-third" ? "18%" : 0,
       }}
     >
-      <div
-        style={{
-          maxWidth: `${style.maxWidthPct}%`,
-          textAlign: "center",
-          fontFamily: `'${style.fontFamily}', 'Arial Black', sans-serif`,
-          fontWeight: 900,
-          fontSize,
-          lineHeight: 1.25,
-          textTransform: style.uppercase ? "uppercase" : "none",
-          // contorno estilo TikTok: o stroke é pintado ATRÁS do preenchimento
-          WebkitTextStroke:
-            style.strokeWidthPx > 0
-              ? `${style.strokeWidthPx}px ${style.strokeColor}`
-              : undefined,
-          paintOrder: "stroke",
-          textShadow: "0 4px 16px rgba(0,0,0,0.5)",
-          transform: `scale(${interpolate(enter, [0, 1], [0.85, 1])}) translateY(${interpolate(enter, [0, 1], [40, 0])}px)`,
-        }}
-      >
-        {lines.map((line, li) => (
-          <div key={li}>{line.map((w, wi) => renderWord(w, wi))}</div>
-        ))}
-      </div>
+      {caption}
     </AbsoluteFill>
   );
 };

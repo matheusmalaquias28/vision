@@ -13,6 +13,8 @@ export default defineConfig({
       "/projects": API,
       "/music": API,
       "/library": API,
+      // efeitos de media/sfx ("Efeitos sonoros" no painel de Áudio, template dinâmico)
+      "/sfx": API,
     },
   },
 });

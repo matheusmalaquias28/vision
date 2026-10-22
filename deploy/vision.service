@@ -1,0 +1,23 @@
+# Servidor do VISION (API + pipeline + render) como serviço do sistema.
+# Copie para /etc/systemd/system/vision.service e rode:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now vision
+[Unit]
+Description=VISION - API, pipeline e render
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=vision
+Group=vision
+WorkingDirectory=/opt/vision
+Environment=NODE_ENV=production
+Environment=PORT=4000
+# OPENAI_API_KEY e modelos vêm de /opt/vision/.env (lido pelo próprio servidor)
+ExecStart=/opt/vision/node_modules/.bin/tsx apps/server/src/server.ts
+Restart=on-failure
+RestartSec=5
+# render do Remotion usa bastante memória; o sistema mata outros antes deste
+OOMScoreAdjust=-200
+
+[Install]
+WantedBy=multi-user.target

@@ -7,6 +7,8 @@
   "types": "src/exports.ts",
   "dependencies": {
     "@remotion/layout-utils": "^4.0.519",
+    "@remotion/motion-blur": "4.0.519",
+    "@remotion/transitions": "4.0.519",
     "@vision/recipe": "*",
     "react": "^19.0.0",
     "remotion": "4.0.519"

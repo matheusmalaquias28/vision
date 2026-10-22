@@ -8,6 +8,9 @@ import {
 } from "./api";
 import { Editor } from "./editor/Editor";
 import { Icon } from "./editor/Icon";
+import { MotionLabPage } from "./lab/MotionLabPage";
+import { Logo } from "./ui/Logo";
+import { appendClips, ClipQueue, type QueuedClip } from "./home/ClipQueue";
 
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -21,11 +24,56 @@ function fmtDate(iso: string): string {
     : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
 }
 
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : `${fmtDate(iso)}, ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+const ProjectCard: React.FC<{ project: ProjectSummary; onOpen: () => void }> = ({
+  project: p,
+  onOpen,
+}) => {
+  // sem miniatura (ffmpeg falhou / fonte sumiu) cai no ícone
+  const [thumbFailed, setThumbFailed] = useState(false);
+  return (
+    <button className="project-card" onClick={onOpen} title={p.id}>
+      <span className="pc-thumb">
+        {thumbFailed ? (
+          <Icon name="film" size={20} />
+        ) : (
+          <img
+            src={`/api/projects/${encodeURIComponent(p.id)}/thumbnail`}
+            alt=""
+            loading="lazy"
+            onError={() => setThumbFailed(true)}
+          />
+        )}
+        <span className="pc-badge">
+          {p.clipCount > 1 && `${p.clipCount} clipes · `}
+          {fmtDuration(p.durationInSeconds)}
+        </span>
+      </span>
+      <span className="pc-name">{p.id}</span>
+      <span className="pc-dates">
+        <span>
+          Criado <time dateTime={p.createdAt}>{fmtDate(p.createdAt)}</time>
+        </span>
+        <span>
+          Editado <time dateTime={p.updatedAt}>{fmtDateTime(p.updatedAt)}</time>
+        </span>
+      </span>
+    </button>
+  );
+};
+
 export const App: React.FC = () => {
   // null = ainda carregando
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [files, setFiles] = useState<File[]>([]);
+  // ordem da fila = ordem dos clipes na timeline
+  const [clips, setClips] = useState<QueuedClip[]>([]);
   const [briefing, setBriefing] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,15 +87,26 @@ export const App: React.FC = () => {
   };
   useEffect(refresh, []);
 
+  // #lab abre o laboratório de motions
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
   const createDemand = async () => {
-    if (files.length === 0) return;
+    if (clips.length === 0) return;
     setError(null);
     setStatus("Enviando clipes");
     try {
-      const recipe = await uploadProject(files, briefing.trim());
+      const recipe = await uploadProject(
+        clips.map((c) => c.file),
+        briefing.trim()
+      );
       refresh();
       setSelected(recipe.projectId);
-      setFiles([]);
+      setClips([]);
       if (fileRef.current) fileRef.current.value = "";
       if (briefing.trim()) {
         const job = await startDirect(recipe.projectId, briefing.trim());
@@ -77,6 +136,10 @@ export const App: React.FC = () => {
     }
   };
 
+  if (hash === "#lab") {
+    return <MotionLabPage onBack={() => (window.location.hash = "")} />;
+  }
+
   if (selected) {
     return (
       <Editor
@@ -96,16 +159,21 @@ export const App: React.FC = () => {
     );
   }
 
-  const pickFiles = (list: FileList | null) =>
-    setFiles(Array.from(list ?? []).filter((f) => f.type.startsWith("video")));
+  const pickFiles = (list: FileList | null) => {
+    // copia já: o FileList do input é esvaziado logo depois
+    const files = Array.from(list ?? []);
+    setClips((queue) => appendClips(queue, files));
+  };
 
   return (
     <div className="home">
       <header className="topbar">
         <span className="brand">
-          <span className="brand-mark" />
-          VISION
+          <Logo />
         </span>
+        <a className="lab-link" href="#lab">
+          Laboratório de motions
+        </a>
       </header>
       {error && (
         <div className="banner">
@@ -125,6 +193,8 @@ export const App: React.FC = () => {
             <label
               className={`dropzone ${dragOver ? "over" : ""}`}
               onDragOver={(e) => {
+                // só arquivos: reordenar a fila de clipes não acende a área
+                if (!e.dataTransfer.types.includes("Files")) return;
                 e.preventDefault();
                 setDragOver(true);
               }}
@@ -138,16 +208,10 @@ export const App: React.FC = () => {
               <span className="dz-icon">
                 <Icon name="upload" size={20} />
               </span>
-              {files.length > 0 ? (
+              {clips.length > 0 ? (
                 <>
-                  <strong>{files.length} clipe(s) prontos</strong>
-                  <span className="file-chips">
-                    {files.map((f) => (
-                      <span key={f.name} title={f.name}>
-                        {f.name}
-                      </span>
-                    ))}
-                  </span>
+                  <strong>Adicionar mais clipes</strong>
+                  <span>arraste aqui ou clique · entram no fim da fila</span>
                 </>
               ) : (
                 <>
@@ -160,9 +224,16 @@ export const App: React.FC = () => {
                 type="file"
                 accept="video/*"
                 multiple
-                onChange={(e) => pickFiles(e.target.files)}
+                onChange={(e) => {
+                  pickFiles(e.target.files);
+                  // permite escolher o mesmo arquivo de novo depois de tirá-lo
+                  e.target.value = "";
+                }}
               />
             </label>
+            {clips.length > 0 && (
+              <ClipQueue clips={clips} onChange={setClips} disabled={status !== null} />
+            )}
             <label>
               Briefing do gestor (opcional)
               <textarea
@@ -174,10 +245,14 @@ export const App: React.FC = () => {
             </label>
             <button
               className="primary btn-block"
-              disabled={files.length === 0 || status !== null}
+              disabled={clips.length === 0 || status !== null}
               onClick={createDemand}
             >
-              {status ? `${status}…` : "Criar projeto"}
+              {status
+                ? `${status}…`
+                : clips.length > 1
+                  ? `Criar projeto com ${clips.length} clipes`
+                  : "Criar projeto"}
             </button>
           </div>
         </section>
@@ -192,27 +267,11 @@ export const App: React.FC = () => {
               Nenhum projeto ainda. <strong>Crie o primeiro</strong> subindo os clipes ao lado.
             </p>
           ) : (
-            <div className="project-table">
-              <div className="project-table-head">
-                <span>Nome</span>
-                <span>Clipes</span>
-                <span>Bruto</span>
-                <span>Criado</span>
-              </div>
+            <div className="project-grid">
               {[...projects]
                 .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
                 .map((p) => (
-                  <button key={p.id} className="project-row" onClick={() => setSelected(p.id)}>
-                    <span className="pr-name">
-                      <span className="pr-thumb">
-                        <Icon name="film" size={14} />
-                      </span>
-                      {p.id}
-                    </span>
-                    <span className="pr-num">{p.clipCount}</span>
-                    <span className="pr-num">{fmtDuration(p.durationInSeconds)}</span>
-                    <span className="pr-num">{fmtDate(p.createdAt)}</span>
-                  </button>
+                  <ProjectCard key={p.id} project={p} onOpen={() => setSelected(p.id)} />
                 ))}
             </div>
           )}

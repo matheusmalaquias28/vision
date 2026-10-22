@@ -378,6 +378,23 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       )}
 
       <div className="dock-body">
+        {pending.length > 0 && (
+          <div className="sug-approve">
+            <span className="sug-approve-text">
+              <strong>{pending.length}</strong> {pending.length === 1 ? "corte sugerido" : "cortes sugeridos"}
+              <span className="note">
+                {" "}· −{pending.reduce((acc, c) => acc + (c.sourceEnd - c.sourceStart), 0).toFixed(1)}s
+              </span>
+            </span>
+            <button className="sm ghost" onClick={() => review(pending.map((c) => c.id), false)}>
+              Rejeitar todos
+            </button>
+            <button className="sm primary" onClick={() => review(pending.map((c) => c.id), true)}>
+              <Icon name="check" size={13} />
+              Aprovar todos os cortes
+            </button>
+          </div>
+        )}
         {byReason.length > 0 && (
           <div className="sug-summary">
             {byReason.map(({ reason, ids }) => (

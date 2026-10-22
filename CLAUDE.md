@@ -16,8 +16,8 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
 
 ## Convenções críticas
 
-- Timestamps em segundos no tempo do VÍDEO BRUTO (exceto música: fades/offset
-  no tempo do vídeo final). Conversão via `packages/recipe/src/time.ts`.
+- Timestamps em segundos no tempo do VÍDEO BRUTO (exceto overlays e
+  `audioClips`: tempo do vídeo final). Conversão via `packages/recipe/src/time.ts`.
 - Timeline guarda segmentos MANTIDOS, ordenados e sem sobreposição.
 - Sugestões de IA vivem em `timeline.suggestedCuts` com status
   pending/accepted/rejected; aceitar recorta os segmentos via
@@ -26,6 +26,11 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   aponta índices de palavras; o servidor converte para tempo). Novas
   sugestões entram por `mergeSuggestions` (dedupe, respeita o que o operador
   já rejeitou); revisão por `reviewSuggestions`.
+- Antes de detectar, `refineTranscriptTimings` apara das palavras do Whisper o
+  silêncio real do áudio (ele estica palavras sobre pausas). Vícios/muletas
+  usam contexto (pausa em volta, abertura de fala) + a mesma chamada de LLM das
+  retomadas (kind "filler"). Ritmo das pausas: `PAUSE_PACES` (suave/normal/
+  acelerado), escolhido no editor e enviado em `smart-cuts`.
 - Editor por texto: cortar palavras usa `wordsCutRange` (inclui a pausa
   seguinte); restaurar usa `wordsRestoreRange` + `restoreSourceRange` (só o
   áudio da palavra). Palavras cortadas somem da legenda no render.
@@ -36,6 +41,15 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   os cortes); `durationSeconds` no tempo final. Render usa só `accepted`;
   o editor passa `previewPending` para mostrar sugestões. Posições em % da
   ALTURA (`top`), nunca `padding-top` % (é relativo à largura).
+- Música e SFX são `recipe.audioClips` (kind music|sfx, start/duration/offset,
+  fades relativos ao clipe); helpers em `audioClips.ts`. `audio.music`/`sfx`
+  antigos são convertidos por `migrateRecipeData`.
+- Posição livre (arrastada no preview): `placement` {x,y} = centro do elemento
+  em % da largura/ALTURA, em `captions.style`, overlays e motions (null = layout
+  padrão). Render marca o elemento com `data-vision-drag` (`Positioned.tsx`);
+  o editor desenha as alças em `DragLayer.tsx` e grava via `setPlacement`.
+- `recipe.layerOrder` empilha as camadas visuais (primeira = na frente); a
+  composição e a timeline seguem essa ordem.
 - Caminhos de mídia na receita são relativos à raiz do repo com "/". O dir
   `media/` é servido como raiz estática (publicDir no render); componentes usam
   `mediaSrc()` que remove o prefixo `media/`.

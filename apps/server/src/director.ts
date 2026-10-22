@@ -157,18 +157,26 @@ export async function directProject(
 
   // 5. Música
   if (plan.music && listMusicFiles().includes(plan.music.file)) {
+    // trilha de fundo do vídeo inteiro, em loop (substitui músicas anteriores)
     r = {
       ...r,
-      audio: {
-        ...r.audio,
-        music: {
+      audioClips: [
+        ...r.audioClips.filter((c) => c.kind !== "music"),
+        {
+          id: "aud_music",
+          kind: "music",
           file: plan.music.file,
+          start: 0,
+          duration: Math.max(outputDuration(r.timeline.segments), 0.1),
+          offset: 0,
           volume: plan.music.volume,
           fadeInSeconds: 1,
           fadeOutSeconds: 2,
-          startOffsetSeconds: 0,
+          loop: true,
+          mediaDurationSeconds: null,
+          assetId: null,
         },
-      },
+      ],
     };
   }
 
@@ -198,6 +206,7 @@ export async function directProject(
           scale: 0.4,
           assetId: null,
           mediaDurationSeconds: null,
+          placement: null,
         },
       ],
     };

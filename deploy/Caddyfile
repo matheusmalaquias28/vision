@@ -1,0 +1,27 @@
+# VISION atrás do Caddy: HTTPS automático (Let's Encrypt) + senha na entrada.
+# Copie para /etc/caddy/Caddyfile e troque o domínio e o hash da senha.
+#
+# O VISION não tem login próprio: sem o basic_auth, qualquer pessoa com o
+# endereço usa sua chave da OpenAI e mexe nos seus projetos.
+
+vision.seudominio.com.br {
+	encode zstd gzip
+
+	basic_auth {
+		# usuário  hash gerado com: caddy hash-password
+		operador $2a$14$TROQUE_PELO_HASH_GERADO
+	}
+
+	# API e mídia (media/ é servida na raiz pelo servidor Node)
+	@backend path /api/* /projects/* /music/* /sfx/* /library/*
+	handle @backend {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	# interface web (npm run build -w @vision/web)
+	handle {
+		root * /opt/vision/apps/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { outputDuration, type Recipe, type Sfx } from "@vision/recipe";
+import { outputDuration, type AudioClip, type Recipe } from "@vision/recipe";
 import { musicDir } from "./paths";
 
 export interface TemplateInfo {
@@ -42,18 +42,26 @@ function findTransitionSfx(): string | null {
 }
 
 /** SFX de transição em cada troca de segmento (menos o início do vídeo) */
-function sfxAtCuts(recipe: Recipe): Sfx[] {
+function sfxAtCuts(recipe: Recipe): AudioClip[] {
   const file = findTransitionSfx();
   if (!file) return [];
-  const cuts: Sfx[] = [];
+  const cuts: AudioClip[] = [];
   let acc = 0;
   recipe.timeline.segments.forEach((s, i) => {
     if (i > 0) {
       cuts.push({
         id: `sfx_${String(cuts.length + 1).padStart(2, "0")}`,
+        kind: "sfx",
         file,
-        at: Math.round(acc * 100) / 100,
+        start: Math.round(acc * 100) / 100,
+        duration: 1.5,
+        offset: 0,
         volume: 0.5,
+        fadeInSeconds: 0,
+        fadeOutSeconds: 0,
+        loop: false,
+        mediaDurationSeconds: null,
+        assetId: null,
       });
     }
     acc += s.sourceEnd - s.sourceStart;
@@ -69,7 +77,7 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
         ...recipe,
         template: templateId,
         effects: { ...recipe.effects, punchIn: false },
-        sfx: [],
+        audioClips: recipe.audioClips.filter((c) => c.kind !== "sfx"),
         captions: {
           ...recipe.captions,
           style: {
@@ -89,7 +97,7 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
         ...recipe,
         template: templateId,
         effects: { ...recipe.effects, punchIn: true },
-        sfx: sfxAtCuts(recipe),
+        audioClips: [...recipe.audioClips.filter((c) => c.kind !== "sfx"), ...sfxAtCuts(recipe)],
         captions: {
           ...recipe.captions,
           style: {
@@ -121,12 +129,7 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
             animation: "pop",
           },
         },
-        audio: recipe.audio.music
-          ? {
-              ...recipe.audio,
-              music: { ...recipe.audio.music, volume: 0.06 },
-            }
-          : recipe.audio,
+        audioClips: recipe.audioClips.map((c) => (c.kind === "music" ? { ...c, volume: 0.06 } : c)),
       };
     default:
       throw new Error(`Template desconhecido: ${templateId}`);

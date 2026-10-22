@@ -10,6 +10,7 @@ import {
 } from "remotion";
 import type { CaptionStyle, MotionOf, PlacedMotion } from "@vision/recipe";
 import { useGoogleFont } from "./fonts";
+import { AtPoint, dragProps } from "./Positioned";
 
 /** Frames de saída comuns a todos os motions de tela */
 const EXIT_FRAMES = 6;
@@ -45,6 +46,21 @@ const Band: React.FC<{ top: string; align?: "center" | "left"; children: React.R
   </AbsoluteFill>
 );
 
+/** Posição livre (arrastada no preview) ou a faixa padrão do tipo */
+const Place: React.FC<{
+  m: { placement: { x: number; y: number } | null };
+  top: string;
+  align?: "center" | "left";
+  children: React.ReactNode;
+}> = ({ m, top, align, children }) =>
+  m.placement ? (
+    <AtPoint at={m.placement}>{children}</AtPoint>
+  ) : (
+    <Band top={top} align={align}>
+      {children}
+    </Band>
+  );
+
 /** Texto preto ou branco, o que contrastar mais com o fundo */
 function contrastText(hex: string): string {
   const m = hex.replace("#", "").match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
@@ -75,8 +91,9 @@ function useEnterExit(stiffness = 180): { enter: number; exit: number } {
 const Keyword: React.FC<{ m: MotionOf<"keyword">; style: CaptionStyle }> = ({ m, style }) => {
   const { enter, exit } = useEnterExit();
   return (
-    <Band top={m.params.position === "top" ? "9%" : CHEST_TOP}>
+    <Place m={m} top={m.params.position === "top" ? "9%" : CHEST_TOP}>
       <div
+        {...dragProps(`motion:${m.id}`)}
         style={{
           fontFamily: fontStack(style),
           fontWeight: 900,
@@ -96,7 +113,7 @@ const Keyword: React.FC<{ m: MotionOf<"keyword">; style: CaptionStyle }> = ({ m,
       >
         {m.params.text}
       </div>
-    </Band>
+    </Place>
   );
 };
 
@@ -112,20 +129,23 @@ const Emoji: React.FC<{ m: MotionOf<"emoji"> }> = ({ m }) => {
       : m.params.position === "top"
         ? { left: 0, right: 0, top: "12%", textAlign: "center" }
         : { left: 0, right: 0, top: CHEST_TOP, textAlign: "center" };
+  const emoji = (
+    <div
+      {...dragProps(`motion:${m.id}`)}
+      style={{
+        fontSize: 220,
+        lineHeight: 1,
+        filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.45))",
+        transform: `translateY(${bob}px) scale(${enter * exit}) rotate(${wobble}deg)`,
+      }}
+    >
+      {m.params.emoji}
+    </div>
+  );
+  if (m.placement) return <AtPoint at={m.placement}>{emoji}</AtPoint>;
   return (
     <AbsoluteFill>
-      <div
-        style={{
-          position: "absolute",
-          ...pos,
-          fontSize: 220,
-          lineHeight: 1,
-          filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.45))",
-          transform: `translateY(${bob}px) scale(${enter * exit}) rotate(${wobble}deg)`,
-        }}
-      >
-        {m.params.emoji}
-      </div>
+      <div style={{ position: "absolute", ...pos, display: "flex", justifyContent: "center" }}>{emoji}</div>
     </AbsoluteFill>
   );
 };
@@ -141,10 +161,12 @@ const LowerThird: React.FC<{ m: MotionOf<"lowerThird">; style: CaptionStyle }> =
   });
   const x = interpolate(slide, [0, 1], [-110, 0]) - out * 110;
   return (
-    <Band top="7%" align="left">
+    <Place m={m} top="7%" align="left">
       <div
+        {...dragProps(`motion:${m.id}`)}
         style={{
-          marginLeft: "6%",
+          // na posição livre o elemento é centralizado no ponto: sem recuo
+          marginLeft: m.placement ? 0 : "6%",
           display: "flex",
           alignItems: "stretch",
           transform: `translateX(${x}%)`,
@@ -187,7 +209,7 @@ const LowerThird: React.FC<{ m: MotionOf<"lowerThird">; style: CaptionStyle }> =
           )}
         </div>
       </div>
-    </Band>
+    </Place>
   );
 };
 
@@ -205,8 +227,9 @@ const Counter: React.FC<{ m: MotionOf<"counter">; style: CaptionStyle }> = ({ m,
     maximumFractionDigits: decimals,
   });
   return (
-    <Band top="8%">
+    <Place m={m} top="8%">
       <div
+        {...dragProps(`motion:${m.id}`)}
         style={{
           textAlign: "center",
           transform: `scale(${interpolate(enter, [0, 1], [0.6, 1]) * exit})`,
@@ -247,7 +270,7 @@ const Counter: React.FC<{ m: MotionOf<"counter">; style: CaptionStyle }> = ({ m,
           </div>
         )}
       </div>
-    </Band>
+    </Place>
   );
 };
 

@@ -11,6 +11,7 @@ export const placeholderRecipe: Recipe = {
     {
       id: "src_01",
       file: "media/projects/placeholder/source.mp4",
+      name: "",
       durationInSeconds: 1,
       width: 1080,
       height: 1920,
@@ -25,7 +26,8 @@ export const placeholderRecipe: Recipe = {
     suggestedCuts: [],
   },
   overlays: [],
-  sfx: [],
+  audioClips: [],
+  layerOrder: ["captions", "motions", "overlays", "video"],
   motions: [],
   effects: { punchIn: false },
   captions: {
@@ -33,6 +35,8 @@ export const placeholderRecipe: Recipe = {
       preset: "capcut-bold",
       fontFamily: "Archivo Black",
       fontSizePx: 64,
+      fontWeight: 900,
+      placement: null,
       textColor: "#FFFFFF",
       highlightColor: "#FFD700",
       position: "bottom-third",
@@ -47,6 +51,6 @@ export const placeholderRecipe: Recipe = {
     },
     blocks: [],
   },
-  audio: { originalVolume: 1, useEnhanced: false, music: null, narration: null },
+  audio: { originalVolume: 1, useEnhanced: false, narration: null },
   render: { width: 1080, height: 1920, fps: 30, codec: "h264" },
 };

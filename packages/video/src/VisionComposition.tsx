@@ -8,12 +8,18 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { placeMotions, zoomScaleAt, type Recipe, type Segment, type Source } from "@vision/recipe";
+import {
+  placeMotions,
+  zoomScaleAt,
+  type Recipe,
+  type Segment,
+  type Source,
+  type VisualLayer,
+} from "@vision/recipe";
+import { AudioClips } from "./AudioClips";
 import { Captions } from "./Captions";
 import { Motions } from "./Motions";
-import { Music } from "./Music";
 import { Overlays } from "./Overlays";
-import { SfxTrack } from "./Sfx";
 import { mediaSrc } from "./media";
 
 /** Vídeo de um segmento, com punch-in opcional no início */
@@ -109,16 +115,24 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
     );
   });
 
-  return (
-    <AbsoluteFill style={{ backgroundColor: "black" }}>
-      {/* origem um pouco acima do centro: enquadra rosto em vídeo vertical */}
+  const layers: Record<VisualLayer, React.ReactNode> = {
+    video: (
+      // origem um pouco acima do centro: enquadra rosto em vídeo vertical
       <AbsoluteFill style={{ transform: `scale(${zoom})`, transformOrigin: "50% 40%" }}>
         {sequences}
       </AbsoluteFill>
-      <Overlays recipe={recipe} />
-      <Motions placed={placed} style={recipe.captions.style} />
-      <Captions recipe={recipe} />
-      {recipe.audio.music ? <Music music={recipe.audio.music} /> : null}
+    ),
+    overlays: <Overlays recipe={recipe} />,
+    motions: <Motions placed={placed} style={recipe.captions.style} />,
+    captions: <Captions recipe={recipe} />,
+  };
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: "black" }}>
+      {/* do fundo para a frente: layerOrder lista da frente para o fundo */}
+      {[...recipe.layerOrder].reverse().map((layer) => (
+        <React.Fragment key={layer}>{layers[layer]}</React.Fragment>
+      ))}
       {recipe.audio.narration ? (
         <Sequence from={Math.round(recipe.audio.narration.offsetSeconds * fps)}>
           <Audio
@@ -127,7 +141,7 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
           />
         </Sequence>
       ) : null}
-      <SfxTrack recipe={recipe} />
+      <AudioClips clips={recipe.audioClips} />
     </AbsoluteFill>
   );
 };

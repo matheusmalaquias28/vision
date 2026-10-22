@@ -21,10 +21,21 @@ export const CaptionBlockSchema = z.object({
   words: z.array(WordSchema).min(1),
 });
 
+/**
+ * Posição livre de um elemento, arrastado no preview: centro do elemento em %
+ * da LARGURA (x) e da ALTURA (y) do quadro. null = posição padrão do layout.
+ */
+export const PointSchema = z.object({
+  x: z.number().min(0).max(100),
+  y: z.number().min(0).max(100),
+});
+
 export const CaptionStyleSchema = z.object({
   preset: z.enum(["capcut-bold"]).default("capcut-bold"),
   fontFamily: z.string().min(1).default("Archivo Black"),
   fontSizePx: z.number().int().positive().default(64),
+  /** Peso CSS (100 fino … 900 black); peso que a fonte não tem é simulado pelo navegador */
+  fontWeight: z.number().int().min(100).max(900).multipleOf(100).default(900),
   textColor: z.string().default("#FFFFFF"),
   highlightColor: z.string().default("#FFD700"),
   position: z.enum(["center", "bottom-third"]).default("bottom-third"),
@@ -36,6 +47,8 @@ export const CaptionStyleSchema = z.object({
   strokeColor: z.string().default("#000000"),
   animation: z.enum(["pop", "none"]).default("pop"),
   autoFit: z.boolean().default(true),
+  /** Posição livre de todas as legendas (null = usa `position`) */
+  placement: PointSchema.nullable().default(null),
 });
 
 export const SegmentSchema = z
@@ -79,12 +92,32 @@ export const TimelineSchema = z.object({
   suggestedCuts: z.array(SuggestedCutSchema).default([]),
 });
 
-export const MusicSchema = z.object({
+/**
+ * Clipe de áudio solto na timeline (música ou efeito sonoro). Vive no tempo
+ * do VÍDEO FINAL, como overlays: não acompanha cortes no bruto.
+ */
+export const AUDIO_CLIP_KINDS = ["music", "sfx"] as const;
+export type AudioClipKind = (typeof AUDIO_CLIP_KINDS)[number];
+
+export const AudioClipSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(AUDIO_CLIP_KINDS),
   file: z.string().min(1),
-  volume: z.number().min(0).max(1).default(0.15),
+  /** Início no vídeo final */
+  start: seconds,
+  /** Duração no vídeo final */
+  duration: z.number().positive(),
+  /** Quanto do começo do arquivo é pulado */
+  offset: seconds.default(0),
+  volume: z.number().min(0).max(1).default(0.8),
+  /** Fades relativos ao próprio clipe */
   fadeInSeconds: seconds.default(0),
   fadeOutSeconds: seconds.default(0),
-  startOffsetSeconds: seconds.default(0),
+  /** Repete o arquivo se o clipe for mais longo que ele (trilha de fundo) */
+  loop: z.boolean().default(false),
+  mediaDurationSeconds: z.number().positive().nullable().default(null),
+  /** Item da biblioteca de origem (null = arquivo avulso) */
+  assetId: z.string().nullable().default(null),
 });
 
 export const NarrationSchema = z.object({
@@ -98,13 +131,14 @@ export const AudioSchema = z.object({
   originalVolume: z.number().min(0).max(2).default(1),
   /** Usa o áudio tratado (enhancedAudio das fontes) no lugar do original */
   useEnhanced: z.boolean().default(false),
-  music: MusicSchema.nullable().default(null),
   narration: NarrationSchema.nullable().default(null),
 });
 
 export const SourceSchema = z.object({
   id: z.string().min(1),
   file: z.string().min(1),
+  /** Nome original do arquivo enviado (guia para o operador; "" em projetos antigos) */
+  name: z.string().default(""),
   durationInSeconds: z.number().positive(),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -139,18 +173,12 @@ export const OverlaySchema = z
     assetId: z.string().nullable().default(null),
     /** Duração da mídia; overlay mais longo que isso repete em loop */
     mediaDurationSeconds: z.number().positive().nullable().default(null),
+    /** Posição livre (null = usa `position`); ignorada em fullscreen/split-bottom */
+    placement: PointSchema.nullable().default(null),
   })
   .refine((o) => (o.kind === "title" ? o.text.length > 0 : o.file !== null), {
     message: "overlay: title exige text; image/video exigem file",
   });
-
-export const SfxSchema = z.object({
-  id: z.string().min(1),
-  file: z.string().min(1),
-  /** Momento no tempo do vídeo final */
-  at: seconds,
-  volume: z.number().min(0).max(1).default(0.8),
-});
 
 /**
  * Biblioteca fechada de motions: a IA escolhe QUAL e QUANDO, nunca escreve
@@ -170,6 +198,8 @@ const motionBase = {
   status: z.enum(["pending", "accepted", "rejected"]).default("accepted"),
   origin: z.enum(["ai", "manual"]).default("manual"),
   note: z.string().default(""),
+  /** Posição livre arrastada no preview (null = posição do tipo/params); zoom e flash ignoram */
+  placement: PointSchema.nullable().default(null),
 };
 
 export const MotionSchema = z.discriminatedUnion("kind", [
@@ -232,6 +262,20 @@ export const EffectsSchema = z.object({
   punchIn: z.boolean().default(false),
 });
 
+/**
+ * Camadas visuais, empilhadas na ordem de layerOrder: a primeira fica na
+ * frente de todas, a última no fundo. A timeline mostra as trilhas nessa ordem.
+ */
+export const VISUAL_LAYERS = ["captions", "motions", "overlays", "video"] as const;
+export type VisualLayer = (typeof VISUAL_LAYERS)[number];
+
+export const LayerOrderSchema = z
+  .array(z.enum(VISUAL_LAYERS))
+  .default([...VISUAL_LAYERS])
+  .refine((order) => order.length === VISUAL_LAYERS.length && new Set(order).size === order.length, {
+    message: "layerOrder: precisa listar cada camada visual uma vez",
+  });
+
 export const RenderSchema = z.object({
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -254,7 +298,8 @@ export const RecipeSchema = z
       blocks: z.array(CaptionBlockSchema).default([]),
     }),
     overlays: z.array(OverlaySchema).default([]),
-    sfx: z.array(SfxSchema).default([]),
+    audioClips: z.array(AudioClipSchema).default([]),
+    layerOrder: LayerOrderSchema,
     motions: z.array(MotionSchema).default([]),
     audio: AudioSchema.default({}),
     effects: EffectsSchema.default({}),
@@ -306,11 +351,11 @@ export type CaptionStyle = z.infer<typeof CaptionStyleSchema>;
 export type Segment = z.infer<typeof SegmentSchema>;
 export type SuggestedCut = z.infer<typeof SuggestedCutSchema>;
 export type Timeline = z.infer<typeof TimelineSchema>;
-export type Music = z.infer<typeof MusicSchema>;
+export type AudioClip = z.infer<typeof AudioClipSchema>;
 export type Narration = z.infer<typeof NarrationSchema>;
 export type Source = z.infer<typeof SourceSchema>;
 export type Overlay = z.infer<typeof OverlaySchema>;
-export type Sfx = z.infer<typeof SfxSchema>;
+export type Point = z.infer<typeof PointSchema>;
 export type Motion = z.infer<typeof MotionSchema>;
 export type MotionOf<K extends MotionKind> = Extract<Motion, { kind: K }>;
 export type Recipe = z.infer<typeof RecipeSchema>;

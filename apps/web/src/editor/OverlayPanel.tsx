@@ -11,6 +11,7 @@ const DEFAULTS = {
   scale: 0.4,
   assetId: null,
   mediaDurationSeconds: null,
+  placement: null,
 };
 
 function newId(overlays: Overlay[]): string {

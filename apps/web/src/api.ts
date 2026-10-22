@@ -1,8 +1,9 @@
-import type { Catalog, Recipe, Source } from "@vision/recipe";
+import type { Catalog, CutPace, Recipe, Source } from "@vision/recipe";
 
 export interface ProjectSummary {
   id: string;
   createdAt: string;
+  updatedAt: string;
   clipCount: number;
   durationInSeconds: number;
 }
@@ -131,11 +132,11 @@ export const detectSilence = (id: string) =>
   );
 
 /** Pausas, vícios e repetições + retomadas (ai=true chama o LLM) */
-export const suggestSmartCutsApi = (id: string, ai = true) =>
+export const suggestSmartCutsApi = (id: string, pace: CutPace = "normal", ai = true) =>
   fetch(`/api/projects/${id}/smart-cuts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ai }),
+    body: JSON.stringify({ ai, pace }),
   }).then((r) => json<Recipe>(r));
 
 /** Plano de motions da IA (pendentes); instructions = pedido extra do editor */
@@ -155,6 +156,36 @@ export type ProjectWaveforms = Record<string, WaveformData>;
 
 export const getWaveform = (id: string) =>
   fetch(`/api/projects/${id}/waveform`).then((r) => json<ProjectWaveforms>(r));
+
+export interface FileWaveform extends WaveformData {
+  durationSeconds: number;
+}
+
+// um arquivo de música/SFX costuma aparecer em vários clipes: busca uma vez só
+const fileWaveforms = new Map<string, Promise<FileWaveform>>();
+
+export const getFileWaveform = (file: string) => {
+  let p = fileWaveforms.get(file);
+  if (!p) {
+    p = fetch(`/api/waveform?file=${encodeURIComponent(file)}`).then((r) => json<FileWaveform>(r));
+    p.catch(() => fileWaveforms.delete(file));
+    fileWaveforms.set(file, p);
+  }
+  return p;
+};
+
+export interface FilmstripData {
+  /** Sprite horizontal com os frames lado a lado */
+  url: string;
+  /** Segundos do bruto entre um frame e o próximo */
+  interval: number;
+  count: number;
+}
+
+export type ProjectFilmstrips = Record<string, FilmstripData>;
+
+export const getFilmstrip = (id: string) =>
+  fetch(`/api/projects/${id}/filmstrip`).then((r) => json<ProjectFilmstrips>(r));
 
 export const listMusic = () =>
   fetch("/api/music").then((r) => json<MusicTrack[]>(r));

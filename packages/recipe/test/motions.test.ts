@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeMotionSuggestions,
   placeMotions,
+  retimeMotion,
   reviewMotions,
   zoomScaleAt,
   type MotionCandidate,
@@ -131,5 +132,24 @@ describe("mergeMotionSuggestions / reviewMotions", () => {
     expect(accepted.motions.map((m) => m.status)).toEqual(["accepted", "accepted"]);
     const rejected = reviewMotions(r, ["mo_01"], false);
     expect(rejected.motions.find((m) => m.id === "mo_01")?.status).toBe("rejected");
+  });
+});
+
+describe("retimeMotion", () => {
+  it("move o motion: a âncora vai para o instante do bruto sob o novo início", () => {
+    // corte de 10s→15s: o vídeo final pula do 10 para o 15 do bruto
+    let r = recipe([zoom("m1", 3)]);
+    r = { ...r, timeline: { ...r.timeline, segments: applyCutToSegments(r.timeline.segments, "src_01", 10, 15) } };
+    r = retimeMotion(r, "m1", 12, 2);
+    expect(r.motions[0]).toMatchObject({ sourceId: "src_01", sourceTime: 17, durationSeconds: 2 });
+  });
+
+  it("limita a duração e o início ao vídeo e aceita sugestão", () => {
+    let r = recipe([{ ...zoom("m1", 3), status: "pending", origin: "ai" }]);
+    r = retimeMotion(r, "m1", -4, 40);
+    expect(r.motions[0]).toMatchObject({ sourceTime: 0, durationSeconds: 15, status: "accepted" });
+    r = retimeMotion(r, "m1", 99, 0.01);
+    expect(r.motions[0].sourceTime).toBeCloseTo(29.95, 2);
+    expect(r.motions[0].durationSeconds).toBe(0.1);
   });
 });

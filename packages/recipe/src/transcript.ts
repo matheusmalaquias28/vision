@@ -168,40 +168,131 @@ export function normalizeWord(text: string): string {
 // ─── Detectores determinísticos ──────────────────────────────────────
 
 /**
- * Vícios inequívocos (sons de hesitação). "é" sozinho e "um" ficam de fora:
- * são verbo e artigo em pt-BR.
+ * Sons de hesitação inequívocos ("ééé", "eeeh", "aaah", "hmmm", "ããã"). "é",
+ * "e", "a" e "um" sozinhos ficam de fora: são verbo, conjunção e artigo.
  */
-const STRONG_FILLER = /^(é{2,}|e{2,}h*|eh+|ah+n*|ãh*|ã{2,}|hã+|hum+|hm+|uh+m*|uhum)$/u;
+const STRONG_FILLER =
+  /^(é{2,}h*|e{2,}h*|eh+|a{2,}h*|ah+n*|ã{2,}h*|ãh+|hã+|o{2,}h*|u{2,}h*|uh+m*|hu+m+|hm+|m{2,}|ahn+|uhum)$/u;
 
-/** Vícios que às vezes são legítimos — confiança baixa, operador decide */
-const WEAK_FILLERS: Record<string, number> = { "né": 0.5, tipo: 0.35 };
+/**
+ * Vogal sozinha esticada além disso é hesitação ("éééé"), não verbo/conjunção.
+ * "o"/"a" ficam de fora: são artigos, e o Whisper às vezes dá a eles o tempo
+ * da palavra seguinte ("o[58.3-59.1] imóvel[59.1-59.1]") — cortar comeria a fala.
+ */
+const STRETCHED_VOWEL = new Set(["é", "e", "ah", "eh"]);
+const STRETCHED_SECONDS = 0.4;
+/** Vizinha com menos que isso foi "espremida" pelo Whisper: tempos não confiáveis */
+const COLLAPSED_WORD_SECONDS = 0.04;
+
+/**
+ * Muletas e palavras de transição: às vezes têm função na frase, então a
+ * confiança base é baixa e o contexto decide (ver detectFillers).
+ */
+const CRUTCHES: Record<string, number> = {
+  "né": 0.55,
+  tipo: 0.5,
+  sabe: 0.45,
+  entendeu: 0.45,
+  "então": 0.35,
+  assim: 0.3,
+  "aí": 0.3,
+  bom: 0.3,
+  enfim: 0.4,
+  olha: 0.35,
+  "tá": 0.3,
+  beleza: 0.3,
+  basicamente: 0.35,
+  digamos: 0.4,
+};
+
+/** Expressões de transição de duas palavras */
+const CRUTCH_PHRASES: Record<string, number> = {
+  "pois é": 0.45,
+  "quer dizer": 0.45,
+  "na verdade": 0.35,
+  "tipo assim": 0.6,
+  "então assim": 0.6,
+  "e aí": 0.35,
+  "sabe assim": 0.55,
+};
+
+/** Muletas que, abrindo a fala de um clipe, quase sempre sobram ("Então, hoje…") */
+const OPENERS = new Set(["então", "bom", "olha", "enfim", "aí", "assim"]);
 
 /** Palavras após as quais "tipo" é substantivo ("tipo de", "tipo do") */
-const TIPO_AS_NOUN = new Set(["de", "do", "da", "dos", "das", "assim"]);
+const TIPO_AS_NOUN = new Set(["de", "do", "da", "dos", "das"]);
+/** "assim que", "assim como", "então ele"… : conectivo de verdade */
+const CONNECTIVE_AFTER: Record<string, Set<string>> = {
+  assim: new Set(["que", "como", "mesmo"]),
+};
+
+/** Pausa em volta da muleta: é ela solta, entre respiros, que sobra na fala */
+const CRUTCH_GAP_SECONDS = 0.18;
+/** Muletas abaixo disso ficam de fora (mais ruído que ajuda) */
+const MIN_CRUTCH_CONFIDENCE = 0.5;
 
 /** words: palavras de UMA fonte, ordenadas */
 export function detectFillers(words: TranscriptWord[]): CutCandidate[] {
   const out: CutCandidate[] = [];
-  words.forEach((w, i) => {
-    const norm = normalizeWord(w.text);
-    let confidence = 0;
-    if (STRONG_FILLER.test(norm)) confidence = 0.85;
-    else if (norm in WEAK_FILLERS) {
-      const next = words[i + 1] ? normalizeWord(words[i + 1].text) : "";
-      if (norm === "tipo" && TIPO_AS_NOUN.has(next)) return;
-      confidence = WEAK_FILLERS[norm];
-    }
-    if (confidence === 0) return;
-    const { start, end } = wordsCutRange(words, i, i);
+  const norm = words.map((w) => normalizeWord(w.text));
+  const gapBefore = (i: number) => (i === 0 ? Infinity : words[i].start - words[i - 1].end);
+  const gapAfter = (i: number) =>
+    i === words.length - 1 ? Infinity : words[i + 1].start - words[i].end;
+
+  /** Contexto que indica muleta: isolada por pausas ou abrindo o clipe */
+  const contextBoost = (from: number, to: number) => {
+    const before = gapBefore(from) >= CRUTCH_GAP_SECONDS;
+    const after = gapAfter(to) >= CRUTCH_GAP_SECONDS;
+    let boost = before && after ? 0.3 : before || after ? 0.15 : 0;
+    if (from === 0 && OPENERS.has(norm[from])) boost += 0.25;
+    return boost;
+  };
+
+  const push = (from: number, to: number, confidence: number) => {
+    const { start, end } = wordsCutRange(words, from, to);
+    const text = words.slice(from, to + 1).map((w) => w.text).join(" ");
     out.push({
-      sourceId: w.sourceId,
+      sourceId: words[from].sourceId,
       sourceStart: start,
       sourceEnd: end,
       reason: "filler",
-      confidence,
-      note: `"${w.text}"`,
+      confidence: Math.round(Math.min(confidence, 0.9) * 100) / 100,
+      note: `"${text}"`,
     });
-  });
+  };
+
+  for (let i = 0; i < words.length; i++) {
+    const n = norm[i];
+    if (!n) continue;
+    if (STRONG_FILLER.test(n)) {
+      push(i, i, 0.85);
+      continue;
+    }
+    if (STRETCHED_VOWEL.has(n) && words[i].end - words[i].start >= STRETCHED_SECONDS) {
+      const collapsed = (k: number) =>
+        k >= 0 && k < words.length && words[k].end - words[k].start < COLLAPSED_WORD_SECONDS;
+      if (!collapsed(i - 1) && !collapsed(i + 1)) {
+        push(i, i, 0.6);
+        continue;
+      }
+    }
+    const phrase = i + 1 < words.length ? `${n} ${norm[i + 1]}` : "";
+    if (phrase in CRUTCH_PHRASES) {
+      const confidence = CRUTCH_PHRASES[phrase] + contextBoost(i, i + 1);
+      if (confidence >= MIN_CRUTCH_CONFIDENCE) {
+        push(i, i + 1, confidence);
+        i++;
+        continue;
+      }
+    }
+    if (n in CRUTCHES) {
+      const next = norm[i + 1] ?? "";
+      if (n === "tipo" && TIPO_AS_NOUN.has(next)) continue;
+      if (CONNECTIVE_AFTER[n]?.has(next)) continue;
+      const confidence = CRUTCHES[n] + contextBoost(i, i);
+      if (confidence >= MIN_CRUTCH_CONFIDENCE) push(i, i, confidence);
+    }
+  }
   return out;
 }
 
@@ -249,10 +340,21 @@ export interface PauseOptions {
   keepSeconds: number;
 }
 
-export const defaultPauseOptions: PauseOptions = {
-  minGapSeconds: 0.45,
-  keepSeconds: 0.15,
+/**
+ * Ritmo dos cortes de pausa. O que sobra de silêncio num corte é
+ * 2 × keepSeconds; pausas menores que minGapSeconds ficam.
+ */
+export const CUT_PACES = ["suave", "normal", "acelerado"] as const;
+export type CutPace = (typeof CUT_PACES)[number];
+
+export const PAUSE_PACES: Record<CutPace, PauseOptions> = {
+  suave: { minGapSeconds: 0.6, keepSeconds: 0.15 },
+  normal: { minGapSeconds: 0.35, keepSeconds: 0.1 },
+  // fala colada, estilo reels: sobra ~0.12s entre frases
+  acelerado: { minGapSeconds: 0.25, keepSeconds: 0.06 },
 };
+
+export const defaultPauseOptions: PauseOptions = PAUSE_PACES.normal;
 
 /**
  * Pausas entre palavras. Pega o que o silencedetect perde: respiração,
@@ -268,7 +370,8 @@ export function detectPauses(
     if (gap < opts.minGapSeconds) continue;
     const start = words[i - 1].end + opts.keepSeconds;
     const end = words[i].start - opts.keepSeconds;
-    if (end - start < 0.15) continue;
+    // corte de 0.1s ainda tira um "buraco" perceptível no ritmo acelerado
+    if (end - start < 0.1) continue;
     out.push({
       sourceId: words[i].sourceId,
       sourceStart: round3(start),
@@ -282,6 +385,51 @@ export function detectPauses(
   return out;
 }
 
+/** Silêncio medido no áudio (ffmpeg silencedetect), em segundos do bruto */
+export interface SilenceRange {
+  start: number;
+  end: number;
+}
+
+/** Silêncio menor que isso dentro de uma palavra é pausa natural da fala */
+const MIN_SILENCE_IN_WORD = 0.2;
+/** Silêncio que começa até aqui é o "ar" antes da primeira fala */
+const HEAD_SILENCE_EPS = 0.05;
+
+/**
+ * O Whisper estica palavras por cima das pausas ("na" de 1.5s a 3.5s quando a
+ * fala só volta em 3.4s) e as lacunas entre palavras somem — sem lacuna,
+ * detectPauses não acha a pausa e a legenda destaca a palavra no silêncio.
+ * Apara de cada palavra o silêncio real do áudio: na borda, some; no meio,
+ * fica o lado com mais fala. Palavra inteira dentro de um silêncio vai para a
+ * borda onde a fala está (depois do silêncio inicial; senão a mais próxima).
+ * Idempotente: palavras já aparadas não mudam.
+ */
+export function refineWordsWithSilences(words: Word[], silences: SilenceRange[]): Word[] {
+  return words.map((w) => {
+    let start = w.start;
+    let end = w.end;
+    for (const s of silences) {
+      const a = Math.max(start, s.start);
+      const b = Math.min(end, s.end);
+      if (b - a < MIN_SILENCE_IN_WORD) continue;
+      if (a <= start && b >= end) {
+        // nenhuma fala sobra: a palavra foi posta no silêncio
+        const mid = (start + end) / 2;
+        const edge =
+          s.start <= HEAD_SILENCE_EPS || s.end - mid <= mid - s.start ? s.end : s.start;
+        start = edge;
+        end = edge;
+        break;
+      }
+      if (a - start <= end - b) start = b;
+      else end = a;
+    }
+    if (start === w.start && end === w.end) return w;
+    return { ...w, start: round3(start), end: round3(end) };
+  });
+}
+
 /** Agrupa as palavras por fonte, preservando a ordem */
 export function wordsBySource(words: TranscriptWord[]): Map<string, TranscriptWord[]> {
   const map = new Map<string, TranscriptWord[]>();
@@ -293,14 +441,58 @@ export function wordsBySource(words: TranscriptWord[]): Map<string, TranscriptWo
   return map;
 }
 
+/**
+ * Ar antes da primeira palavra e depois da última de cada clipe (o começo de
+ * gravação em que a pessoa ainda não falou, o fim em que ela já parou).
+ */
+export function detectEdgePauses(
+  words: TranscriptWord[],
+  sourceDuration: number,
+  opts: PauseOptions = defaultPauseOptions
+): CutCandidate[] {
+  if (words.length === 0) return [];
+  const out: CutCandidate[] = [];
+  const first = words[0];
+  const last = words[words.length - 1];
+  const headEnd = first.start - opts.keepSeconds;
+  if (first.start >= opts.minGapSeconds && headEnd >= 0.15) {
+    out.push({
+      sourceId: first.sourceId,
+      sourceStart: 0,
+      sourceEnd: round3(headEnd),
+      reason: "pause",
+      confidence: 0.85,
+      note: `${first.start.toFixed(1)}s antes de "${first.text}"`,
+    });
+  }
+  const tailStart = last.end + opts.keepSeconds;
+  if (sourceDuration - last.end >= opts.minGapSeconds && sourceDuration - tailStart >= 0.15) {
+    out.push({
+      sourceId: last.sourceId,
+      sourceStart: round3(tailStart),
+      sourceEnd: round3(sourceDuration),
+      reason: "pause",
+      confidence: 0.85,
+      note: `${(sourceDuration - last.end).toFixed(1)}s depois de "${last.text}"`,
+    });
+  }
+  return out;
+}
+
 /** Roda os detectores determinísticos em todas as fontes */
 export function detectTranscriptCuts(
   recipe: Recipe,
   pauseOpts: PauseOptions = defaultPauseOptions
 ): CutCandidate[] {
   const out: CutCandidate[] = [];
-  for (const words of wordsBySource(transcriptWords(recipe)).values()) {
-    out.push(...detectRepeats(words), ...detectFillers(words), ...detectPauses(words, pauseOpts));
+  const durations = new Map(recipe.sources.map((s) => [s.id, s.durationInSeconds]));
+  for (const [sourceId, words] of wordsBySource(transcriptWords(recipe))) {
+    out.push(
+      ...detectRepeats(words),
+      ...detectFillers(words),
+      ...detectPauses(words, pauseOpts),
+      ...detectEdgePauses(words, durations.get(sourceId) ?? words[words.length - 1].end, pauseOpts)
+    );
   }
   return out;
 }

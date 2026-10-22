@@ -26,6 +26,41 @@ const GOOGLE_FONTS = [
   "Titan One",
 ];
 
+const WEIGHT_LABEL: Record<number, string> = {
+  100: "Thin",
+  200: "ExtraLight",
+  300: "Light",
+  400: "Regular",
+  500: "Medium",
+  600: "SemiBold",
+  700: "Bold",
+  800: "ExtraBold",
+  900: "Black",
+};
+const ALL_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+
+/** Pesos que cada fonte da lista tem no Google Fonts (as outras: todos) */
+const FONT_WEIGHTS: Record<string, number[]> = {
+  "Archivo Black": [400],
+  Anton: [400],
+  "Bebas Neue": [400],
+  "Titan One": [400],
+  Oswald: [200, 300, 400, 500, 600, 700],
+  Rubik: [300, 400, 500, 600, 700, 800, 900],
+  Nunito: [200, 300, 400, 500, 600, 700, 800, 900],
+};
+
+/**
+ * Opções de peso da fonte. Fonte de peso único ganha também "negrito
+ * simulado" (900): é o que as legendas usavam antes do controle existir.
+ */
+function weightOptions(family: string): { value: number; label: string }[] {
+  const real = FONT_WEIGHTS[family] ?? ALL_WEIGHTS;
+  const options = real.map((w) => ({ value: w, label: `${WEIGHT_LABEL[w]} · ${w}` }));
+  if (real[real.length - 1] < 700) options.push({ value: 900, label: "Negrito simulado · 900" });
+  return options;
+}
+
 interface StylePanelProps {
   recipe: Recipe;
   onChange: (recipe: Recipe) => void;
@@ -97,6 +132,26 @@ export const StylePanel: React.FC<StylePanelProps> = ({ recipe, onChange }) => {
             />
           </Prop>
         )}
+        <Prop label="Peso" hint="Espessura da letra. Pesos que a fonte não tem são simulados pelo navegador.">
+          <Select
+            value={String(style.fontWeight)}
+            onChange={(e) => setStyle({ fontWeight: Number(e.target.value) })}
+          >
+            {(() => {
+              const options = weightOptions(style.fontFamily);
+              // peso salvo que não está na lista (ex.: trocou de fonte) continua visível
+              if (!options.some((o) => o.value === style.fontWeight)) {
+                options.push({ value: style.fontWeight, label: `${WEIGHT_LABEL[style.fontWeight]} · ${style.fontWeight}` });
+                options.sort((a, b) => a.value - b.value);
+              }
+              return options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ));
+            })()}
+          </Select>
+        </Prop>
         <Prop label="Tamanho">
           <Slider
             value={style.fontSizePx}

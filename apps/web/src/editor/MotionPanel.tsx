@@ -37,6 +37,7 @@ function newMotion(kind: MotionKind, at: SourceTime): Motion {
     status: "accepted" as const,
     origin: "manual" as const,
     note: "",
+    placement: null,
   };
   switch (kind) {
     case "zoom":

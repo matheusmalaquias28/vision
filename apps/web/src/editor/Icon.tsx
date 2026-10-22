@@ -14,6 +14,7 @@ export type IconName =
   | "chevronLeft"
   | "chevronRight"
   | "chevronDown"
+  | "chevronUp"
   | "check"
   | "x"
   | "plus"
@@ -43,6 +44,8 @@ export type IconName =
   | "mic"
   | "home"
   | "save"
+  | "pointer"
+  | "copy"
   | "search";
 
 const PATHS: Record<IconName, React.ReactNode> = {
@@ -70,6 +73,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   chevronLeft: <path d="M15 18l-6-6 6-6" />,
   chevronRight: <path d="M9 18l6-6-6-6" />,
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  chevronUp: <path d="M6 15l6-6 6 6" />,
   check: <path d="M20 6.5L9.5 17 4 11.5" />,
   x: <path d="M17.5 6.5l-11 11M6.5 6.5l11 11" />,
   plus: <path d="M12 5v14M5 12h14" />,
@@ -191,6 +195,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z" />
       <path d="M8 4v4.5h7V4M8 20v-6h8v6" />
+    </>
+  ),
+  pointer: <path d="M6 3.5l12.5 7.6-5.6 1.3-2.6 5.4z" />,
+  copy: (
+    <>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="1.5" />
+      <path d="M15.5 8.5V5.5a1 1 0 0 0-1-1h-9a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" />
     </>
   ),
 };

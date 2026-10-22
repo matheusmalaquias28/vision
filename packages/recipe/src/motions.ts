@@ -1,5 +1,5 @@
 import type { Motion, MotionKind, Recipe, Segment } from "./schema";
-import { sourceToOutput } from "./time";
+import { outputDuration, outputToSource, sourceToOutput } from "./time";
 
 export const MOTION_LABEL: Record<MotionKind, string> = {
   zoom: "Zoom",
@@ -11,7 +11,8 @@ export const MOTION_LABEL: Record<MotionKind, string> = {
 };
 
 /** Motion sem os campos que o merge/revisão controlam */
-export type MotionCandidate = Omit<Motion, "id" | "status" | "origin">;
+/** O que a IA propõe: posição livre é só do operador (arrastada no preview) */
+export type MotionCandidate = Omit<Motion, "id" | "status" | "origin" | "placement">;
 
 /** Motion posicionado no vídeo final */
 export interface PlacedMotion {
@@ -125,7 +126,7 @@ export function mergeMotionSuggestions(recipe: Recipe, candidates: MotionCandida
       );
       if (clash) continue;
     }
-    all.push({ ...c, id: nextId(), status: "pending", origin: "ai" } as Motion);
+    all.push({ ...c, id: nextId(), status: "pending", origin: "ai", placement: null } as Motion);
   }
   return { ...recipe, motions: all };
 }
@@ -136,6 +137,42 @@ export function reviewMotions(recipe: Recipe, ids: string[], accept: boolean): R
     ...recipe,
     motions: recipe.motions.map((m) =>
       ids.includes(m.id) && m.status === "pending" ? { ...m, status } : m
+    ),
+  };
+}
+
+export const MOTION_MIN_SECONDS = 0.1;
+export const MOTION_MAX_SECONDS = 15;
+
+/**
+ * Reposiciona um motion arrastado na timeline: `outputStart` é o novo início
+ * no vídeo final, convertido para a âncora no bruto (o motion continua
+ * seguindo os cortes). Mexer numa sugestão conta como aceitá-la.
+ */
+export function retimeMotion(
+  recipe: Recipe,
+  id: string,
+  outputStart: number,
+  durationSeconds: number
+): Recipe {
+  const segments = recipe.timeline.segments;
+  const total = outputDuration(segments);
+  const start = Math.min(Math.max(outputStart, 0), Math.max(total - 0.05, 0));
+  const anchor = outputToSource(segments, start);
+  if (!anchor) return recipe;
+  const duration = Math.min(Math.max(durationSeconds, MOTION_MIN_SECONDS), MOTION_MAX_SECONDS);
+  return {
+    ...recipe,
+    motions: recipe.motions.map((m) =>
+      m.id === id
+        ? {
+            ...m,
+            sourceId: anchor.sourceId,
+            sourceTime: Math.round(anchor.seconds * 1000) / 1000,
+            durationSeconds: Math.round(duration * 100) / 100,
+            status: m.status === "pending" ? "accepted" : m.status,
+          }
+        : m
     ),
   };
 }

@@ -1,19 +1,34 @@
 import {
+  audioClipEnd,
   CUT_REASON_LABEL,
+  MIN_AUDIO_CLIP_SECONDS,
   MOTION_LABEL,
   motionSummary,
   outputDuration,
   placeMotions,
+  retimeMotion,
   reviewSuggestions,
   sourceToOutput,
+  splitAudioClip,
+  splitSegmentAt,
   type Asset,
+  type AudioClip,
+  type Motion,
   type Overlay,
   type Recipe,
   type Segment,
   type SuggestedCut,
+  type VisualLayer,
 } from "@vision/recipe";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ProjectWaveforms, WaveformData } from "../api";
+import {
+  getFileWaveform,
+  type FileWaveform,
+  type FilmstripData,
+  type ProjectFilmstrips,
+  type ProjectWaveforms,
+  type WaveformData,
+} from "../api";
 import { Icon } from "./Icon";
 import { ASSET_DRAG_TYPE } from "./LibraryPanel";
 
@@ -23,7 +38,26 @@ const MAX_ZOOM = 30;
 /** Maior canvas de waveform desenhado; acima disso o CSS estica */
 const MAX_WAVE_PX = 8000;
 
-const ROW = { ruler: 26, video: 72, caption: 30, motion: 30, overlay: 30, audio: 36 };
+/** Maior canvas de filmstrip; acima disso os frames ficam esticados */
+const MAX_FILM_PX = 16000;
+
+const ROW = { ruler: 26, video: 64, clipAudio: 40, caption: 30, motion: 30, overlay: 30, music: 40, sfx: 34 };
+
+/** Distância (px) em que bordas arrastadas grudam no playhead e em outras bordas */
+const SNAP_PX = 6;
+
+export type TimelineTool = "select" | "blade";
+
+const LAYER_ROW: Record<VisualLayer, number> = {
+  video: ROW.video,
+  captions: ROW.caption,
+  motions: ROW.motion,
+  overlays: ROW.overlay,
+};
+
+function fileName(file: string): string {
+  return file.split("/").pop() ?? file;
+}
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max);
@@ -73,7 +107,10 @@ const WaveCanvas: React.FC<{
   sourceEnd: number;
   width: number;
   height: number;
-}> = ({ waveform, sourceStart, sourceEnd, width, height }) => {
+  /** Depois do fim do arquivo, volta para sourceStart (clipe em loop) */
+  loop?: boolean;
+  color?: string;
+}> = ({ waveform, sourceStart, sourceEnd, width, height, loop = false, color = "oklch(0.86 0.05 250 / 0.55)" }) => {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -83,27 +120,115 @@ const WaveCanvas: React.FC<{
     canvas.width = w;
     canvas.height = height;
     ctx.clearRect(0, 0, w, height);
-    ctx.fillStyle = "oklch(0.86 0.05 250 / 0.55)";
+    ctx.fillStyle = color;
     // normaliza pelo pico máximo do clipe (o mais alto ocupa a altura toda)
     let maxPeak = 0.01;
     for (const p of waveform.peaks) if (p > maxPeak) maxPeak = p;
     const gain = Math.min(1 / maxPeak, 25);
     const firstBin = sourceStart * waveform.binsPerSecond;
     const binSpan = (sourceEnd - sourceStart) * waveform.binsPerSecond;
+    const loopLen = waveform.peaks.length - firstBin;
     const mid = height / 2;
     for (let x = 0; x < w; x++) {
-      const bin = Math.floor(firstBin + (x / w) * binSpan);
+      let bin = Math.floor(firstBin + (x / w) * binSpan);
+      if (loop && loopLen > 0 && bin >= waveform.peaks.length) {
+        bin = Math.floor(firstBin + ((bin - firstBin) % loopLen));
+      }
       const peak = Math.min((waveform.peaks[bin] ?? 0) * gain, 1);
       const barHalf = Math.max(Math.pow(peak, 0.7) * (mid - 1), 0.5);
       ctx.fillRect(x, mid - barHalf, 1, barHalf * 2);
     }
-  }, [waveform, sourceStart, sourceEnd, width, height]);
+  }, [waveform, sourceStart, sourceEnd, width, height, loop, color]);
   return <canvas ref={ref} className="wave-canvas" style={{ height }} />;
+};
+
+/** Waveforms dos arquivos de música/SFX que estão na timeline */
+function useFileWaveforms(files: string[]): Record<string, FileWaveform> {
+  const [loaded, setLoaded] = useState<Record<string, FileWaveform>>({});
+  const key = [...new Set(files)].sort().join("|");
+  useEffect(() => {
+    let alive = true;
+    for (const file of key ? key.split("|") : []) {
+      getFileWaveform(file)
+        .then((w) => alive && setLoaded((prev) => (prev[file] ? prev : { ...prev, [file]: w })))
+        .catch(() => {
+          // sem waveform o clipe aparece liso
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [key]);
+  return loaded;
+}
+
+// sprites ficam carregados entre renders/remontagens da timeline
+const spriteCache = new Map<string, Promise<HTMLImageElement>>();
+
+function loadSprite(url: string): Promise<HTMLImageElement> {
+  let p = spriteCache.get(url);
+  if (!p) {
+    p = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => {
+        spriteCache.delete(url);
+        reject(new Error(`filmstrip não carregou: ${url}`));
+      };
+      img.src = url;
+    });
+    spriteCache.set(url, p);
+  }
+  return p;
+}
+
+/** Frames do bruto lado a lado; cada tile mostra o frame do instante sob ele */
+const FilmCanvas: React.FC<{
+  filmstrip: FilmstripData;
+  sourceStart: number;
+  sourceEnd: number;
+  width: number;
+  height: number;
+}> = ({ filmstrip, sourceStart, sourceEnd, width, height }) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [sprite, setSprite] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadSprite(filmstrip.url)
+      .then((img) => alive && setSprite(img))
+      .catch(() => alive && setSprite(null));
+    return () => {
+      alive = false;
+    };
+  }, [filmstrip.url]);
+  useEffect(() => {
+    const canvas = ref.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || !sprite) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = clamp(Math.floor(width * dpr), 1, MAX_FILM_PX);
+    const h = Math.round(height * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    ctx.clearRect(0, 0, w, h);
+    const frameW = sprite.naturalWidth / filmstrip.count;
+    const frameH = sprite.naturalHeight;
+    const tileW = Math.max(h * (frameW / frameH), 4);
+    const span = sourceEnd - sourceStart;
+    for (let x = 0; x < w; x += tileW) {
+      // frame do instante no meio do tile
+      const t = sourceStart + ((x + tileW / 2) / w) * span;
+      const idx = clamp(Math.floor(t / filmstrip.interval), 0, filmstrip.count - 1);
+      ctx.drawImage(sprite, idx * frameW, 0, frameW, frameH, x, 0, tileW, h);
+    }
+  }, [sprite, filmstrip, sourceStart, sourceEnd, width, height]);
+  return <canvas ref={ref} className="film-canvas" style={{ height }} />;
 };
 
 interface TimelineProps {
   recipe: Recipe;
   waveforms: ProjectWaveforms | null;
+  filmstrips: ProjectFilmstrips | null;
   playheadSeconds: number;
   selectedCaption: string | null;
   selectedOverlay: string | null;
@@ -115,11 +240,18 @@ interface TimelineProps {
   onSelectMotion: (id: string | null) => void;
   /** Item arrastado da biblioteca e solto num instante da timeline */
   onDropAsset: (asset: Asset, atSeconds: number) => void;
+  tool: TimelineTool;
+  onToolChange: (tool: TimelineTool) => void;
+  selectedSegment: string | null;
+  selectedAudioClip: string | null;
+  onSelectSegment: (id: string | null) => void;
+  onSelectAudioClip: (id: string | null) => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
   recipe,
   waveforms,
+  filmstrips,
   playheadSeconds,
   selectedCaption,
   selectedOverlay,
@@ -130,6 +262,12 @@ export const Timeline: React.FC<TimelineProps> = ({
   onSelectOverlay,
   onSelectMotion,
   onDropAsset,
+  tool,
+  onToolChange,
+  selectedSegment,
+  selectedAudioClip,
+  onSelectSegment,
+  onSelectAudioClip,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -137,6 +275,9 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [zoom, setZoom] = useState(1);
   /** Instante sob o cursor durante um arrastar da biblioteca */
   const [dropAt, setDropAt] = useState<number | null>(null);
+  /** Onde a ferramenta de corte cortaria (linha guia sob o cursor) */
+  const [bladeAt, setBladeAt] = useState<number | null>(null);
+  const fileWaves = useFileWaveforms(recipe.audioClips.map((c) => c.file));
   const pendingScroll = useRef<number | null>(null);
 
   useEffect(() => {
@@ -156,6 +297,9 @@ export const Timeline: React.FC<TimelineProps> = ({
   const pxPerSec = fitPps * zoom;
   const contentW = Math.max(duration * pxPerSec + 24, laneW);
   const multiClip = recipe.sources.length > 1;
+  /** Nome do arquivo enviado (sem extensão) ou o id em projetos antigos */
+  const sourceLabel = (id: string) =>
+    recipe.sources.find((s) => s.id === id)?.name.replace(/\.[^.]+$/, "") || id;
 
   // Ctrl/⌘ + roda = zoom ancorado no cursor (listener nativo: precisa de passive:false)
   const zoomRef = useRef({ zoom, fitPps });
@@ -315,6 +459,177 @@ export const Timeline: React.FC<TimelineProps> = ({
     setSegments(next);
   };
 
+  // ─── Ferramenta de corte ───────────────────────────────────────────
+
+  /** Instante do corte: gruda no playhead quando passa perto dele */
+  const bladeTime = (clientX: number) => {
+    const t = timeAt(clientX);
+    return Math.abs(t - playheadSeconds) * pxPerSec < SNAP_PX ? playheadSeconds : t;
+  };
+
+  const bladeSegment = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSegments(splitSegmentAt(segments, bladeTime(e.clientX)));
+  };
+
+  const setAudioClips = (next: AudioClip[]) => onChange({ ...recipe, audioClips: next });
+
+  const bladeAudioClip = (e: React.PointerEvent, clip: AudioClip) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const parts = splitAudioClip(clip, bladeTime(e.clientX), `aud_${Date.now().toString(36)}`);
+    if (!parts) return;
+    setAudioClips(recipe.audioClips.flatMap((c) => (c.id === clip.id ? parts : [c])));
+  };
+
+  /** Clique num trecho de vídeo (ou no áudio dele): corta ou seleciona */
+  const segmentPointerDown = (e: React.PointerEvent, seg: Segment) => {
+    if (e.button !== 0 || e.target !== e.currentTarget) return;
+    if (tool === "blade") return bladeSegment(e);
+    e.stopPropagation();
+    onSelectSegment(seg.id === selectedSegment ? null : seg.id);
+  };
+
+  // ─── Clipes de áudio: mover, aparar, selecionar ─────────────────────
+
+  /** Bordas para onde um clipe arrastado gruda */
+  const snapPoints = (exceptId: string) => {
+    const pts = [0, duration, playheadSeconds, ...segmentPositions];
+    for (const c of recipe.audioClips) {
+      if (c.id !== exceptId) pts.push(c.start, audioClipEnd(c));
+    }
+    return pts;
+  };
+
+  const snap = (t: number, points: number[]) => {
+    let best = t;
+    let bestPx = SNAP_PX;
+    for (const p of points) {
+      const px = Math.abs(p - t) * pxPerSec;
+      if (px < bestPx) {
+        best = p;
+        bestPx = px;
+      }
+    }
+    return best;
+  };
+
+  const startAudioDrag = (
+    e: React.PointerEvent,
+    clip: AudioClip,
+    mode: "move" | "start" | "end",
+    mediaDuration: number | null
+  ) => {
+    if (e.button !== 0) return;
+    if (tool === "blade") return bladeAudioClip(e, clip);
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectAudioClip(clip.id);
+    const startX = e.clientX;
+    const points = snapPoints(clip.id);
+    const end0 = audioClipEnd(clip);
+    // sem loop, o clipe não passa do fim do arquivo
+    const maxEnd = clip.loop || mediaDuration === null ? Infinity : clip.start + (mediaDuration - clip.offset);
+    const minStart = clip.loop ? 0 : Math.max(0, clip.start - clip.offset);
+    const onMove = (ev: PointerEvent) => {
+      const deltaSec = (ev.clientX - startX) / pxPerSec;
+      let next: AudioClip;
+      if (mode === "move") {
+        let start = clip.start + deltaSec;
+        // gruda pelo início ou pelo fim, o que estiver mais perto de uma borda
+        const byStart = snap(start, points) - start;
+        const byEnd = snap(start + clip.duration, points) - (start + clip.duration);
+        if (byStart !== 0 && (byEnd === 0 || Math.abs(byStart) <= Math.abs(byEnd))) start += byStart;
+        else start += byEnd;
+        next = { ...clip, start: round2(clamp(start, 0, Math.max(duration - MIN_AUDIO_CLIP_SECONDS, 0))) };
+      } else if (mode === "start") {
+        const start = round2(clamp(snap(clip.start + deltaSec, points), minStart, end0 - MIN_AUDIO_CLIP_SECONDS));
+        const moved = start - clip.start;
+        next = {
+          ...clip,
+          start,
+          duration: round2(end0 - start),
+          offset: round2(Math.max(0, clip.offset + moved)),
+        };
+      } else {
+        const end = round2(clamp(snap(end0 + deltaSec, points), clip.start + MIN_AUDIO_CLIP_SECONDS, maxEnd));
+        next = { ...clip, duration: round2(end - clip.start) };
+      }
+      setAudioClips(recipe.audioClips.map((c) => (c.id === clip.id ? next : c)));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  // ─── Motions: adiantar, atrasar, aparar ────────────────────────────
+
+  /** Inícios das palavras no vídeo final: motions costumam nascer numa palavra */
+  const wordStarts = () => {
+    const pts: number[] = [];
+    for (const b of recipe.captions.blocks) {
+      for (const w of b.words) {
+        const t = blockOutputStart(segments, b.sourceId, w.start);
+        if (t !== null) pts.push(t);
+      }
+    }
+    return pts;
+  };
+
+  const startMotionDrag = (
+    e: React.PointerEvent,
+    m: Motion,
+    outputStart: number,
+    mode: "move" | "start" | "end"
+  ) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectMotion(m.id);
+    const startX = e.clientX;
+    const end0 = outputStart + m.durationSeconds;
+    const points = [
+      0,
+      duration,
+      playheadSeconds,
+      ...segmentPositions,
+      ...wordStarts(),
+      ...placedMotions
+        .filter((p) => p.motion.id !== m.id)
+        .flatMap((p) => [p.outputStart, p.outputEnd]),
+    ];
+    const onMove = (ev: PointerEvent) => {
+      const deltaSec = (ev.clientX - startX) / pxPerSec;
+      if (Math.abs(ev.clientX - startX) < 3) return;
+      let start = outputStart;
+      let dur = m.durationSeconds;
+      if (mode === "move") {
+        start = outputStart + deltaSec;
+        // gruda pelo início ou pelo fim, o que estiver mais perto de uma borda
+        const byStart = snap(start, points) - start;
+        const byEnd = snap(start + dur, points) - (start + dur);
+        if (byStart !== 0 && (byEnd === 0 || Math.abs(byStart) <= Math.abs(byEnd))) start += byStart;
+        else start += byEnd;
+      } else if (mode === "start") {
+        start = Math.min(snap(outputStart + deltaSec, points), end0 - 0.1);
+        dur = end0 - start;
+      } else {
+        dur = snap(end0 + deltaSec, points) - outputStart;
+      }
+      onChange(retimeMotion(recipe, m.id, start, dur));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const reviewSuggestion = (cut: SuggestedCut, accept: boolean) =>
     onChange(reviewSuggestions(recipe, [cut.id], accept));
 
@@ -344,15 +659,247 @@ export const Timeline: React.FC<TimelineProps> = ({
     }
   }
 
+const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
+  const sfxClips = recipe.audioClips.filter((c) => c.kind === "sfx");
+
+  const renderAudioClip = (c: AudioClip) => {
+    const wave = fileWaves[c.file];
+    const mediaDuration = wave?.durationSeconds ?? c.mediaDurationSeconds;
+    const width = c.duration * pxPerSec;
+    const drag = (mode: "move" | "start" | "end") => (e: React.PointerEvent) =>
+      startAudioDrag(e, c, mode, mediaDuration);
+    return (
+      <div
+        key={c.id}
+        className={`clip aclip kind-${c.kind} ${selectedAudioClip === c.id ? "selected" : ""}`}
+        style={{ left: c.start * pxPerSec, width: Math.max(width, 4) }}
+        title={`${fileName(c.file)} · ${c.start.toFixed(2)}s → ${audioClipEnd(c).toFixed(2)}s · ${Math.round(c.volume * 100)}%${c.loop ? " · loop" : ""}`}
+        onPointerDown={drag("move")}
+      >
+        {wave && (
+          <WaveCanvas
+            waveform={wave}
+            sourceStart={c.offset}
+            sourceEnd={c.offset + c.duration}
+            width={width}
+            height={(c.kind === "music" ? ROW.music : ROW.sfx) - 10}
+            loop={c.loop}
+            color={c.kind === "music" ? "oklch(0.86 0.11 155 / 0.75)" : "oklch(0.9 0.12 80 / 0.8)"}
+          />
+        )}
+        {width > 40 && <span className="clip-label">{fileName(c.file)}</span>}
+        <div className="handle handle-l" onPointerDown={drag("start")} />
+        <div className="handle handle-r" onPointerDown={drag("end")} />
+      </div>
+    );
+  };
+
   const zoomSlider = Math.log(zoom) / Math.log(MAX_ZOOM);
 
-  const head = (cls: string, name: string, meta: React.ReactNode) => (
-    <div className={`tl-head ${cls}`}>
-      <span className="th-swatch" />
-      <span className="th-name">{name}</span>
-      <span className="th-meta">{meta}</span>
-    </div>
-  );
+  const moveLayer = (layer: VisualLayer, delta: -1 | 1) => {
+    const order = [...recipe.layerOrder];
+    const i = order.indexOf(layer);
+    const j = i + delta;
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    onChange({ ...recipe, layerOrder: order });
+  };
+
+  const head = (cls: string, name: string, meta: React.ReactNode, layer?: VisualLayer) => {
+    const i = layer ? recipe.layerOrder.indexOf(layer) : -1;
+    return (
+      <div className={`tl-head ${cls}`}>
+        <span className="th-swatch" />
+        <span className="th-name">{name}</span>
+        <span className="th-meta">{meta}</span>
+        {layer && (
+          <span className="th-order">
+            <button
+              className="icon ghost"
+              title="Subir: passa na frente da camada de cima"
+              disabled={i === 0}
+              onClick={() => moveLayer(layer, -1)}
+            >
+              <Icon name="chevronUp" size={12} />
+            </button>
+            <button
+              className="icon ghost"
+              title="Descer: vai para trás da camada de baixo"
+              disabled={i === recipe.layerOrder.length - 1}
+              onClick={() => moveLayer(layer, 1)}
+            >
+              <Icon name="chevronDown" size={12} />
+            </button>
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  // trilhas visuais: renderizadas na ordem de layerOrder (a de cima cobre a de baixo)
+  const visualLanes: Record<VisualLayer, React.ReactNode> = {
+    video: (
+      <>
+        {/* vídeo */}
+        {head("trk-video", "Vídeo", segments.length, "video")}
+        <div className="tl-lane" onPointerDown={laneSeek}>
+          {segments.map((seg, i) => {
+            const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
+            return (
+              <div
+                key={seg.id}
+                className={`clip ${selectedSegment === seg.id ? "selected" : ""}`}
+                style={{ left: segmentPositions[i] * pxPerSec, width }}
+                title={`${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
+                onPointerDown={(e) => segmentPointerDown(e, seg)}
+              >
+                {filmstrips?.[seg.sourceId] && (
+                  <FilmCanvas
+                    filmstrip={filmstrips[seg.sourceId]}
+                    sourceStart={seg.sourceStart}
+                    sourceEnd={seg.sourceEnd}
+                    width={width}
+                    height={ROW.video - 10}
+                  />
+                )}
+                {width > 46 && (
+                  <span className="clip-label">
+                    {multiClip ? `${sourceLabel(seg.sourceId)} · ` : ""}
+                    {(seg.sourceEnd - seg.sourceStart).toFixed(1)}s
+                  </span>
+                )}
+                <div className="handle handle-l" onPointerDown={(e) => startEdgeDrag(e, i, "start")} />
+                {multiClip && (
+                  <span className="clip-move" onPointerDown={(e) => e.stopPropagation()}>
+                    <button title="Mover para a esquerda" onClick={() => moveSegment(i, -1)}>
+                      <Icon name="chevronLeft" size={12} />
+                    </button>
+                    <button title="Mover para a direita" onClick={() => moveSegment(i, 1)}>
+                      <Icon name="chevronRight" size={12} />
+                    </button>
+                  </span>
+                )}
+                <div className="handle handle-r" onPointerDown={(e) => startEdgeDrag(e, i, "end")} />
+              </div>
+            );
+          })}
+          {pendingCuts.map((cut) => {
+            const outStart = sourceToOutput(segments, cut.sourceId, cut.sourceStart);
+            if (outStart === null) return null;
+            return (
+              <div
+                key={cut.id}
+                className={`cut-sug reason-${cut.reason}`}
+                style={{
+                  left: outStart * pxPerSec,
+                  width: Math.max((cut.sourceEnd - cut.sourceStart) * pxPerSec, 40),
+                }}
+                title={`${CUT_REASON_LABEL[cut.reason]} · confiança ${cut.confidence}${cut.note ? ` · ${cut.note}` : ""}`}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                <span className="cut-sug-actions">
+                  <button className="ok" title="Aceitar corte" onClick={() => reviewSuggestion(cut, true)}>
+                    <Icon name="check" size={11} />
+                  </button>
+                  <button className="no" title="Rejeitar" onClick={() => reviewSuggestion(cut, false)}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    ),
+    captions: (
+      <>
+        {/* legenda */}
+        {head("trk-caption", "Legenda", spoken, "captions")}
+        <div className="tl-lane alt" onPointerDown={laneSeek}>
+          {spoken === 0 && <span className="lane-empty">Transcreva para gerar a legenda</span>}
+          {recipe.captions.blocks.map((block) => {
+            const start = blockOutputStart(segments, block.sourceId, block.words[0].start);
+            if (start === null) return null;
+            const endRaw = blockOutputStart(
+              segments,
+              block.sourceId,
+              block.words[block.words.length - 1].end - 0.01
+            );
+            const end = endRaw ?? start + 0.3;
+            const text = block.words.map((w) => w.text).join(" ");
+            return (
+              <div
+                key={block.id}
+                className={`blk cap-blk ${selectedCaption === block.id ? "selected" : ""} ${block.sourceId === null ? "narration" : ""}`}
+                style={{ left: start * pxPerSec, width: Math.max((end - start) * pxPerSec, 10) }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => onSelectCaption(block.id === selectedCaption ? null : block.id)}
+                title={text}
+              >
+                {text}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    ),
+    motions: (
+      <>
+        {/* motions */}
+        {head(
+        "trk-motion",
+        "Motions",
+        recipe.motions.filter((m) => m.status !== "rejected").length,
+        "motions"
+        )}
+        <div className="tl-lane" onPointerDown={laneSeek}>
+          {placedMotions.length === 0 && <span className="lane-empty">Sem motions</span>}
+          {placedMotions.map(({ motion: m, outputStart }) => (
+            <div
+              key={m.id}
+              className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""}`}
+              style={{
+                left: outputStart * pxPerSec,
+                width: Math.max(m.durationSeconds * pxPerSec, 12),
+              }}
+              title={`${MOTION_LABEL[m.kind]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
+              onPointerDown={(e) => startMotionDrag(e, m, outputStart, "move")}
+            >
+              <div className="handle handle-l" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "start")} />
+              {motionSummary(m) || MOTION_LABEL[m.kind]}
+              <div className="handle handle-r" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "end")} />
+            </div>
+          ))}
+        </div>
+      </>
+    ),
+    overlays: (
+      <>
+        {/* overlays */}
+        {head("trk-overlay", "Overlays", recipe.overlays.length, "overlays")}
+        <div className="tl-lane alt" onPointerDown={laneSeek}>
+          {recipe.overlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
+          {recipe.overlays.map((o) => {
+            const end = o.end ?? duration;
+            return (
+              <div
+                key={o.id}
+                className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""}`}
+                style={{ left: o.start * pxPerSec, width: Math.max((end - o.start) * pxPerSec, 16) }}
+                onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
+                title={o.kind === "title" ? o.text : (o.file ?? "")}
+              >
+                <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
+                {o.text || o.file?.split("/").pop()}
+                <div className="handle handle-r" onPointerDown={(e) => startOverlayDrag(e, o.id, "end")} />
+              </div>
+            );
+          })}
+        </div>
+      </>
+    ),
+  };
+
 
   return (
     <div className="timeline">
@@ -362,6 +909,36 @@ export const Timeline: React.FC<TimelineProps> = ({
           {pendingCuts.length > 0 ? `${pendingCuts.length} cortes sugeridos · ` : ""}
           {duration.toFixed(1)}s no corte
         </span>
+        {pendingCuts.length > 0 && (
+          <button
+            className="sm primary"
+            title="Aceita todas as sugestões de corte pendentes"
+            onClick={() => onChange(reviewSuggestions(recipe, pendingCuts.map((c) => c.id), true))}
+          >
+            <Icon name="check" size={13} />
+            Aprovar todos os cortes ({pendingCuts.length})
+          </button>
+        )}
+        <div className="tl-tools" role="radiogroup" aria-label="Ferramenta">
+          <button
+            className={`sm icon ghost ${tool === "select" ? "active" : ""}`}
+            role="radio"
+            aria-checked={tool === "select"}
+            title="Seleção (V): clique seleciona, arraste move · Delete apaga · Ctrl+D duplica"
+            onClick={() => onToolChange("select")}
+          >
+            <Icon name="pointer" size={15} />
+          </button>
+          <button
+            className={`sm icon ghost ${tool === "blade" ? "active" : ""}`}
+            role="radio"
+            aria-checked={tool === "blade"}
+            title="Corte (C): clique num trecho de vídeo ou áudio para dividir"
+            onClick={() => onToolChange("blade")}
+          >
+            <Icon name="scissors" size={15} />
+          </button>
+        </div>
         <div className="tl-zoom">
           <button className="sm icon ghost" title="Diminuir zoom" onClick={() => zoomTo(zoom / 1.4)}>
             <Icon name="zoomOut" size={15} />
@@ -388,8 +965,12 @@ export const Timeline: React.FC<TimelineProps> = ({
       </div>
 
       <div
-        className={`tl-scroll ${dropAt !== null ? "dropping" : ""}`}
+        className={`tl-scroll ${dropAt !== null ? "dropping" : ""} ${tool === "blade" ? "tool-blade" : ""}`}
         ref={scrollRef}
+        onPointerMove={(e) => {
+          if (tool === "blade") setBladeAt(bladeTime(e.clientX));
+        }}
+        onPointerLeave={() => setBladeAt(null)}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) return;
           e.preventDefault();
@@ -415,7 +996,15 @@ export const Timeline: React.FC<TimelineProps> = ({
           className="tl-grid"
           style={{
             gridTemplateColumns: `${HEAD_W}px ${contentW}px`,
-            gridTemplateRows: `${ROW.ruler}px ${ROW.video}px ${ROW.caption}px ${ROW.motion}px ${ROW.overlay}px ${ROW.audio}px`,
+            gridTemplateRows: [
+              ROW.ruler,
+              ...recipe.layerOrder.map((l) => LAYER_ROW[l]),
+              ROW.clipAudio,
+              ROW.music,
+              ROW.sfx,
+            ]
+              .map((h) => `${h}px`)
+              .join(" "),
           }}
         >
           {/* régua */}
@@ -424,20 +1013,22 @@ export const Timeline: React.FC<TimelineProps> = ({
             {ticks}
           </div>
 
-          {/* vídeo */}
-          {head("trk-video", "Vídeo", segments.length)}
+          {recipe.layerOrder.map((layer) => (
+            <React.Fragment key={layer}>{visualLanes[layer]}</React.Fragment>
+          ))}
+
+          {/* áudio do vídeo: mesmos trechos da trilha de vídeo (cortar um corta o outro) */}
+          {head("trk-video-audio", "Áudio do vídeo", recipe.audio.useEnhanced ? "tratado" : "")}
           <div className="tl-lane" onPointerDown={laneSeek}>
             {segments.map((seg, i) => {
               const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
               return (
                 <div
                   key={seg.id}
-                  className="clip"
+                  className={`clip clip-audio ${selectedSegment === seg.id ? "selected" : ""}`}
                   style={{ left: segmentPositions[i] * pxPerSec, width }}
-                  title={`${seg.sourceId} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
-                  onPointerDown={(e) => {
-                    if (e.target === e.currentTarget) startScrub(e);
-                  }}
+                  title={`Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
+                  onPointerDown={(e) => segmentPointerDown(e, seg)}
                 >
                   {waveforms?.[seg.sourceId] && (
                     <WaveCanvas
@@ -445,157 +1036,33 @@ export const Timeline: React.FC<TimelineProps> = ({
                       sourceStart={seg.sourceStart}
                       sourceEnd={seg.sourceEnd}
                       width={width}
-                      height={ROW.video - 22}
+                      height={ROW.clipAudio - 10}
                     />
                   )}
-                  {width > 46 && (
-                    <span className="clip-label">
-                      {multiClip ? `${seg.sourceId} · ` : ""}
-                      {(seg.sourceEnd - seg.sourceStart).toFixed(1)}s
-                    </span>
-                  )}
                   <div className="handle handle-l" onPointerDown={(e) => startEdgeDrag(e, i, "start")} />
-                  {multiClip && (
-                    <span className="clip-move" onPointerDown={(e) => e.stopPropagation()}>
-                      <button title="Mover para a esquerda" onClick={() => moveSegment(i, -1)}>
-                        <Icon name="chevronLeft" size={12} />
-                      </button>
-                      <button title="Mover para a direita" onClick={() => moveSegment(i, 1)}>
-                        <Icon name="chevronRight" size={12} />
-                      </button>
-                    </span>
-                  )}
                   <div className="handle handle-r" onPointerDown={(e) => startEdgeDrag(e, i, "end")} />
                 </div>
               );
             })}
-            {pendingCuts.map((cut) => {
-              const outStart = sourceToOutput(segments, cut.sourceId, cut.sourceStart);
-              if (outStart === null) return null;
-              return (
-                <div
-                  key={cut.id}
-                  className={`cut-sug reason-${cut.reason}`}
-                  style={{
-                    left: outStart * pxPerSec,
-                    width: Math.max((cut.sourceEnd - cut.sourceStart) * pxPerSec, 40),
-                  }}
-                  title={`${CUT_REASON_LABEL[cut.reason]} · confiança ${cut.confidence}${cut.note ? ` · ${cut.note}` : ""}`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                >
-                  <span className="cut-sug-actions">
-                    <button className="ok" title="Aceitar corte" onClick={() => reviewSuggestion(cut, true)}>
-                      <Icon name="check" size={11} />
-                    </button>
-                    <button className="no" title="Rejeitar" onClick={() => reviewSuggestion(cut, false)}>
-                      <Icon name="x" size={11} />
-                    </button>
-                  </span>
-                </div>
-              );
-            })}
           </div>
 
-          {/* legenda */}
-          {head("trk-caption", "Legenda", spoken)}
-          <div className="tl-lane alt" onPointerDown={laneSeek}>
-            {spoken === 0 && <span className="lane-empty">Transcreva para gerar a legenda</span>}
-            {recipe.captions.blocks.map((block) => {
-              const start = blockOutputStart(segments, block.sourceId, block.words[0].start);
-              if (start === null) return null;
-              const endRaw = blockOutputStart(
-                segments,
-                block.sourceId,
-                block.words[block.words.length - 1].end - 0.01
-              );
-              const end = endRaw ?? start + 0.3;
-              const text = block.words.map((w) => w.text).join(" ");
-              return (
-                <div
-                  key={block.id}
-                  className={`blk cap-blk ${selectedCaption === block.id ? "selected" : ""} ${block.sourceId === null ? "narration" : ""}`}
-                  style={{ left: start * pxPerSec, width: Math.max((end - start) * pxPerSec, 10) }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => onSelectCaption(block.id === selectedCaption ? null : block.id)}
-                  title={text}
-                >
-                  {text}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* motions */}
-          {head("trk-motion", "Motions", recipe.motions.filter((m) => m.status !== "rejected").length)}
-          <div className="tl-lane" onPointerDown={laneSeek}>
-            {placedMotions.length === 0 && <span className="lane-empty">Sem motions</span>}
-            {placedMotions.map(({ motion: m, outputStart }) => (
-              <div
-                key={m.id}
-                className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""}`}
-                style={{
-                  left: outputStart * pxPerSec,
-                  width: Math.max(m.durationSeconds * pxPerSec, 12),
-                }}
-                title={`${MOTION_LABEL[m.kind]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => onSelectMotion(m.id === selectedMotion ? null : m.id)}
-              >
-                {motionSummary(m) || MOTION_LABEL[m.kind]}
-              </div>
-            ))}
-          </div>
-
-          {/* overlays */}
-          {head("trk-overlay", "Overlays", recipe.overlays.length)}
-          <div className="tl-lane alt" onPointerDown={laneSeek}>
-            {recipe.overlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
-            {recipe.overlays.map((o) => {
-              const end = o.end ?? duration;
-              return (
-                <div
-                  key={o.id}
-                  className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""}`}
-                  style={{ left: o.start * pxPerSec, width: Math.max((end - o.start) * pxPerSec, 16) }}
-                  onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
-                  title={o.kind === "title" ? o.text : (o.file ?? "")}
-                >
-                  <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
-                  {o.text || o.file?.split("/").pop()}
-                  <div className="handle handle-r" onPointerDown={(e) => startOverlayDrag(e, o.id, "end")} />
-                </div>
-              );
-            })}
-          </div>
-
-          {/* áudio */}
+          {/* música e efeitos: clipes soltos no tempo do vídeo final */}
           {head(
             "trk-audio",
-            "Áudio",
-            recipe.sfx.length > 0 ? `${recipe.sfx.length} sfx` : ""
+            "Música",
+            recipe.audio.narration ? "+ narração" : musicClips.length || ""
           )}
           <div className="tl-lane" onPointerDown={laneSeek}>
-            {recipe.audio.music ? (
-              <div className="music-bar" style={{ left: 0, width: duration * pxPerSec }}>
-                <Icon name="music" size={12} />
-                {recipe.audio.music.file.split("/").pop()} · {Math.round(recipe.audio.music.volume * 100)}%
-                {recipe.audio.narration ? " · + narração" : ""}
-                {recipe.audio.useEnhanced ? " · áudio tratado" : ""}
-              </div>
-            ) : (
-              <span className="lane-empty">
-                {recipe.audio.narration ? "Narração" : "Sem música"}
-                {recipe.audio.useEnhanced ? " · áudio tratado" : ""}
-              </span>
+            {musicClips.length === 0 && (
+              <span className="lane-empty">Arraste uma música da Biblioteca para cá</span>
             )}
-            {recipe.sfx.map((s) => (
-              <span
-                key={s.id}
-                className="sfx-marker"
-                style={{ left: s.at * pxPerSec }}
-                title={`${s.file.split("/").pop()} @ ${s.at.toFixed(2)}s`}
-              />
-            ))}
+            {musicClips.map(renderAudioClip)}
+          </div>
+
+          {head("trk-sfx", "Efeitos", sfxClips.length || "")}
+          <div className="tl-lane alt" onPointerDown={laneSeek}>
+            {sfxClips.length === 0 && <span className="lane-empty">Arraste efeitos sonoros para cá</span>}
+            {sfxClips.map(renderAudioClip)}
           </div>
 
           {/* playhead: camada sobre todas as trilhas, abaixo dos cabeçalhos */}
@@ -604,6 +1071,9 @@ export const Timeline: React.FC<TimelineProps> = ({
               <span className="tl-playhead-head" />
             </div>
             {dropAt !== null && <div className="tl-drop" style={{ left: dropAt * pxPerSec }} />}
+            {tool === "blade" && bladeAt !== null && (
+              <div className="tl-blade" style={{ left: bladeAt * pxPerSec }} />
+            )}
           </div>
         </div>
       </div>

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import express from "express";
 import multer from "multer";
-import { parseRecipe } from "@vision/recipe";
+import { CUT_PACES, parseRecipe } from "@vision/recipe";
 import { directProject } from "./director";
 import { mediaDir, musicDir, projectDir, projectsDir, recipePath, toRecipePath } from "./paths";
 import { createProject, loadRecipe, saveRecipe, slugify } from "./project";
@@ -15,7 +15,9 @@ import { defaultSilenceOptions, suggestCuts } from "./pipeline/silence";
 import { suggestMotions } from "./pipeline/motions";
 import { suggestSmartCuts } from "./pipeline/smartCuts";
 import { transcribeProject } from "./pipeline/transcribe";
-import { getWaveforms } from "./pipeline/waveform";
+import { getFilmstrips } from "./pipeline/filmstrip";
+import { getThumbnail } from "./pipeline/thumbnail";
+import { getFileWaveform, getWaveforms } from "./pipeline/waveform";
 import { enqueueRender, getJob } from "./render/queue";
 import { loadCatalog } from "./library/catalog";
 import { applyTemplate, TEMPLATES } from "./templates";
@@ -31,6 +33,15 @@ const upload = multer({
   dest: path.join(os.tmpdir(), "vision-uploads"),
   limits: { fileSize: 2 * 1024 * 1024 * 1024 },
 });
+
+/**
+ * O multer entrega o nome do arquivo decodificado como latin1: "vídeo.mp4"
+ * chega "vÃ­deo.mp4". Reinterpreta como UTF-8 quando isso dá um texto válido.
+ */
+function uploadName(raw: string): string {
+  const utf8 = Buffer.from(raw, "latin1").toString("utf8");
+  return utf8.includes("\uFFFD") ? raw : utf8;
+}
 
 function listAudioFiles(dir: string, prefix: string) {
   const exts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"];
@@ -55,6 +66,8 @@ app.get("/api/projects", (_req, res) => {
       return {
         id,
         createdAt: r.createdAt,
+        // toda edição regrava o recipe.json
+        updatedAt: fs.statSync(recipePath(id)).mtime.toISOString(),
         clipCount: r.sources.length,
         durationInSeconds: r.sources.reduce((a, s) => a + s.durationInSeconds, 0),
       };
@@ -76,13 +89,15 @@ app.post("/api/projects", upload.array("videos", 20), async (req, res, next) => 
       fs.renameSync(f.path, withExt);
       renamed.push(withExt);
     }
+    const names = files.map((f) => uploadName(f.originalname));
     const requestedId =
       (req.body.id as string | undefined) ||
-      slugify(path.basename(files[0].originalname, path.extname(files[0].originalname)));
+      slugify(path.basename(names[0], path.extname(names[0])));
     const recipe = await createProject(
       renamed,
       requestedId,
-      (req.body.briefing as string | undefined) ?? ""
+      (req.body.briefing as string | undefined) ?? "",
+      names
     );
     res.json(recipe);
   } catch (err) {
@@ -129,8 +144,10 @@ app.post("/api/projects/:id/silence", async (req, res, next) => {
 // Pausas, vícios e repetições (determinístico) + retomadas (IA, opcional)
 app.post("/api/projects/:id/smart-cuts", async (req, res, next) => {
   try {
+    const pace = CUT_PACES.find((p) => p === req.body?.pace) ?? "normal";
     const updated = await suggestSmartCuts(loadRecipe(req.params.id), {
       ai: req.body?.ai !== false,
+      pace,
     });
     saveRecipe(updated);
     res.json(updated);
@@ -179,6 +196,43 @@ app.post("/api/projects/:id/narration", async (req, res, next) => {
 app.get("/api/projects/:id/waveform", async (req, res, next) => {
   try {
     res.json(await getWaveforms(loadRecipe(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/waveform", async (req, res, next) => {
+  const file = String(req.query.file ?? "");
+  if (!file) {
+    res.status(400).json({ error: "parâmetro file é obrigatório" });
+    return;
+  }
+  try {
+    res.set("Cache-Control", "public, max-age=3600");
+    res.json(await getFileWaveform(file));
+  } catch (err) {
+    const status = (err as { status?: number }).status;
+    if (status) {
+      res.status(status).json({ error: (err as Error).message });
+      return;
+    }
+    next(err);
+  }
+});
+
+app.get("/api/projects/:id/filmstrip", async (req, res, next) => {
+  try {
+    res.json(await getFilmstrips(loadRecipe(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/projects/:id/thumbnail", async (req, res, next) => {
+  try {
+    const file = await getThumbnail(loadRecipe(req.params.id));
+    res.set("Cache-Control", "public, max-age=3600");
+    res.sendFile(file);
   } catch (err) {
     next(err);
   }

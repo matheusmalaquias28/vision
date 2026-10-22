@@ -107,5 +107,6 @@ export function overlayFromAsset(
     scale,
     assetId: asset.id,
     mediaDurationSeconds: kind === "video" ? media : null,
+    placement: null,
   };
 }

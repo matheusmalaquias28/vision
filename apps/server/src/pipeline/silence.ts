@@ -1,4 +1,10 @@
-import { mergeSuggestions, type CutCandidate, type Recipe } from "@vision/recipe";
+import {
+  mergeSuggestions,
+  refineWordsWithSilences,
+  type CutCandidate,
+  type Recipe,
+  type SilenceRange,
+} from "@vision/recipe";
 import { fromRecipePath } from "../paths";
 import { ffmpegPath, run } from "./ffbin";
 
@@ -16,11 +22,6 @@ export const defaultSilenceOptions: SilenceOptions = {
   minSilenceSeconds: 0.8,
   paddingSeconds: 0.15,
 };
-
-interface SilenceRange {
-  start: number;
-  end: number;
-}
 
 export async function detectSilences(
   videoAbsPath: string,
@@ -84,4 +85,33 @@ export async function suggestCuts(
     }
   }
   return mergeSuggestions(recipe, candidates, ["silence"]);
+}
+
+/**
+ * Detecção fina para corrigir timestamps de palavras: pega pausas a partir
+ * de 0.2s (as sugestões de corte continuam exigindo pausas maiores).
+ */
+const wordTimingSilence: SilenceOptions = { noiseDb: -35, minSilenceSeconds: 0.2, paddingSeconds: 0 };
+
+/**
+ * Corrige as palavras do Whisper com os silêncios reais do áudio de cada
+ * clipe (ver refineWordsWithSilences). Sem silêncio detectável (música de
+ * fundo, ruído alto) as palavras ficam como estão.
+ */
+export async function refineTranscriptTimings(recipe: Recipe): Promise<Recipe> {
+  const bySource = new Map<string, SilenceRange[]>();
+  for (const source of recipe.sources) {
+    if (!recipe.captions.blocks.some((b) => b.sourceId === source.id)) continue;
+    bySource.set(source.id, await detectSilences(fromRecipePath(source.file), wordTimingSilence));
+  }
+  let changed = false;
+  const blocks = recipe.captions.blocks.map((b) => {
+    const silences = b.sourceId ? bySource.get(b.sourceId) : undefined;
+    if (!silences || silences.length === 0) return b;
+    const words = refineWordsWithSilences(b.words, silences);
+    if (words.every((w, i) => w === b.words[i])) return b;
+    changed = true;
+    return { ...b, words };
+  });
+  return changed ? { ...recipe, captions: { ...recipe.captions, blocks } } : recipe;
 }

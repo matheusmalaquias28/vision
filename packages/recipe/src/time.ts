@@ -225,3 +225,38 @@ export function insertClipSegment(
   if (!inserted) result.push(clip); // at no fim (ou timeline vazia) → anexa
   return result;
 }
+
+/**
+ * Ferramenta de corte: divide o segmento sob `atOutputSeconds` em dois, sem
+ * remover nada (o vídeo final não muda; cada metade passa a ser editável).
+ * Retorna os segmentos inalterados se o ponto cai numa borda.
+ */
+export function splitSegmentAt(segments: Segment[], atOutputSeconds: number): Segment[] {
+  const taken = new Set(segments.map((s) => s.id));
+  let acc = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    const dur = segmentDuration(s);
+    const local = atOutputSeconds - acc;
+    if (local > MIN_SEGMENT_SECONDS && local < dur - MIN_SEGMENT_SECONDS) {
+      const split = Math.round((s.sourceStart + local) * 1000) / 1000;
+      return [
+        ...segments.slice(0, i),
+        { ...s, sourceEnd: split },
+        { ...s, id: freshSegmentId(s.id, taken), sourceStart: split },
+        ...segments.slice(i + 1),
+      ];
+    }
+    acc += dur;
+  }
+  return segments;
+}
+
+/** Duplica o segmento: a cópia entra logo depois do original */
+export function duplicateSegment(segments: Segment[], segmentId: string): Segment[] {
+  const i = segments.findIndex((s) => s.id === segmentId);
+  if (i < 0) return segments;
+  const taken = new Set(segments.map((s) => s.id));
+  const copy = { ...segments[i], id: freshSegmentId(segments[i].id, taken) };
+  return [...segments.slice(0, i + 1), copy, ...segments.slice(i + 1)];
+}
