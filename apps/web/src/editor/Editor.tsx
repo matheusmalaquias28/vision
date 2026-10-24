@@ -19,12 +19,14 @@ import {
   detectSilence,
   getRecipe,
   getFilmstrip,
+  getProjectDemand,
   getWaveform,
   listTemplates,
   putRecipe,
   suggestMotionsApi,
   suggestSmartCutsApi,
   transcribe,
+  type ProjectDemand,
   type ProjectSummary,
   type ProjectFilmstrips,
   type ProjectWaveforms,
@@ -45,6 +47,7 @@ import { Timeline, type TimelineTool } from "./Timeline";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { Logo } from "../ui/Logo";
 import { DragLayer } from "./DragLayer";
+import { NotificationBell } from "../home/NotificationBell";
 
 /** Passos de desfazer guardados */
 const HISTORY_LIMIT = 100;
@@ -93,6 +96,7 @@ export const Editor: React.FC<EditorProps> = ({
   onHome,
 }) => {
   const [recipe, setRecipe] = useState<Recipe | null>(null);
+  const [demand, setDemand] = useState<ProjectDemand | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +171,9 @@ export const Editor: React.FC<EditorProps> = ({
     getRecipe(projectId)
       .then(setRecipe)
       .catch((e) => setError(e.message));
+    getProjectDemand(projectId)
+      .then(setDemand)
+      .catch(() => setDemand(null));
     getWaveform(projectId)
       .then(setWaveforms)
       .catch(() => setWaveforms(null));
@@ -572,6 +579,15 @@ export const Editor: React.FC<EditorProps> = ({
             </div>
           )}
         </div>
+        {demand && (
+          <span
+            className="demand-chip"
+            title={`${demand.demand.clientName} · ${demand.demand.title} · vídeo ${demand.video.index} de ${demand.demand.videoCount}`}
+          >
+            <strong>{demand.demand.clientName}</strong>
+            {demand.demand.title} · vídeo {demand.video.index}/{demand.demand.videoCount}
+          </span>
+        )}
         {recipe.briefing && (
           <div className="popover-anchor" ref={briefingRef}>
             <button
@@ -699,6 +715,12 @@ export const Editor: React.FC<EditorProps> = ({
         >
           <Icon name="redo" size={16} />
         </button>
+        <NotificationBell
+          onOpenDemand={(id) => {
+            window.location.hash = `#/demandas/${encodeURIComponent(id)}`;
+            onHome();
+          }}
+        />
         <button className="primary" onClick={() => setTab("exportar")}>
           <Icon name="export" size={15} />
           Exportar
@@ -794,7 +816,13 @@ export const Editor: React.FC<EditorProps> = ({
               </>
             )}
             {tab === "exportar" && (
-              <RenderPanel recipe={recipe} dirty={dirty} onSaved={() => setDirty(false)} />
+              <RenderPanel
+                recipe={recipe}
+                dirty={dirty}
+                onSaved={() => setDirty(false)}
+                demand={demand}
+                onDelivered={() => getProjectDemand(projectId).then(setDemand).catch(() => {})}
+              />
             )}
           </div>
         </section>

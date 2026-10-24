@@ -1,9 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
+import type { Recipe } from "@vision/recipe";
 import {
+  disconnectDrive,
   getDirectorJob,
+  getIntegrations,
+  listDemands,
   listProjects,
+  setDemandStatus,
   startDirect,
+  uploadDemandVideo,
   uploadProject,
+  type Demand,
+  type Integrations,
   type ProjectSummary,
 } from "./api";
 import { Editor } from "./editor/Editor";
@@ -11,6 +19,10 @@ import { Icon } from "./editor/Icon";
 import { MotionLabPage } from "./lab/MotionLabPage";
 import { Logo } from "./ui/Logo";
 import { appendClips, ClipQueue, type QueuedClip } from "./home/ClipQueue";
+import { ClientsPage } from "./home/ClientsPage";
+import { DemandDetail } from "./home/DemandDetail";
+import { DemandsBoard } from "./home/DemandsBoard";
+import { NotificationBell } from "./home/NotificationBell";
 
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -68,6 +80,26 @@ const ProjectCard: React.FC<{ project: ProjectSummary; onOpen: () => void }> = (
   );
 };
 
+type Route =
+  | { view: "demandas"; id: string | null }
+  | { view: "clientes"; id: string | null }
+  | { view: "projetos" }
+  | { view: "lab" };
+
+/** #/demandas[/id] · #/clientes[/id] · #/projetos · #lab */
+function parseHash(hash: string): Route {
+  if (hash === "#lab") return { view: "lab" };
+  const [view, id] = hash.replace(/^#\/?/, "").split("?")[0].split("/");
+  const decoded = id ? decodeURIComponent(id) : null;
+  if (view === "clientes") return { view: "clientes", id: decoded };
+  if (view === "projetos") return { view: "projetos" };
+  return { view: "demandas", id: decoded };
+}
+
+const go = (hash: string) => {
+  window.location.hash = hash;
+};
+
 export const App: React.FC = () => {
   // null = ainda carregando
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
@@ -77,39 +109,66 @@ export const App: React.FC = () => {
   const [briefing, setBriefing] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // muda a cada demanda concluída para forçar o editor a recarregar
   const [reloadKey, setReloadKey] = useState(0);
+  const [board, setBoard] = useState<{ statuses: string[]; demands: Demand[] } | null>(null);
+  const [integrations, setIntegrations] = useState<Integrations | null>(null);
 
   const refresh = () => {
     listProjects().then(setProjects).catch((e) => setError(e.message));
   };
-  useEffect(refresh, []);
+  const refreshBoard = () => {
+    listDemands().then(setBoard).catch((e) => setError(e.message));
+  };
+  const refreshIntegrations = () => {
+    getIntegrations().then(setIntegrations).catch(() => {});
+  };
+  useEffect(() => {
+    refresh();
+    refreshBoard();
+    refreshIntegrations();
+  }, []);
 
-  // #lab abre o laboratório de motions
   const [hash, setHash] = useState(window.location.hash);
   useEffect(() => {
     const onHash = () => setHash(window.location.hash);
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+  const route = parseHash(hash);
 
-  const createDemand = async () => {
-    if (clips.length === 0) return;
+  // volta do login do Google: #/demandas?drive=ok|erro&msg=…
+  useEffect(() => {
+    const q = new URLSearchParams(hash.split("?")[1] ?? "");
+    if (!q.has("drive")) return;
+    if (q.get("drive") === "ok") setNotice("Google Drive conectado.");
+    else setError(`Não foi possível conectar o Google Drive: ${q.get("msg") ?? ""}`);
+    refreshIntegrations();
+    window.history.replaceState(null, "", "#/demandas");
+    setHash("#/demandas");
+  }, [hash]);
+
+  // o quadro acompanha os webhooks do War enquanto está aberto
+  useEffect(() => {
+    if (route.view !== "demandas" || selected) return;
+    const t = window.setInterval(refreshBoard, 20_000);
+    return () => window.clearInterval(t);
+  }, [route.view, selected]);
+
+  /** Sobe os brutos, abre o editor e, com briefing, roda o diretor IA em segundo plano */
+  const launch = async (create: () => Promise<Recipe>, brief: string) => {
     setError(null);
     setStatus("Enviando clipes");
     try {
-      const recipe = await uploadProject(
-        clips.map((c) => c.file),
-        briefing.trim()
-      );
+      const recipe = await create();
       refresh();
+      refreshBoard();
       setSelected(recipe.projectId);
-      setClips([]);
-      if (fileRef.current) fileRef.current.value = "";
-      if (briefing.trim()) {
-        const job = await startDirect(recipe.projectId, briefing.trim());
+      if (brief) {
+        const job = await startDirect(recipe.projectId, brief);
         setStatus("Diretor IA: iniciando");
         const poll = window.setInterval(async () => {
           try {
@@ -129,15 +188,39 @@ export const App: React.FC = () => {
       } else {
         setStatus(null);
       }
-      setBriefing("");
+      return true;
     } catch (e) {
       setStatus(null);
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     }
   };
 
-  if (hash === "#lab") {
-    return <MotionLabPage onBack={() => (window.location.hash = "")} />;
+  const createDemand = async () => {
+    if (clips.length === 0) return;
+    const brief = briefing.trim();
+    const ok = await launch(() => uploadProject(clips.map((c) => c.file), brief), brief);
+    if (ok) {
+      setClips([]);
+      setBriefing("");
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const moveDemand = async (id: string, next: string) => {
+    // otimista: o cartão já muda de coluna; o servidor devolve ao War
+    setBoard((b) => b && { ...b, demands: b.demands.map((d) => (d.id === id ? { ...d, status: next } : d)) });
+    try {
+      const d = await setDemandStatus(id, next);
+      if (d.syncState === "error") setError(`O War não confirmou a mudança: ${d.syncError}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    refreshBoard();
+  };
+
+  if (route.view === "lab") {
+    return <MotionLabPage onBack={() => go("#/demandas")} />;
   }
 
   if (selected) {
@@ -153,6 +236,7 @@ export const App: React.FC = () => {
         }}
         onHome={() => {
           refresh();
+          refreshBoard();
           setSelected(null);
         }}
       />
@@ -165,29 +249,131 @@ export const App: React.FC = () => {
     setClips((queue) => appendClips(queue, files));
   };
 
+  const drive = integrations?.drive;
+
   return (
     <div className="home">
       <header className="topbar">
         <span className="brand">
           <Logo />
         </span>
+        <span className="topbar-sep" />
+        <nav className="home-nav">
+          <a className={route.view === "demandas" ? "on" : ""} href="#/demandas">
+            <Icon name="board" size={14} />
+            Demandas
+          </a>
+          <a className={route.view === "clientes" ? "on" : ""} href="#/clientes">
+            <Icon name="user" size={14} />
+            Clientes
+          </a>
+          <a className={route.view === "projetos" ? "on" : ""} href="#/projetos">
+            <Icon name="film" size={14} />
+            Projetos
+          </a>
+        </nav>
+        <span className="home-nav-spacer" />
+        {integrations?.storage === "local" && (
+          <span
+            className="env-badge"
+            title="Sem VISION_DATABASE_URL: demandas em data/demands-db.json"
+          >
+            dados locais
+          </span>
+        )}
+        {drive &&
+          (drive.connected ? (
+            <button
+              className="sm ghost drive-status on"
+              title="Google Drive conectado · clique para desconectar"
+              onClick={async () => {
+                if (!window.confirm(`Desconectar o Google Drive (${drive.email ?? "conta"})?`)) return;
+                await disconnectDrive();
+                refreshIntegrations();
+              }}
+            >
+              <Icon name="cloud" size={14} />
+              {drive.email ?? "Drive conectado"}
+            </button>
+          ) : drive.configured ? (
+            <a className="drive-status" href="/api/google/connect">
+              <Icon name="cloud" size={14} />
+              Conectar Google Drive
+            </a>
+          ) : (
+            <span className="drive-status off" title="Defina GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET no .env">
+              <Icon name="cloud" size={14} />
+              Drive não configurado
+            </span>
+          ))}
+        <NotificationBell onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)} />
         <a className="lab-link" href="#lab">
           Laboratório de motions
         </a>
       </header>
-      {error && (
-        <div className="banner">
-          {error}
-          <button className="sm ghost" onClick={() => setError(null)}>
+      {(error || notice) && (
+        <div className={`banner ${error ? "" : "ok"}`}>
+          {error ?? notice}
+          <button
+            className="sm ghost"
+            onClick={() => {
+              setError(null);
+              setNotice(null);
+            }}
+          >
             Fechar
           </button>
         </div>
       )}
+
+      {route.view === "demandas" && (
+        <>
+          {board ? (
+            <DemandsBoard
+              statuses={board.statuses}
+              demands={board.demands}
+              onOpen={(id) => go(`#/demandas/${encodeURIComponent(id)}`)}
+              onMove={moveDemand}
+            />
+          ) : (
+            <div className="page-pad">Carregando…</div>
+          )}
+          {route.id && (
+            <DemandDetail
+              demandId={route.id}
+              statuses={board?.statuses ?? []}
+              busy={status}
+              onClose={() => go("#/demandas")}
+              onChanged={refreshBoard}
+              onOpenClient={(id) => go(`#/clientes/${encodeURIComponent(id)}`)}
+              onOpenProject={(id) => setSelected(id)}
+              onStartVideo={(demand, index, files) =>
+                launch(
+                  () => uploadDemandVideo(demand.id, index, files),
+                  (demand.briefing || demand.briefingText || "").trim()
+                )
+              }
+            />
+          )}
+        </>
+      )}
+
+      {route.view === "clientes" && (
+        <div className="home-scroll">
+          <ClientsPage
+            clientId={route.id}
+            onOpenClient={(id) => go(id ? `#/clientes/${encodeURIComponent(id)}` : "#/clientes")}
+            onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)}
+          />
+        </div>
+      )}
+
+      {route.view === "projetos" && (
       <div className="home-body">
         <section>
-          <h2>Nova demanda</h2>
+          <h2>Projeto avulso</h2>
           <p className="lede">
-            Suba os clipes brutos. Com briefing, o diretor IA já monta a primeira versão.
+            Fora do fluxo do War. Suba os clipes brutos; com briefing, o diretor IA já monta a primeira versão.
           </p>
           <div className="demand-form">
             <label
@@ -277,6 +463,7 @@ export const App: React.FC = () => {
           )}
         </section>
       </div>
+      )}
     </div>
   );
 };

@@ -56,10 +56,29 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
 - NUNCA gravar JSON com BOM (PowerShell `Set-Content -Encoding utf8` gera BOM e
   quebra o bundler do Remotion) — usar o Write tool ou Node.
 
+## Demandas do War (`apps/server/src/demands/`)
+
+- Entrada única `POST /api/webhooks/war` (header `x-webhook-secret`); separa
+  por `event`: demanda completa (sem event), `demanda.status`, `demanda.nota`.
+  Só `tipo === "video"`. Saída para o War usa `x-api-key` (mesmo
+  `DEMANDAS_WEBHOOK_SECRET`). Entrada NUNCA dispara saída (evita loop).
+- Cliente = `clientId` do War (estável); sem ele, `nome:<slug>`, migrado quando o
+  id aparece. Demanda = `id` do War. Nota = `criadoEm` (identidade nos dois lados).
+- Uma `DemandVideo` por unidade de `quantidadeVideos`, ligada a um projeto;
+  entrega no Drive como "Título NN.mp4" (re-render substitui o arquivo).
+- BANCO COMPARTILHADO com outro sistema: o Vision só existe no schema `vision`
+  (`db/vision.sql`, aplicado à mão; nunca `supabase db push`) e conecta como
+  `vision_app` (`VISION_DATABASE_URL`), que só lê/grava dados nesse schema.
+  Nunca usar service role nem tocar em `public`/outros schemas; SQL sempre
+  qualificado `vision.<tabela>`. Mudança de tabela = novo bloco idempotente em
+  `db/vision.sql`. Sem a variável, `store.ts` usa `data/demands-db.json`
+  (fora de `media/`, que é público).
+
 ## Comandos
 
 - `npm test` — testes do schema/tempo (vitest)
 - `npm run cli -- ingest|transcribe|silence|smart-cuts|cuts|motions|render` — pipeline via CLI
+- `npm run cli -- db-check` — confere a conexão `VISION_DATABASE_URL` (só leitura)
 - Type-check: `npx tsc -p <pacote>/tsconfig.json`
 
 ## Estado / roadmap

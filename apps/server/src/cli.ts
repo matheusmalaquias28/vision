@@ -15,6 +15,7 @@ import {
   type SuggestedCut,
 } from "@vision/recipe";
 import { acceptCuts, pendingCutIds, rejectCuts } from "./cuts";
+import { checkDatabase } from "./demands/dbCheck";
 import { loadCatalog } from "./library/catalog";
 import { importPack } from "./library/importPack";
 import { tagAssets } from "./library/tagAssets";
@@ -269,6 +270,17 @@ program
       }
     });
     console.log(`Render concluído: ${outputPath}`);
+  });
+
+program
+  .command("db-check")
+  .description("Confere a conexão com o banco (VISION_DATABASE_URL) sem gravar nada")
+  .action(async () => {
+    const url = process.env.VISION_DATABASE_URL;
+    if (!url) throw new Error("VISION_DATABASE_URL não está no .env");
+    const ok = await checkDatabase(url);
+    console.log(ok ? "\nTudo certo." : "\nAlgo não bate: veja as linhas ERRO.");
+    if (!ok) process.exitCode = 1;
   });
 
 program.parseAsync(process.argv).catch((err) => {

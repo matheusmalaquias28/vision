@@ -46,9 +46,62 @@ export type IconName =
   | "save"
   | "pointer"
   | "copy"
-  | "search";
+  | "search"
+  | "external"
+  | "user"
+  | "calendar"
+  | "cloud"
+  | "board"
+  | "refresh"
+  | "bell"
+  | "chat";
 
 const PATHS: Record<IconName, React.ReactNode> = {
+  bell: (
+    <>
+      <path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 2H5z" />
+      <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+    </>
+  ),
+  chat: <path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z" />,
+  external: (
+    <>
+      <path d="M14 4.5h5.5V10" />
+      <path d="M19.5 4.5L11 13" />
+      <path d="M17.5 13.5v4.5a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5V8A1.5 1.5 0 0 1 6 6.5h4.5" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8.5" r="3.5" />
+      <path d="M5 19.5c.8-3.3 3.6-5 7-5s6.2 1.7 7 5" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="4" y="5.5" width="16" height="14" rx="2" />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+    </>
+  ),
+  cloud: (
+    <>
+      <path d="M7.5 18.5a4 4 0 0 1-.6-7.95 5.5 5.5 0 0 1 10.6 1.45 3.25 3.25 0 0 1-.5 6.5z" />
+      <path d="M12 16v-5M9.75 13.25L12 11l2.25 2.25" />
+    </>
+  ),
+  board: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9.25 4.5v15M15 4.5v9" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9" />
+      <path d="M4.5 12a7.5 7.5 0 0 1 13.2-4.9" />
+      <path d="M18 3.5v4h-4M6 20.5v-4h4" />
+    </>
+  ),
   play: <path d="M7.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L8.7 4.5a.8.8 0 0 0-1.2.7z" fill="currentColor" stroke="none" />,
   pause: (
     <>

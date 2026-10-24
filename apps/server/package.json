@@ -14,11 +14,13 @@
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "multer": "^2.3.0",
-    "openai": "^4.80.0"
+    "openai": "^4.80.0",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
-    "@types/node": "^26.4.0"
+    "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1"
   }
 }

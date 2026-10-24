@@ -1,13 +1,13 @@
 import "./env";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import express from "express";
-import multer from "multer";
 import { CUT_PACES, parseRecipe } from "@vision/recipe";
 import { directProject } from "./director";
 import { mediaDir, musicDir, projectDir, projectsDir, recipePath, toRecipePath } from "./paths";
-import { createProject, loadRecipe, saveRecipe, slugify } from "./project";
+import { loadRecipe, saveRecipe, slugify } from "./project";
+import { createProjectFromUploads, upload } from "./uploads";
+import { demandsRouter } from "./demands/routes";
 import { enhanceAudio } from "./pipeline/enhance";
 import { generateNarration } from "./pipeline/narration";
 import { probeVideo } from "./pipeline/probe";
@@ -26,22 +26,9 @@ const PORT = Number(process.env.PORT ?? 4000);
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
+app.use(demandsRouter);
 // Serve media/ na raiz (mesma convenção do staticFile() do Remotion)
 app.use(express.static(mediaDir));
-
-const upload = multer({
-  dest: path.join(os.tmpdir(), "vision-uploads"),
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
-});
-
-/**
- * O multer entrega o nome do arquivo decodificado como latin1: "vídeo.mp4"
- * chega "vÃ­deo.mp4". Reinterpreta como UTF-8 quando isso dá um texto válido.
- */
-function uploadName(raw: string): string {
-  const utf8 = Buffer.from(raw, "latin1").toString("utf8");
-  return utf8.includes("\uFFFD") ? raw : utf8;
-}
 
 function listAudioFiles(dir: string, prefix: string) {
   const exts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"];
@@ -76,34 +63,15 @@ app.get("/api/projects", (_req, res) => {
 });
 
 app.post("/api/projects", upload.array("videos", 20), async (req, res, next) => {
-  const files = (req.files as Express.Multer.File[]) ?? [];
-  const renamed: string[] = [];
   try {
-    if (files.length === 0) {
-      res.status(400).json({ error: "envie ao menos um arquivo no campo 'videos'" });
-      return;
-    }
-    for (const f of files) {
-      const ext = path.extname(f.originalname).toLowerCase() || ".mp4";
-      const withExt = `${f.path}${ext}`;
-      fs.renameSync(f.path, withExt);
-      renamed.push(withExt);
-    }
-    const names = files.map((f) => uploadName(f.originalname));
-    const requestedId =
-      (req.body.id as string | undefined) ||
-      slugify(path.basename(names[0], path.extname(names[0])));
-    const recipe = await createProject(
-      renamed,
-      requestedId,
-      (req.body.briefing as string | undefined) ?? "",
-      names
+    const recipe = await createProjectFromUploads(
+      (req.files as Express.Multer.File[]) ?? [],
+      req.body.id as string | undefined,
+      (req.body.briefing as string | undefined) ?? ""
     );
     res.json(recipe);
   } catch (err) {
     next(err);
-  } finally {
-    for (const p of renamed) fs.rmSync(p, { force: true });
   }
 });
 
@@ -406,6 +374,11 @@ app.use(
   }
 );
 
-app.listen(PORT, () => {
-  console.log(`VISION server em http://localhost:${PORT}`);
-});
+// Na Vercel a função importa o app; localmente (e num VPS) sobe a porta
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`VISION server em http://localhost:${PORT}`);
+  });
+}
+
+export default app;

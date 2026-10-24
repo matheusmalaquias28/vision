@@ -6,3 +6,4 @@ dist/
 .env.local
 media/library/
 media/.cache/
+data/

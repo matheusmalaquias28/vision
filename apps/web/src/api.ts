@@ -202,3 +202,173 @@ export const getLibrary = () => fetch("/api/library").then((r) => json<Catalog>(
 
 /** URL servida de um arquivo de media/ (o servidor expõe media/ na raiz) */
 export const mediaUrl = (file: string) => "/" + file.replace(/^media\//, "");
+
+// ─── Demandas (War) ──────────────────────────────────────────────────
+
+export interface DemandNote {
+  texto: string;
+  autor: string;
+  criadoEm: string;
+  imagens?: string[];
+  apagadoEm?: string;
+  origem?: "war" | "vision";
+  syncError?: string | null;
+}
+
+export interface Notification {
+  id: number;
+  demandId: string;
+  kind: "demand" | "note";
+  title: string;
+  body: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface DemandVideo {
+  demandId: string;
+  index: number;
+  projectId: string | null;
+  driveFileId: string | null;
+  driveFileUrl: string | null;
+  deliveredAt: string | null;
+}
+
+export interface Demand {
+  id: string;
+  clientId: string;
+  clientName: string;
+  title: string;
+  priority: string | null;
+  videoCount: number;
+  driveEditados: string | null;
+  driveMateriais: string | null;
+  briefing: string;
+  briefingText: string | null;
+  instagram: string | null;
+  gestor: string | null;
+  solicitante: string | null;
+  editor: string | null;
+  squad: string | null;
+  categoria: string | null;
+  status: string;
+  dueDate: string | null;
+  notas: DemandNote[];
+  statusPermitidos: string[];
+  warCreatedAt: string | null;
+  statusChangedAt: string | null;
+  syncState: "ok" | "error";
+  syncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  videos: DemandVideo[];
+  started: number;
+  delivered: number;
+}
+
+export interface Client {
+  id: string;
+  warClientId: string | null;
+  name: string;
+  instagram: string | null;
+  drive: string | null;
+  squad: string | null;
+  gestor: string | null;
+}
+
+export interface ClientStats {
+  total: number;
+  month: number;
+  open: number;
+  videos: number;
+}
+
+export interface DemandEvent {
+  id: number;
+  direction: "in" | "out";
+  kind: "created" | "updated" | "status" | "note";
+  status: string | null;
+  previousStatus: string | null;
+  by: string | null;
+  ok: boolean;
+  error: string | null;
+  attempts: number;
+  createdAt: string;
+}
+
+export interface Integrations {
+  storage: "postgres" | "local";
+  webhookConfigured: boolean;
+  drive: { configured: boolean; connected: boolean; email: string | null };
+}
+
+const postJson = (url: string, body?: unknown) =>
+  fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+export const listDemands = () =>
+  fetch("/api/demands").then((r) => json<{ statuses: string[]; demands: Demand[] }>(r));
+
+export const getDemand = (id: string) =>
+  fetch(`/api/demands/${encodeURIComponent(id)}`).then((r) =>
+    json<{ demand: Demand; client: Client | null; events: DemandEvent[] }>(r)
+  );
+
+export const setDemandStatus = (id: string, status: string) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/status`, { status }).then((r) => json<Demand>(r));
+
+export const resyncDemand = (id: string) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/resync`).then((r) => json<Demand>(r));
+
+export const uploadDemandVideo = (id: string, index: number, files: File[]) => {
+  const fd = new FormData();
+  for (const f of files) fd.append("videos", f);
+  return fetch(`/api/demands/${encodeURIComponent(id)}/videos/${index}/project`, {
+    method: "POST",
+    body: fd,
+  }).then((r) => json<Recipe>(r));
+};
+
+export const listClients = () =>
+  fetch("/api/clients").then((r) => json<(Client & { stats: ClientStats })[]>(r));
+
+export const getClient = (id: string) =>
+  fetch(`/api/clients/${encodeURIComponent(id)}`).then((r) =>
+    json<{ client: Client; stats: ClientStats; demands: Demand[] }>(r)
+  );
+
+export interface ProjectDemand {
+  demand: Demand;
+  video: DemandVideo;
+  /** nome do arquivo no Drive: "Título 01.mp4" */
+  deliveryName: string;
+}
+
+export const getProjectDemand = (projectId: string) =>
+  fetch(`/api/projects/${projectId}/demand`).then((r) => json<ProjectDemand | null>(r));
+
+export const deliverProject = (projectId: string) =>
+  postJson(`/api/projects/${projectId}/deliver`).then((r) =>
+    json<{ video: DemandVideo; delivered: number; total: number }>(r)
+  );
+
+export const getIntegrations = () => fetch("/api/integrations").then((r) => json<Integrations>(r));
+
+export const disconnectDrive = () => postJson("/api/google/disconnect").then((r) => json<{ ok: true }>(r));
+
+export const addDemandNote = (id: string, texto: string, autor: string) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/notes`, { texto, autor }).then((r) => json<DemandNote>(r));
+
+export const resendDemandNote = (id: string, criadoEm: string) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/notes/resend`, { criadoEm }).then((r) =>
+    json<DemandNote>(r)
+  );
+
+export const listNotifications = () =>
+  fetch("/api/notifications").then((r) => json<{ unread: number; items: Notification[] }>(r));
+
+export const markNotificationsRead = (demandId?: string) =>
+  postJson("/api/notifications/read", { demandId }).then((r) => json<{ ok: true }>(r));
