@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { MusicWantSchema } from "./music";
+import { ColorGradeSchema } from "./color";
+import { FramingSchema } from "./framing";
+import { TRANSITION_STYLES } from "./transitions";
 import { BLEND_MODES } from "./library";
 
 const seconds = z.number().finite().min(0);
@@ -32,7 +36,7 @@ export const PointSchema = z.object({
 
 export const CaptionStyleSchema = z.object({
   preset: z.enum(["capcut-bold"]).default("capcut-bold"),
-  fontFamily: z.string().min(1).default("Archivo Black"),
+  fontFamily: z.string().min(1).default("Poppins"),
   fontSizePx: z.number().int().positive().default(64),
   /** Peso CSS (100 fino … 900 black); peso que a fonte não tem é simulado pelo navegador */
   fontWeight: z.number().int().min(100).max(900).multipleOf(100).default(900),
@@ -43,10 +47,21 @@ export const CaptionStyleSchema = z.object({
   uppercase: z.boolean().default(true),
   wordsPerLine: z.number().int().min(0).max(8).default(0),
   maxWidthPct: z.number().int().min(40).max(100).default(85),
-  strokeWidthPx: z.number().int().min(0).max(40).default(12),
+  strokeWidthPx: z.number().int().min(0).max(40).default(6),
   strokeColor: z.string().default("#000000"),
-  animation: z.enum(["pop", "none"]).default("pop"),
-  autoFit: z.boolean().default(true),
+  /**
+   * pop (padrão antigo) · none · smooth (sobe e aparece, destaque gradual) ·
+   * reveal (palavra a palavra) · box (pílula atrás da palavra falada) ·
+   * blur (sai do desfoque, letras se aproximam)
+   */
+  animation: z.enum(["pop", "none", "smooth", "reveal", "box", "blur"]).default("pop"),
+  /**
+   * Obsoleto (ignorado no render): a legenda tem tamanho fixo; frase longa é
+   * quebrada em partes que cabem em `maxLines` linhas.
+   */
+  autoFit: z.boolean().default(false),
+  /** Linhas por vez na tela; a frase que não cabe vira partes na sequência da fala */
+  maxLines: z.number().int().min(1).max(3).default(2),
   /** Posição livre de todas as legendas (null = usa `position`) */
   placement: PointSchema.nullable().default(null),
 });
@@ -118,6 +133,13 @@ export const AudioClipSchema = z.object({
   mediaDurationSeconds: z.number().positive().nullable().default(null),
   /** Item da biblioteca de origem (null = arquivo avulso) */
   assetId: z.string().nullable().default(null),
+  /** Som de um motion (`motionSfx.ts`): acompanha o motion; null = clipe solto */
+  motionId: z.string().nullable().default(null),
+  /** Música sugerida pela IA fica "pending": toca no preview, só entra no MP4 aceita */
+  status: z.enum(["accepted", "pending"]).default("accepted"),
+  origin: z.enum(["manual", "ai"]).default("manual"),
+  /** Motivo da sugestão ("energia 4/5 · animada · sem voz") */
+  note: z.string().default(""),
 });
 
 export const NarrationSchema = z.object({
@@ -145,6 +167,10 @@ export const SourceSchema = z.object({
   fps: z.number().positive(),
   /** Áudio tratado (denoise+loudnorm) gerado pelo pipeline; null = não gerado */
   enhancedAudio: z.string().nullable().default(null),
+  /** Ajuste de cor deste vídeo (LOG/flat, exposição…); null = original */
+  color: ColorGradeSchema.nullable().default(null),
+  /** Enquadramento (subir/descer, zoom) quando o vídeo é cortado para caber, ex. no split; null = centro */
+  framing: FramingSchema.nullable().default(null),
 });
 
 /** Overlays vivem no tempo do VÍDEO FINAL (decoram a edição pronta) */
@@ -159,11 +185,12 @@ export const OverlaySchema = z
     end: seconds.nullable().default(null),
     position: z.enum(["top", "center", "bottom"]).default("top"),
     /**
-     * overlay: destaque central · pip: janela no canto · split-bottom: metade
-     * de baixo · fullscreen: cobre o quadro (fundos, transições, molduras)
-     * · sticker: elemento solto sobre o vídeo (ícones, personagens)
+     * overlay: destaque central · pip: janela no canto · split-bottom /
+     * split-top: metade de baixo / de cima (o vídeo principal vai para a
+     * outra metade) · fullscreen: cobre o quadro (fundos, transições,
+     * molduras) · sticker: elemento solto sobre o vídeo (ícones, personagens)
      */
-    layout: z.enum(["overlay", "pip", "split-bottom", "fullscreen", "sticker"]).default("overlay"),
+    layout: z.enum(["overlay", "pip", "split-bottom", "split-top", "fullscreen", "sticker"]).default("overlay"),
     /** Mescla com o vídeo: screen some o preto (luz), multiply some o branco */
     blend: z.enum(BLEND_MODES).default("normal"),
     opacity: z.number().min(0).max(1).default(1),
@@ -173,8 +200,10 @@ export const OverlaySchema = z
     assetId: z.string().nullable().default(null),
     /** Duração da mídia; overlay mais longo que isso repete em loop */
     mediaDurationSeconds: z.number().positive().nullable().default(null),
-    /** Posição livre (null = usa `position`); ignorada em fullscreen/split-bottom */
+    /** Posição livre (null = usa `position`); ignorada em fullscreen e split */
     placement: PointSchema.nullable().default(null),
+    /** Enquadramento da mídia dentro da área (split, PiP, tela cheia); null = centro */
+    framing: FramingSchema.nullable().default(null),
   })
   .refine((o) => (o.kind === "title" ? o.text.length > 0 : o.file !== null), {
     message: "overlay: title exige text; image/video exigem file",
@@ -184,8 +213,34 @@ export const OverlaySchema = z
  * Biblioteca fechada de motions: a IA escolhe QUAL e QUANDO, nunca escreve
  * animação. Visual herda fonte e cor de destaque do estilo da legenda.
  */
-export const MOTION_KINDS = ["zoom", "keyword", "emoji", "lowerThird", "counter", "flash"] as const;
+export const MOTION_KINDS = [
+  "zoom",
+  "keyword",
+  "emoji",
+  "lowerThird",
+  "counter",
+  "flash",
+  "kinetic",
+  "statement",
+  "list",
+  "bubble",
+  "arrow",
+  "annotation",
+  "chart",
+  "callout",
+  "speedLines",
+  "screen",
+  "transition",
+  "illustration",
+] as const;
 export type MotionKind = (typeof MOTION_KINDS)[number];
+
+/** Cor só em hexadecimal #RRGGBB: nada de CSS livre na receita */
+export const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "cor deve ser #RRGGBB");
+
+/** Intensidade visual comum (escala, contraste, tamanho), sem CSS livre */
+export const MOTION_INTENSITIES = ["subtle", "normal", "strong"] as const;
+const intensity = z.enum(MOTION_INTENSITIES).default("normal");
 
 const motionBase = {
   id: z.string().min(1),
@@ -200,6 +255,13 @@ const motionBase = {
   note: z.string().default(""),
   /** Posição livre arrastada no preview (null = posição do tipo/params); zoom e flash ignoram */
   placement: PointSchema.nullable().default(null),
+  /**
+   * Peças de uma receita de motion (combo) compartilham "<combo>:<n>": dá
+   * para remover o grupo de uma vez, mas cada peça segue editável sozinha.
+   */
+  group: z.string().max(60).nullable().default(null),
+  /** Cor de destaque só deste motion (null = cor padrão dos motions do vídeo) */
+  accentColor: HexColorSchema.nullable().default(null),
 };
 
 export const MotionSchema = z.discriminatedUnion("kind", [
@@ -211,6 +273,9 @@ export const MotionSchema = z.discriminatedUnion("kind", [
         scale: z.number().min(1).max(1.6).default(1.15),
         /** punch: entra seco (ênfase) · smooth: aproxima devagar (explicação) */
         style: z.enum(["punch", "smooth"]).default("punch"),
+        /** Ponto que fica parado no zoom, em % do quadro (padrão: rosto em vídeo vertical) */
+        focusX: z.number().min(0).max(100).default(50),
+        focusY: z.number().min(0).max(100).default(40),
       })
       .default({}),
   }),
@@ -220,6 +285,9 @@ export const MotionSchema = z.discriminatedUnion("kind", [
     params: z.object({
       text: z.string().min(1).max(40),
       position: z.enum(["top", "center"]).default("top"),
+      /** pop: selo inclinado (visual original) · slide · underline · marker (marca-texto) */
+      variant: z.enum(["pop", "slide", "underline", "marker"]).default("pop"),
+      intensity,
     }),
   }),
   z.object({
@@ -236,6 +304,8 @@ export const MotionSchema = z.discriminatedUnion("kind", [
     params: z.object({
       title: z.string().min(1).max(40),
       subtitle: z.string().max(60).default(""),
+      /** bar: barra de cor + cartão escuro (original) · minimal: texto com fio fino */
+      variant: z.enum(["bar", "minimal"]).default("bar"),
     }),
   }),
   z.object({
@@ -248,17 +318,181 @@ export const MotionSchema = z.discriminatedUnion("kind", [
       prefix: z.string().max(8).default(""),
       suffix: z.string().max(12).default(""),
       label: z.string().max(40).default(""),
+      /** bold: número grande com contorno (original) · card: cartão com barra de progresso */
+      variant: z.enum(["bold", "card"]).default("bold"),
     }),
   }),
   z.object({
     ...motionBase,
     kind: z.literal("flash"),
-    params: z.object({ color: z.string().default("#FFFFFF") }).default({}),
+    params: z
+      .object({
+        color: z.string().default("#FFFFFF"),
+        /** normal: pico de 85% (original) · subtle: 45%, para quem pede discrição */
+        intensity: z.enum(["subtle", "normal"]).default("normal"),
+      })
+      .default({}),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("kinetic"),
+    params: z.object({
+      text: z.string().trim().min(1).max(60),
+      /** rise: palavras sobem em cascata · blur: foco entrando · mask: revelação por máscara */
+      variant: z.enum(["rise", "blur", "mask"]).default("rise"),
+      position: z.enum(["top", "center"]).default("center"),
+      /** Palavra da frase pintada na cor de destaque ("" = nenhuma) */
+      emphasis: z.string().max(30).default(""),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("statement"),
+    params: z.object({
+      text: z.string().trim().min(1).max(70),
+      /** Linha pequena acima do texto ("" = sem) */
+      eyebrow: z.string().max(30).default(""),
+      /** center: chamada centralizada · left: alinhada à esquerda · cta: chamada para ação com botão */
+      variant: z.enum(["center", "left", "cta"]).default("center"),
+      /** Brilho que atravessa o texto/botão (inspirado no Shine do Remotion Elements) */
+      shine: z.boolean().default(false),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("list"),
+    params: z.object({
+      title: z.string().max(40).default(""),
+      items: z.array(z.string().trim().min(1).max(40)).min(2).max(5),
+      variant: z.enum(["check", "number"]).default("check"),
+      position: z.enum(["top", "center"]).default("center"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("bubble"),
+    params: z.object({
+      text: z.string().trim().min(1).max(120),
+      /** Quem "fala" ("" = sem nome) */
+      sender: z.string().max(30).default(""),
+      side: z.enum(["left", "right"]).default("left"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("arrow"),
+    params: z
+      .object({
+        /** Para onde a seta aponta */
+        direction: z.enum(["down", "up", "left", "right"]).default("down"),
+        label: z.string().max(30).default(""),
+        variant: z.enum(["curve", "straight"]).default("curve"),
+      })
+      .default({}),
+  }),
+  // ── Adaptados do Remotion Elements (marcações, gráficos, callout, speed lines) ──
+  z.object({
+    ...motionBase,
+    kind: z.literal("annotation"),
+    params: z.object({
+      /** Frase mostrada na tela */
+      text: z.string().trim().min(1).max(70),
+      /** Palavra(s) da frase que recebem a marcação ("" = a palavra mais longa) */
+      target: z.string().max(40).default(""),
+      /** marker: marca-texto · circle: círculo · strike: risco · crossed: rabisco de "errado" */
+      variant: z.enum(["marker", "circle", "strike", "crossed"]).default("marker"),
+      position: z.enum(["top", "center"]).default("center"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("chart"),
+    params: z.object({
+      /** pie: pizza · bars: barras horizontais · columns: colunas · line: linha (evolução) */
+      variant: z.enum(["pie", "bars", "columns", "line"]).default("bars"),
+      title: z.string().max(40).default(""),
+      items: z
+        .array(z.object({ label: z.string().trim().min(1).max(24), value: z.number() }))
+        .min(1)
+        .max(7),
+      prefix: z.string().max(6).default(""),
+      suffix: z.string().max(8).default(""),
+      position: z.enum(["top", "center"]).default("top"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("callout"),
+    params: z.object({
+      /** Texto curto do selo: "-20%", "GRÁTIS", "NOVO" */
+      text: z.string().trim().min(1).max(14),
+      /** Para onde o bico aponta */
+      pointer: z.enum(["down", "up", "left", "right"]).default("down"),
+      position: z.enum(["top", "center"]).default("center"),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("speedLines"),
+    params: z
+      .object({
+        intensity: z.enum(["subtle", "normal"]).default("normal"),
+        /** light: linhas brancas · dark: linhas pretas */
+        tone: z.enum(["light", "dark"]).default("light"),
+      })
+      .default({}),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("screen"),
+    params: z.object({
+      /** Frase grande da tela (2–12 palavras) */
+      text: z.string().trim().min(1).max(90),
+      /** Linha pequena acima ("PASSO 1", "O PROBLEMA") */
+      eyebrow: z.string().max(30).default(""),
+      /** Palavra(s) da frase na cor de destaque */
+      emphasis: z.string().max(40).default(""),
+      /** Fundo animado: papel · grid · pontos · gradiente */
+      variant: z.enum(["paper", "grid", "dots", "gradient"]).default("paper"),
+      /** light: papel creme/fundo claro · dark: papel escuro/fundo escuro */
+      tone: z.enum(["light", "dark"]).default("light"),
+      /** slide: a tela sobe por cima do vídeo · fade: aparece suave */
+      transition: z.enum(["slide", "fade"]).default("slide"),
+      align: z.enum(["center", "left"]).default("center"),
+      /** A legenda some enquanto a tela está cheia (o texto já está nela) */
+      hideCaptions: z.boolean().default(true),
+    }),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("transition"),
+    params: z
+      .object({
+        /** Modelo (vídeo da biblioteca + som): luz, queima de filme, glitch, varrida, papel */
+        style: z.enum(TRANSITION_STYLES).default("flare"),
+      })
+      .default({}),
+  }),
+  z.object({
+    ...motionBase,
+    kind: z.literal("illustration"),
+    params: z.object({
+      /** O que desenhar (objeto/cena simbólica do ponto-chave); o estilo é fixo no código */
+      subject: z.string().trim().min(2).max(300),
+      /** Legenda curta no cartão, com marca-texto (opcional) */
+      label: z.string().max(40).default(""),
+      /** Imagem gerada (assets do projeto); null = ainda não gerada (não aparece no MP4) */
+      image: z.string().nullable().default(null),
+      position: z.enum(["top", "center"]).default("top"),
+    }),
   }),
 ]);
 
 export const EffectsSchema = z.object({
-  /** Zoom rápido (punch-in) no início de cada segmento */
+  /**
+   * OBSOLETO: o zoom nos cortes agora são motions de zoom visíveis na timeline
+   * (`punchInMotions`). `migrateRecipeData` converte true em motions e zera.
+   */
   punchIn: z.boolean().default(false),
 });
 
@@ -301,7 +535,18 @@ export const RecipeSchema = z
     audioClips: z.array(AudioClipSchema).default([]),
     layerOrder: LayerOrderSchema,
     motions: z.array(MotionSchema).default([]),
+    /** Aparência comum dos motions do vídeo */
+    motionStyle: z
+      .object({
+        /** Cor de destaque padrão (null = a cor de destaque da legenda) */
+        accentColor: HexColorSchema.nullable().default(null),
+        /** Motion aceito/inserido ganha efeito sonoro da biblioteca */
+        autoSfx: z.boolean().default(true),
+      })
+      .default({}),
     audio: AudioSchema.default({}),
+    /** Trilha que o vídeo pede, descrita pelo planner (base do "outra música") */
+    musicWant: MusicWantSchema.nullable().default(null),
     effects: EffectsSchema.default({}),
     render: RenderSchema,
   })

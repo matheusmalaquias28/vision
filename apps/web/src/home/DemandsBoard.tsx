@@ -44,6 +44,11 @@ const DemandCard: React.FC<{ demand: Demand; onOpen: () => void }> = ({ demand: 
             {d.editor}
           </span>
         )}
+        {d.videos.some((v) => v.analysis?.status === "queued" || v.analysis?.status === "running") && (
+          <span className="dm-analyzing" title="Transcrição, cortes e motions rodando no servidor">
+            IA analisando
+          </span>
+        )}
         {d.syncState === "error" && (
           <span className="dm-sync-err" title={d.syncError ?? "Status não chegou ao War"}>
             não sincronizado

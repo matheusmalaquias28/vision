@@ -2,14 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import type { Recipe } from "@vision/recipe";
 import {
   disconnectDrive,
-  getDirectorJob,
+  getMe,
   getIntegrations,
   listDemands,
   listProjects,
   setDemandStatus,
-  startDirect,
   uploadDemandVideo,
   uploadProject,
+  type CurrentUser,
   type Demand,
   type Integrations,
   type ProjectSummary,
@@ -22,7 +22,12 @@ import { appendClips, ClipQueue, type QueuedClip } from "./home/ClipQueue";
 import { ClientsPage } from "./home/ClientsPage";
 import { DemandDetail } from "./home/DemandDetail";
 import { DemandsBoard } from "./home/DemandsBoard";
+import { LoginPage } from "./home/LoginPage";
 import { NotificationBell } from "./home/NotificationBell";
+import { UserMenu } from "./home/UserMenu";
+import { UsersPage } from "./home/UsersPage";
+import { ConfirmButton } from "./ui/ConfirmButton";
+import { UserContext, useCurrentUser } from "./ui/user";
 
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -84,6 +89,7 @@ type Route =
   | { view: "demandas"; id: string | null }
   | { view: "clientes"; id: string | null }
   | { view: "projetos" }
+  | { view: "usuarios" }
   | { view: "lab" };
 
 /** #/demandas[/id] · #/clientes[/id] · #/projetos · #lab */
@@ -93,6 +99,7 @@ function parseHash(hash: string): Route {
   const decoded = id ? decodeURIComponent(id) : null;
   if (view === "clientes") return { view: "clientes", id: decoded };
   if (view === "projetos") return { view: "projetos" };
+  if (view === "usuarios") return { view: "usuarios" };
   return { view: "demandas", id: decoded };
 }
 
@@ -100,7 +107,9 @@ const go = (hash: string) => {
   window.location.hash = hash;
 };
 
-export const App: React.FC = () => {
+/** Vision depois do login */
+const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
+  const me = useCurrentUser();
   // null = ainda carregando
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -158,8 +167,8 @@ export const App: React.FC = () => {
     return () => window.clearInterval(t);
   }, [route.view, selected]);
 
-  /** Sobe os brutos, abre o editor e, com briefing, roda o diretor IA em segundo plano */
-  const launch = async (create: () => Promise<Recipe>, brief: string) => {
+  /** Sobe os brutos e abre o editor; a análise (transcrição, cortes, motions) já roda no servidor */
+  const launch = async (create: () => Promise<Recipe>) => {
     setError(null);
     setStatus("Enviando clipes");
     try {
@@ -167,27 +176,7 @@ export const App: React.FC = () => {
       refresh();
       refreshBoard();
       setSelected(recipe.projectId);
-      if (brief) {
-        const job = await startDirect(recipe.projectId, brief);
-        setStatus("Diretor IA: iniciando");
-        const poll = window.setInterval(async () => {
-          try {
-            const j = await getDirectorJob(job.id);
-            if (j.status === "running") {
-              setStatus(`Diretor IA: ${j.stage}`);
-            } else {
-              window.clearInterval(poll);
-              setStatus(null);
-              if (j.status === "error") setError(`Diretor IA falhou: ${j.error}`);
-              setReloadKey((k) => k + 1);
-            }
-          } catch {
-            // erro transitório; tenta no próximo tick
-          }
-        }, 1500);
-      } else {
-        setStatus(null);
-      }
+      setStatus(null);
       return true;
     } catch (e) {
       setStatus(null);
@@ -199,7 +188,7 @@ export const App: React.FC = () => {
   const createDemand = async () => {
     if (clips.length === 0) return;
     const brief = briefing.trim();
-    const ok = await launch(() => uploadProject(clips.map((c) => c.file), brief), brief);
+    const ok = await launch(() => uploadProject(clips.map((c) => c.file), brief));
     if (ok) {
       setClips([]);
       setBriefing("");
@@ -271,6 +260,12 @@ export const App: React.FC = () => {
             <Icon name="film" size={14} />
             Projetos
           </a>
+          {(me?.role === "superadmin" || me?.role === "admin") && (
+            <a className={route.view === "usuarios" ? "on" : ""} href="#/usuarios">
+              <Icon name="user" size={14} />
+              Usuários
+            </a>
+          )}
         </nav>
         <span className="home-nav-spacer" />
         {integrations?.storage === "local" && (
@@ -283,18 +278,18 @@ export const App: React.FC = () => {
         )}
         {drive &&
           (drive.connected ? (
-            <button
+            <ConfirmButton
               className="sm ghost drive-status on"
               title="Google Drive conectado · clique para desconectar"
-              onClick={async () => {
-                if (!window.confirm(`Desconectar o Google Drive (${drive.email ?? "conta"})?`)) return;
+              question="Desconectar o Drive?"
+              onConfirm={async () => {
                 await disconnectDrive();
                 refreshIntegrations();
               }}
             >
               <Icon name="cloud" size={14} />
               {drive.email ?? "Drive conectado"}
-            </button>
+            </ConfirmButton>
           ) : drive.configured ? (
             <a className="drive-status" href="/api/google/connect">
               <Icon name="cloud" size={14} />
@@ -307,6 +302,7 @@ export const App: React.FC = () => {
             </span>
           ))}
         <NotificationBell onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)} />
+        <UserMenu onLogout={onLogout} />
         <a className="lab-link" href="#lab">
           Laboratório de motions
         </a>
@@ -347,15 +343,16 @@ export const App: React.FC = () => {
               onChanged={refreshBoard}
               onOpenClient={(id) => go(`#/clientes/${encodeURIComponent(id)}`)}
               onOpenProject={(id) => setSelected(id)}
-              onStartVideo={(demand, index, files) =>
-                launch(
-                  () => uploadDemandVideo(demand.id, index, files),
-                  (demand.briefing || demand.briefingText || "").trim()
-                )
-              }
+              onStartVideo={(demand, index, files) => launch(() => uploadDemandVideo(demand.id, index, files))}
             />
           )}
         </>
+      )}
+
+      {route.view === "usuarios" && (
+        <div className="home-scroll">
+          <UsersPage />
+        </div>
       )}
 
       {route.view === "clientes" && (
@@ -373,7 +370,7 @@ export const App: React.FC = () => {
         <section>
           <h2>Projeto avulso</h2>
           <p className="lede">
-            Fora do fluxo do War. Suba os clipes brutos; com briefing, o diretor IA já monta a primeira versão.
+            Fora do fluxo do War. Suba os clipes brutos: a IA já transcreve e sugere cortes e motions (com o briefing, se houver).
           </p>
           <div className="demand-form">
             <label
@@ -465,5 +462,25 @@ export const App: React.FC = () => {
       </div>
       )}
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  // undefined = conferindo a sessão; null = precisa entrar
+  const [user, setUser] = useState<CurrentUser | null | undefined>(undefined);
+
+  useEffect(() => {
+    getMe().then(setUser).catch(() => setUser(null));
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener("vision:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("vision:unauthorized", onUnauthorized);
+  }, []);
+
+  if (user === undefined) return null;
+  if (user === null) return <LoginPage onLogin={setUser} />;
+  return (
+    <UserContext.Provider value={user}>
+      <Workspace onLogout={() => setUser(null)} />
+    </UserContext.Provider>
   );
 };

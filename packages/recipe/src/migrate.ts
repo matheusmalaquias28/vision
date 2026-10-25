@@ -1,3 +1,5 @@
+import { PUNCH_IN_GROUP, punchInMotions } from "./motions";
+
 /**
  * Repara ids de segmento repetidos. Versões antigas de applyCutToSegments
  * geravam `${id}b` sem checar colisão, e receitas salvas nessa época têm ids
@@ -30,7 +32,23 @@ function dedupeSegmentIds(raw: unknown): unknown {
  * gravados por versões com bug. Aplicada em todo load.
  */
 export function migrateRecipeData(raw: unknown): unknown {
-  return migrateAudioClips(dedupeSegmentIds(migrateV1(raw)));
+  return migratePunchIn(migrateAudioClips(dedupeSegmentIds(migrateV1(raw))));
+}
+
+/**
+ * `effects.punchIn` aplicava um zoom em todo começo de trecho sem aparecer na
+ * timeline. Vira motions de zoom (grupo "punch-in") que o operador vê e remove.
+ */
+function migratePunchIn(raw: unknown): unknown {
+  const r = raw as Record<string, any>;
+  if (!r || typeof r !== "object" || r.effects?.punchIn !== true) return raw;
+  const segments = Array.isArray(r.timeline?.segments) ? r.timeline.segments : [];
+  const motions = Array.isArray(r.motions) ? r.motions : [];
+  return {
+    ...r,
+    effects: { ...r.effects, punchIn: false },
+    motions: [...motions.filter((m: any) => m?.group !== PUNCH_IN_GROUP), ...punchInMotions(segments)],
+  };
 }
 
 /** Duração que o SFX antigo (só um instante) reservava no render */

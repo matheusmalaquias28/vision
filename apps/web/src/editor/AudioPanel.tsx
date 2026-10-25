@@ -1,4 +1,14 @@
-import { createAudioClip, outputDuration, type AudioClip, type Recipe } from "@vision/recipe";
+import {
+  acceptAudioClip,
+  createAudioClip,
+  defaultMusicWant,
+  outputDuration,
+  rankMusic,
+  swapMusicClip,
+  type Asset,
+  type AudioClip,
+  type Recipe,
+} from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import {
   enhanceAudioApi,
@@ -24,6 +34,8 @@ interface AudioPanelProps {
   /** Clipe de música/SFX selecionado na timeline */
   selectedClipId: string | null;
   onSelectClip: (id: string | null) => void;
+  /** Músicas da biblioteca (com estilo analisado) para "outra música" */
+  musicAssets: Asset[];
 }
 
 export const AudioPanel: React.FC<AudioPanelProps> = ({
@@ -33,7 +45,10 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   onServerUpdate,
   selectedClipId,
   onSelectClip,
+  musicAssets,
 }) => {
+  /** Faixas já oferecidas nesta sessão: "outra música" não repete */
+  const [tried, setTried] = useState<string[]>([]);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [sfxFiles, setSfxFiles] = useState<MusicTrack[]>([]);
   const [script, setScript] = useState("");
@@ -117,7 +132,24 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
       </Section>
 
       {selected && (
-        <Section title={selected.kind === "music" ? "Música selecionada" : "Efeito selecionado"}>
+        <Section
+          title={selected.kind === "music" ? "Música selecionada" : "Efeito selecionado"}
+          actions={selected.status === "pending" ? <span className="pill pending">sugestão</span> : null}
+        >
+          {selected.kind === "music" && (
+            <MusicChoice
+              clip={selected}
+              recipe={recipe}
+              musicAssets={musicAssets}
+              tried={tried}
+              onTried={(id) => setTried((t) => [...t, id])}
+              onChange={onChange}
+              onReject={() => {
+                onChange({ ...recipe, audioClips: recipe.audioClips.filter((c) => c.id !== selected.id) });
+                onSelectClip(null);
+              }}
+            />
+          )}
           <p className="note clip-file" title={selected.file}>
             {selected.file.split("/").pop()} · {selected.start.toFixed(2)}s, {selected.duration.toFixed(2)}s
           </p>
@@ -283,5 +315,72 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
       </Section>
       {error && <p className="note error" style={{ padding: "8px 12px" }}>{error}</p>}
     </>
+  );
+};
+
+/**
+ * Trilha sugerida pela IA (pendente: toca no preview, não vai para o MP4) ou
+ * qualquer música: aceitar, pedir outra (próxima faixa que combina com o que
+ * o vídeo pede, pelo estilo analisado da biblioteca) ou recusar.
+ */
+const MusicChoice: React.FC<{
+  clip: AudioClip;
+  recipe: Recipe;
+  musicAssets: Asset[];
+  tried: string[];
+  onTried: (assetId: string) => void;
+  onChange: (recipe: Recipe) => void;
+  onReject: () => void;
+}> = ({ clip, recipe, musicAssets, tried, onTried, onChange, onReject }) => {
+  const asset = musicAssets.find((a) => a.id === clip.assetId);
+  const pending = clip.status === "pending";
+  const nextPick = () => {
+    const ranked = rankMusic(musicAssets, recipe.musicWant ?? defaultMusicWant(), {
+      exclude: [...tried, ...(clip.assetId ? [clip.assetId] : [])],
+    });
+    return ranked[0] ?? null;
+  };
+  const analyzed = musicAssets.some((a) => a.music);
+  return (
+    <div className="music-choice">
+      <div className="music-choice-name">
+        <Icon name="music" size={13} />
+        <strong>{asset?.name ?? clip.file.split("/").pop()}</strong>
+      </div>
+      {(clip.note || asset?.music) && (
+        <p className="prop-hint">
+          {clip.note || ""}
+          {asset?.music?.description ? `${clip.note ? " — " : ""}${asset.music.description}` : ""}
+        </p>
+      )}
+      {pending && (
+        <p className="prop-hint">Sugestão da IA: toca no preview, mas só entra no vídeo final se você aceitar.</p>
+      )}
+      <div className="row">
+        {pending && (
+          <button className="sm accept" onClick={() => onChange(acceptAudioClip(recipe, clip.id))}>
+            <Icon name="check" size={13} /> Aceitar
+          </button>
+        )}
+        <button
+          className="sm"
+          disabled={!analyzed}
+          title={analyzed ? "Próxima faixa da biblioteca que combina com o vídeo" : "Músicas da biblioteca ainda não analisadas (npm run cli -- library music)"}
+          onClick={() => {
+            const pick = nextPick();
+            if (!pick) return;
+            if (clip.assetId) onTried(clip.assetId);
+            onChange(swapMusicClip(recipe, clip.id, pick));
+          }}
+        >
+          <Icon name="refresh" size={13} /> Outra música
+        </button>
+        {pending && (
+          <button className="sm reject" onClick={onReject}>
+            Recusar
+          </button>
+        )}
+      </div>
+    </div>
   );
 };

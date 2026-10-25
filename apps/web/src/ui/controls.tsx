@@ -295,6 +295,99 @@ export const Select: React.FC<
 
 // ─── Abas ────────────────────────────────────────────────────────────
 
+// ─── Faixa rolável por arrasto (abas e filtros que não cabem) ─────────
+
+/**
+ * Faixa horizontal que estoura a largura: arrastar com o mouse rola (o
+ * clique que termina o arrasto não aciona o botão), a rodinha rola de lado,
+ * e as bordas esmaecem quando há itens escondidos (classes fade-left/right).
+ * No toque o navegador já rola sozinho.
+ */
+/** Ref de callback (liga quando o elemento aparece, mesmo depois do 1º render) com `.current` */
+export type DragScrollRef<T> = ((node: T | null) => void) & { current: T | null };
+
+export function useDragScroll<T extends HTMLElement>(): DragScrollRef<T> {
+  const [el, setEl] = useState<T | null>(null);
+  const [ref] = useState(() => {
+    const fn = ((node: T | null) => {
+      fn.current = node;
+      setEl(node);
+    }) as DragScrollRef<T>;
+    fn.current = null;
+    return fn;
+  });
+  useEffect(() => {
+    if (!el) return;
+    el.classList.add("drag-scroll");
+    const overflow = () => el.scrollWidth > el.clientWidth + 1;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      el.classList.toggle("can-scroll", overflow());
+      el.classList.toggle("fade-left", el.scrollLeft > 2);
+      el.classList.toggle("fade-right", el.scrollLeft < max - 2);
+    };
+    let dragging = false;
+    let moved = false;
+    let startX = 0;
+    let startLeft = 0;
+    const swallowClick = (ev: MouseEvent) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+    };
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0 || e.pointerType === "touch" || !overflow()) return;
+      dragging = true;
+      moved = false;
+      startX = e.clientX;
+      startLeft = el.scrollLeft;
+    };
+    const move = (e: PointerEvent) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) < 5) return;
+      moved = true;
+      el.classList.add("dragging");
+      el.scrollLeft = startLeft - dx;
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      el.classList.remove("dragging");
+      if (moved) {
+        // o click vem logo depois do pointerup: não troca de aba ao soltar o arrasto
+        el.addEventListener("click", swallowClick, { capture: true, once: true });
+        setTimeout(() => el.removeEventListener("click", swallowClick, { capture: true }), 0);
+      }
+    };
+    const wheel = (e: WheelEvent) => {
+      if (!overflow() || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    el.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    // itens que mudam (badge, filtros novos) mudam a largura do conteúdo
+    const mo = new MutationObserver(update);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    update();
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [el]);
+  return ref;
+}
+
 export function Tabs<T extends string>({
   value,
   tabs,
@@ -304,8 +397,20 @@ export function Tabs<T extends string>({
   tabs: { id: T; label: string; badge?: number }[];
   onChange: (id: T) => void;
 }) {
+  const ref = useDragScroll<HTMLDivElement>();
+  // a aba escolhida (por clique, atalho ou seleção na timeline) sempre fica à vista
+  useEffect(() => {
+    const on = ref.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const box = ref.current;
+    if (!on || !box) return;
+    const left = on.offsetLeft - box.offsetLeft;
+    if (left < box.scrollLeft) box.scrollTo({ left: left - 8, behavior: "smooth" });
+    else if (left + on.offsetWidth > box.scrollLeft + box.clientWidth) {
+      box.scrollTo({ left: left + on.offsetWidth - box.clientWidth + 8, behavior: "smooth" });
+    }
+  }, [value, ref]);
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" ref={ref}>
       {tabs.map((t) => (
         <button
           key={t.id}

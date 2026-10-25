@@ -6,8 +6,10 @@
   "main": "src/exports.ts",
   "types": "src/exports.ts",
   "dependencies": {
-    "@remotion/layout-utils": "^4.0.519",
+    "@remotion/layout-utils": "4.0.519",
     "@remotion/motion-blur": "4.0.519",
+    "@remotion/rough-notation": "4.0.519",
+    "@remotion/shapes": "4.0.519",
     "@remotion/transitions": "4.0.519",
     "@vision/recipe": "*",
     "react": "^19.0.0",

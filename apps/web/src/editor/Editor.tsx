@@ -1,6 +1,16 @@
 import { type PlayerRef } from "@remotion/player";
 import {
+  applyMotionSfxRules,
   createAudioClip,
+  dropTarget,
+  insertClipSegment,
+  MAX_VIDEO_SECONDS,
+  type Overlay,
+  type Segment,
+  type TrackId,
+  deleteTimelineItems,
+  selectionCount,
+  type TimelineSelection,
   duplicateAudioClip,
   duplicateSegment,
   outputDuration,
@@ -15,31 +25,45 @@ import {
 import { recipeMetadata } from "@vision/video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addSourceClip,
   applyTemplateApi,
   detectSilence,
+  getLibrary,
   getRecipe,
   getFilmstrip,
   getProjectDemand,
   getWaveform,
   listTemplates,
   putRecipe,
-  suggestMotionsApi,
+  planCreativeApi,
+  generateIllustrationApi,
+  getAnalysis,
+  suggestIllustrationsApi,
+  type IllustrationJob,
+  type IllustrationReport,
+  uploadAsset,
+  analyzeApi,
   suggestSmartCutsApi,
   transcribe,
+  type CreativeReport,
   type ProjectDemand,
   type ProjectSummary,
   type ProjectFilmstrips,
   type ProjectWaveforms,
   type TemplateInfo,
 } from "../api";
-import { Kbd, Select, Tabs, Toggle, useDismiss } from "../ui/controls";
+import { Kbd, Select, Tabs, Toggle, useDismiss, useDragScroll } from "../ui/controls";
 import { AudioPanel } from "./AudioPanel";
 import { CaptionPanel } from "./CaptionPanel";
+import { ColorPanel } from "./ColorPanel";
 import { Icon } from "./Icon";
-import { LibraryPanel } from "./LibraryPanel";
+import { LibraryPanel, type LibraryFilter } from "./LibraryPanel";
+import { inspectMediaFile } from "./mediaFiles";
 import { MediaPanel } from "./MediaPanel";
-import { MotionPanel } from "./MotionPanel";
+import { MotionGallery } from "./MotionGallery";
+import { insertCombo, insertMotion, MotionPanel } from "./MotionPanel";
 import { OverlayPanel } from "./OverlayPanel";
+import { PipelineStep } from "./PipelineStep";
 import { PlayerPanel } from "./PlayerPanel";
 import { RenderPanel } from "./RenderPanel";
 import { StylePanel } from "./StylePanel";
@@ -68,7 +92,12 @@ function readCutPace(): CutPace {
 }
 const TL_MIN = 170;
 
-type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "exportar";
+type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "cor" | "exportar";
+
+/** Receita sem ajuste de cor (comparar antes/depois no preview) */
+function withoutColor(recipe: Recipe): Recipe {
+  return { ...recipe, sources: recipe.sources.map((s) => ({ ...s, color: null })) };
+}
 
 function readTimelineHeight(): number {
   try {
@@ -97,6 +126,8 @@ export const Editor: React.FC<EditorProps> = ({
 }) => {
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [demand, setDemand] = useState<ProjectDemand | null>(null);
+  const [creativeReport, setCreativeReport] = useState<CreativeReport | null>(null);
+  const [fastPathMs, setFastPathMs] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +137,8 @@ export const Editor: React.FC<EditorProps> = ({
   const [selectedMotion, setSelectedMotion] = useState<string | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<string | null>(null);
   const [selectedAudioClip, setSelectedAudioClip] = useState<string | null>(null);
+  /** Vários itens da timeline de uma vez (retângulo ou Shift/Ctrl+clique) */
+  const [multi, setMulti] = useState<TimelineSelection | null>(null);
   const [tool, setTool] = useState<TimelineTool>("select");
   const [cutPace, setCutPace] = useState<CutPace>(readCutPace);
   const [previewPending, setPreviewPending] = useState(true);
@@ -114,10 +147,15 @@ export const Editor: React.FC<EditorProps> = ({
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [tab, setTab] = useState<InspectorTab>("motions");
   const [leftTab, setLeftTab] = useState<"texto" | "biblioteca">("texto");
+  const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("motions");
+  /** Segurando "Ver original" no painel de cor */
+  const [showOriginalColor, setShowOriginalColor] = useState(false);
   const [tlHeight, setTlHeight] = useState(readTimelineHeight);
   const [splitDrag, setSplitDrag] = useState(false);
   const [menu, setMenu] = useState<"projects" | "briefing" | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
+  // passos do topo: em janela estreita a faixa rola por arrasto em vez de cortar botões
+  const stepsRef = useDragScroll<HTMLDivElement>();
   const projectMenuRef = useDismiss(menu === "projects", closeMenu);
   const briefingRef = useDismiss(menu === "briefing", closeMenu);
   const playerRef = useRef<PlayerRef>(null);
@@ -126,13 +164,31 @@ export const Editor: React.FC<EditorProps> = ({
   const history = useRef({ past: [] as Recipe[], future: [] as Recipe[], lastPush: 0 });
   const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
 
+  /** SFX da biblioteca: som automático dos motions */
+  const sfxRef = useRef<Asset[]>([]);
+  const [sfxAssets, setSfxAssets] = useState<Asset[]>([]);
+  /** Músicas da biblioteca com o estilo analisado ("outra música" da IA) */
+  const [musicAssets, setMusicAssets] = useState<Asset[]>([]);
+  useEffect(() => {
+    getLibrary()
+      .then((c) => {
+        sfxRef.current = c.assets.filter((a) => a.type === "sfx");
+        setSfxAssets(sfxRef.current);
+        setMusicAssets(c.assets.filter((a) => a.type === "music"));
+      })
+      .catch(() => undefined);
+  }, []);
+
   /**
    * Troca a receita guardando a anterior para desfazer. coalesce=true junta
-   * mudanças em rajada (arrasto de borda gera dezenas por segundo).
+   * mudanças em rajada (arrasto de borda gera dezenas por segundo). Toda
+   * mudança passa pelo vínculo motion→som (o som acompanha, nasce e sai com o
+   * motion); devolve true se esse vínculo mexeu na receita.
    */
-  const commit = useCallback((next: Recipe, coalesce: boolean) => {
+  const commit = useCallback((raw: Recipe, coalesce: boolean): boolean => {
     const h = history.current;
     const prev = recipeRef.current;
+    const next = applyMotionSfxRules(prev, raw, sfxRef.current);
     const now = performance.now();
     if (prev && prev !== next && !(coalesce && now - h.lastPush < HISTORY_COALESCE_MS)) {
       h.past = [...h.past, prev].slice(-HISTORY_LIMIT);
@@ -141,6 +197,7 @@ export const Editor: React.FC<EditorProps> = ({
     h.lastPush = coalesce ? now : 0;
     setHistorySize({ past: h.past.length, future: h.future.length });
     setRecipe(next);
+    return next !== raw;
   }, []);
 
   const undo = useCallback(() => {
@@ -211,15 +268,24 @@ export const Editor: React.FC<EditorProps> = ({
   );
 
   // o que está selecionado na timeline, lido pelos atalhos sem recriar o listener
-  const selectionRef = useRef({ segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay });
-  selectionRef.current = { segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay };
+  const selectionRef = useRef({ segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, multi });
+  selectionRef.current = { segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, multi };
 
   /** Delete: apaga o item selecionado. false = nada para apagar */
   const deleteSelection = useCallback((): boolean => {
     const r = recipeRef.current;
     const sel = selectionRef.current;
     if (!r) return false;
-    if (sel.audio) {
+    if (sel.multi && selectionCount(sel.multi) > 0) {
+      // tudo numa mudança só: um Ctrl+Z traz tudo de volta
+      commit(deleteTimelineItems(r, sel.multi).recipe, false);
+      setMulti(null);
+      setSelectedMotion(null);
+      setSelectedCaption(null);
+      setSelectedOverlay(null);
+      setSelectedSegment(null);
+      setSelectedAudioClip(null);
+    } else if (sel.audio) {
       commit({ ...r, audioClips: r.audioClips.filter((c) => c.id !== sel.audio) }, false);
       setSelectedAudioClip(null);
     } else if (sel.segment) {
@@ -309,6 +375,7 @@ export const Editor: React.FC<EditorProps> = ({
         setTool("select");
         setSelectedSegment(null);
         setSelectedAudioClip(null);
+        setMulti(null);
         return;
       }
       // o editor por texto trata ⌫ antes (e marca defaultPrevented)
@@ -372,18 +439,95 @@ export const Editor: React.FC<EditorProps> = ({
 
   const serverUpdate = useCallback(
     (next: Recipe) => {
-      commit(next, false);
-      setDirty(false);
+      // o servidor já gravou; só fica "não salvo" se o vínculo de sons mexeu
+      setDirty(commit(next, false));
     },
     [commit]
+  );
+
+  // ── Análise automática do servidor (subida dos brutos): acompanha e recarrega no fim ──
+  const [serverStage, setServerStage] = useState<string | null>(null);
+  useEffect(() => {
+    let stop = false;
+    let timer: number | undefined;
+    let wasRunning = false;
+    const tick = async () => {
+      try {
+        const a = await getAnalysis(projectId);
+        if (stop) return;
+        if (a && (a.status === "queued" || a.status === "running")) {
+          wasRunning = true;
+          setServerStage(a.stage);
+          setBusy("auto");
+          timer = window.setTimeout(tick, 2000);
+          return;
+        }
+        if (wasRunning) {
+          // terminou com o editor aberto: traz as sugestões que o servidor gravou
+          const r = await getRecipe(projectId);
+          if (stop) return;
+          serverUpdate(r);
+          setBusy(null);
+          setTab("motions");
+          if (a?.status === "error") setError(`Análise automática falhou: ${a.error}`);
+        }
+        setServerStage(null);
+      } catch {
+        if (!stop) timer = window.setTimeout(tick, 4000);
+      }
+    };
+    tick();
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+    };
+  }, [projectId, serverUpdate]);
+  /** Seta do fluxo que a análise do servidor está rodando agora */
+  const autoStep =
+    busy === "auto" ? ({ Transcrevendo: 1, "Analisando cortes": 2, "Planejando motions": 3 } as Record<string, number>)[serverStage ?? ""] ?? 0 : 0;
+
+  // ── Ilustrações (Magnific): imagem só por botão (gasta crédito), gravada no motion ──
+  const [illustrations, setIllustrations] = useState<Record<string, IllustrationJob>>({});
+  const [illustrationReport, setIllustrationReport] = useState<IllustrationReport | null>(null);
+  /** Sobe a cada imagem gerada: a galeria do painel recarrega */
+  const [imagesVersion, setImagesVersion] = useState(0);
+
+  const generateIllustration = useCallback(
+    async (motionId: string, fresh = false) => {
+      const m = recipeRef.current?.motions.find((x) => x.id === motionId);
+      if (!m || m.kind !== "illustration") return;
+      setIllustrations((s) => ({ ...s, [motionId]: { busy: true, error: null } }));
+      try {
+        const r = await generateIllustrationApi(projectId, m.params.subject, fresh);
+        // a receita pode ter mudado nos ~20 s da geração: aplica sobre a atual
+        const cur = recipeRef.current;
+        const now = cur?.motions.find((x) => x.id === motionId);
+        if (cur && now && now.kind === "illustration") {
+          commit(
+            {
+              ...cur,
+              motions: cur.motions.map((x) =>
+                x.id === motionId ? { ...now, params: { ...now.params, image: r.file } } : x
+              ),
+            },
+            false
+          );
+          setDirty(true);
+        }
+        setIllustrations((s) => ({ ...s, [motionId]: { busy: false, error: null } }));
+        setImagesVersion((v) => v + 1);
+      } catch (e) {
+        setIllustrations((s) => ({ ...s, [motionId]: { busy: false, error: (e as Error).message } }));
+      }
+    },
+    [projectId, commit]
   );
 
   const runStep = async (label: string, fn: () => Promise<Recipe>) => {
     setBusy(label);
     setError(null);
     try {
-      commit(await fn(), false);
-      setDirty(false);
+      setDirty(commit(await fn(), false));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -394,11 +538,15 @@ export const Editor: React.FC<EditorProps> = ({
   // seleção na timeline leva o inspetor para a aba certa
   const selectCaption = (id: string | null) => {
     setSelectedCaption(id);
-    if (id) setTab("legenda");
+    if (id) {
+      setMulti(null);
+      setTab("legenda");
+    }
   };
   const selectOverlay = (id: string | null) => {
     setSelectedOverlay(id);
     if (id) {
+      setMulti(null);
       setSelectedSegment(null);
       setSelectedAudioClip(null);
       setTab("midia");
@@ -425,6 +573,7 @@ export const Editor: React.FC<EditorProps> = ({
   const selectSegment = (id: string | null) => {
     setSelectedSegment(id);
     if (id) {
+      setMulti(null);
       setSelectedAudioClip(null);
       setSelectedOverlay(null);
     }
@@ -432,6 +581,7 @@ export const Editor: React.FC<EditorProps> = ({
   const selectAudioClip = (id: string | null) => {
     setSelectedAudioClip(id);
     if (id) {
+      setMulti(null);
       setSelectedSegment(null);
       setSelectedOverlay(null);
       setTab("audio");
@@ -439,7 +589,10 @@ export const Editor: React.FC<EditorProps> = ({
   };
   const selectMotion = (id: string | null) => {
     setSelectedMotion(id);
-    if (id) setTab("motions");
+    if (id) {
+      setMulti(null);
+      setTab("motions");
+    }
   };
 
   const startSplitDrag = (e: React.PointerEvent) => {
@@ -491,6 +644,33 @@ export const Editor: React.FC<EditorProps> = ({
       return fn();
     });
 
+  /** Fast Path: tudo de uma vez; o editor revisa as sugestões depois */
+  const analyzeAll = () =>
+    step("analise", async () => {
+      const r = await analyzeApi(projectId, cutPace);
+      setCreativeReport(r.report.creative);
+      setFastPathMs(r.report.totalMs);
+      setTab("motions");
+      return r.recipe;
+    });
+
+  /** Creative Planner: 1 chamada de IA; o relatório aparece no painel de motions */
+  const planMotions = (instructions = "", force = false) =>
+    step("motions", async () => {
+      const r = await planCreativeApi(projectId, instructions, force);
+      setCreativeReport(r.report);
+      return r.recipe;
+    });
+
+  /** Botão "Sugerir imagens": fora do Analisar e do Sugerir motions (cada imagem gasta crédito) */
+  const suggestImages = (instructions = "") =>
+    step("imagens", async () => {
+      const r = await suggestIllustrationsApi(projectId, instructions);
+      setIllustrationReport(r.report);
+      setImagesVersion((v) => v + 1);
+      return r.recipe;
+    });
+
   /** Item da biblioteca → receita, no instante `at` do vídeo final */
   const addAsset = (asset: Asset, at: number = playheadOutput) => {
     const t = Math.round(at * 100) / 100;
@@ -515,6 +695,90 @@ export const Editor: React.FC<EditorProps> = ({
     selectOverlay(overlay.id);
   };
 
+  /**
+   * Arquivos soltos do computador na timeline. Cada um é conferido (tipo,
+   * tamanho, duração) antes de subir e vai para a trilha da sua camada: áudio
+   * só em Música/Efeitos; vídeo vira clipe da sequência (som na trilha do
+   * vídeo) ou overlay sem som se solto em Overlays; imagem é overlay.
+   */
+  const addFiles = async (files: File[], at: number, hovered: TrackId | null) => {
+    if (!recipeRef.current) return;
+    setError(null);
+    let t = at;
+    for (const file of files) {
+      const info = await inspectMediaFile(file);
+      if ("error" in info) {
+        setError(info.error);
+        continue;
+      }
+      const target = dropTarget(info.kind, hovered, info.seconds);
+      const progress = (f: number) =>
+        setBusy(f < 1 ? `envio:Enviando ${file.name} (${Math.round(f * 100)}%)` : `envio:Preparando ${file.name}`);
+      progress(0);
+      try {
+        const id = Date.now().toString(36);
+        if (target === "video") {
+          const { source } = await addSourceClip(recipeRef.current.projectId, file, progress);
+          const r = recipeRef.current;
+          const clip: Segment = { id: `seg_clip_${id}`, sourceId: source.id, sourceStart: 0, sourceEnd: source.durationInSeconds };
+          const segments = insertClipSegment(r.timeline.segments, clip, t);
+          commit({ ...r, sources: [...r.sources, source], timeline: { ...r.timeline, segments } }, false);
+          selectSegment(clip.id);
+          t += source.durationInSeconds;
+          const total = outputDuration(segments);
+          if (total > MAX_VIDEO_SECONDS) {
+            setError(`Atenção: o vídeo agora tem ${Math.floor(total / 60)}:${String(Math.round(total % 60)).padStart(2, "0")}; o limite do Vision é 1:30.`);
+          }
+        } else {
+          const up = await uploadAsset(recipeRef.current.projectId, file, progress);
+          const r = recipeRef.current;
+          const total = outputDuration(r.timeline.segments);
+          const start = Math.round(Math.min(t, Math.max(0, total - 0.1)) * 100) / 100;
+          if (target === "music" || target === "sfx") {
+            const clip = createAudioClip({
+              id: `aud_${id}`,
+              kind: target,
+              file: up.file,
+              start,
+              videoDuration: total,
+              mediaDurationSeconds: info.seconds,
+            });
+            commit({ ...r, audioClips: [...r.audioClips, clip] }, false);
+            selectAudioClip(clip.id);
+          } else {
+            const isVideo = info.kind === "video";
+            const length = isVideo ? (info.seconds ?? 4) : 3;
+            const o: Overlay = {
+              id: `ov_${id}`,
+              kind: isVideo ? "video" : "image",
+              text: "",
+              file: up.file,
+              start,
+              end: Math.round(Math.min(start + length, total) * 100) / 100,
+              // vídeo por cima entra sem som (Overlays é trilha visual)
+              position: "top",
+              layout: isVideo ? "pip" : "sticker",
+              blend: "normal",
+              opacity: 1,
+              scale: isVideo ? 0.45 : 0.38,
+              assetId: null,
+              mediaDurationSeconds: isVideo ? info.seconds : null,
+              placement: null,
+              framing: null,
+            };
+            commit({ ...r, overlays: [...r.overlays, o] }, false);
+            selectOverlay(o.id);
+          }
+        }
+        setDirty(true);
+      } catch (e) {
+        setError(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setBusy(null);
+      }
+    }
+  };
+
   const leftTabs = (
     <Tabs
       value={leftTab}
@@ -531,6 +795,9 @@ export const Editor: React.FC<EditorProps> = ({
     silencios: "Detectando silêncios",
     cortes: "Analisando cortes",
     motions: "Planejando motions",
+    analise: "Analisando: transcrição, cortes e motions",
+    auto: `IA analisando o vídeo: ${serverStage ?? ""}`,
+    imagens: "Gerando imagens",
     template: "Aplicando template",
     salvando: "Salvando",
   };
@@ -600,30 +867,49 @@ export const Editor: React.FC<EditorProps> = ({
           </div>
         )}
         <span className="topbar-sep" />
-        <div className="steps">
+        <div className="steps" ref={stepsRef}>
           <button
-            className={`step ${hasTranscript ? "done" : ""}`}
+            className="sm primary analyze-btn"
+            disabled={busy !== null}
+            title={
+              "Fast Path: transcreve (se faltar), sugere cortes e planeja motions com o briefing do War, " +
+              "numa chamada de IA. Nada é aplicado sem você aceitar." +
+              (fastPathMs !== null ? ` Última análise: ${(fastPathMs / 1000).toFixed(0)} s.` : "")
+            }
+            onClick={analyzeAll}
+          >
+            <Icon name="sparkles" size={13} />
+            Analisar e aplicar
+          </button>
+          {/* fluxo em setas: a luz corre na seta que está processando (no Analisar, em todas, em sequência) */}
+          <div className="pipeline">
+          <PipelineStep
+            n={1}
+            first
+            label="Transcrever"
+            runningLabel="Transcrevendo"
+            done={hasTranscript}
+            running={busy === "transcrevendo" || busy === "analise" || autoStep === 1}
+            lightDelay={0}
             disabled={busy !== null}
             onClick={() => step("transcrevendo", () => transcribe(projectId))}
             title="Transcreve a fala palavra a palavra (Whisper)"
+          />
+          <PipelineStep
+            n={2}
+            label="Sugerir cortes"
+            runningLabel="Analisando cortes"
+            done={hasCutSuggestions}
+            running={busy === "cortes" || busy === "analise" || autoStep === 2}
+            lightDelay={0.25}
+            disabled={busy !== null || !hasTranscript}
+            title={
+              hasTranscript
+                ? "Pausas, vícios, muletas, repetições e retomadas (IA). Nada é aplicado sem você aceitar."
+                : "Transcreva o vídeo antes"
+            }
+            onClick={() => step("cortes", () => suggestSmartCutsApi(projectId, cutPace))}
           >
-            <span className="step-num">{hasTranscript ? <Icon name="check" size={10} /> : 1}</span>
-            Transcrever
-          </button>
-          <span className="step-group">
-            <button
-              className={`step ${hasCutSuggestions ? "done" : ""}`}
-              disabled={busy !== null || !hasTranscript}
-              title={
-                hasTranscript
-                  ? "Pausas, vícios, muletas, repetições e retomadas (IA). Nada é aplicado sem você aceitar."
-                  : "Transcreva o vídeo antes"
-              }
-              onClick={() => step("cortes", () => suggestSmartCutsApi(projectId, cutPace))}
-            >
-              <span className="step-num">{hasCutSuggestions ? <Icon name="check" size={10} /> : 2}</span>
-              Sugerir cortes
-            </button>
             <Select
               className="pace-select"
               value={cutPace}
@@ -644,21 +930,22 @@ export const Editor: React.FC<EditorProps> = ({
               <option value="normal">Ritmo normal</option>
               <option value="acelerado">Ritmo acelerado</option>
             </Select>
-          </span>
-          <button
-            className={`step ${recipe.motions.length > 0 ? "done" : ""}`}
+          </PipelineStep>
+          <PipelineStep
+            n={3}
+            label="Sugerir motions"
+            runningLabel="Planejando motions"
+            done={recipe.motions.length > 0}
+            running={busy === "motions" || busy === "analise" || autoStep === 3}
+            lightDelay={0.5}
             disabled={busy !== null || !hasTranscript}
             title={hasTranscript ? "A IA propõe motions presos à fala" : "Transcreva o vídeo antes"}
             onClick={() => {
               setTab("motions");
-              step("motions", () => suggestMotionsApi(projectId));
+              planMotions();
             }}
-          >
-            <span className="step-num">
-              {recipe.motions.length > 0 ? <Icon name="check" size={10} /> : 3}
-            </span>
-            Sugerir motions
-          </button>
+          />
+          </div>
           <button
             className="ghost sm"
             disabled={busy !== null}
@@ -676,7 +963,11 @@ export const Editor: React.FC<EditorProps> = ({
           title={dirty ? "Ctrl+S salva" : undefined}
         >
           <span className="save-dot" />
-          {busy ? `${busyLabel[busy] ?? "Processando"}…` : dirty ? "Não salvo" : "Salvo"}
+          {busy
+            ? `${busyLabel[busy] ?? (busy.startsWith("envio:") ? busy.slice(6) : "Processando")}…`
+            : dirty
+              ? "Não salvo"
+              : "Salvo"}
         </span>
         {dirty && !busy && (
           <button className="sm" onClick={save}>
@@ -737,6 +1028,12 @@ export const Editor: React.FC<EditorProps> = ({
           </div>
         )}
         {backgroundStatus && <div className="banner info">{backgroundStatus}…</div>}
+        {projects.find((p) => p.id === projectId)?.rawPurgedAt && (
+          <div className="banner info">
+            O vídeo bruto deste projeto foi apagado pela limpeza automática. Dá para consultar a edição,
+            mas não renderizar de novo.
+          </div>
+        )}
       </div>
 
       <div className="workspace">
@@ -749,7 +1046,33 @@ export const Editor: React.FC<EditorProps> = ({
             head={leftTabs}
           />
         ) : (
-          <LibraryPanel playheadSeconds={playheadOutput} onAdd={(a) => addAsset(a)} head={leftTabs} />
+          <LibraryPanel
+            playheadSeconds={playheadOutput}
+            onAdd={(a) => addAsset(a)}
+            head={leftTabs}
+            filter={libraryFilter}
+            onFilterChange={setLibraryFilter}
+            motionGallery={
+              <MotionGallery
+                style={recipe.captions.style}
+                accent={recipe.motionStyle.accentColor}
+                previewFile={recipe.sources[0]?.file ?? null}
+                canInsert={playheadSource !== null}
+                onInsertMotion={(kind) => {
+                  if (!playheadSource) return;
+                  const out = insertMotion(recipe, kind, playheadSource);
+                  update(out.recipe);
+                  selectMotion(out.id);
+                }}
+                onInsertCombo={(id) => {
+                  const out = playheadSource ? insertCombo(recipe, id, playheadSource) : null;
+                  if (!out) return;
+                  update(out.recipe);
+                  selectMotion(out.id);
+                }}
+              />
+            }
+          />
         )}
 
 
@@ -762,6 +1085,7 @@ export const Editor: React.FC<EditorProps> = ({
               { id: "legenda", label: "Legenda" },
               { id: "audio", label: "Áudio" },
               { id: "midia", label: "Mídia" },
+              { id: "cor", label: "Cor" },
               { id: "exportar", label: "Exportar" },
             ]}
           />
@@ -772,9 +1096,20 @@ export const Editor: React.FC<EditorProps> = ({
                 selectedId={selectedMotion}
                 playheadSource={playheadSource}
                 suggesting={busy === "motions"}
-                onSuggest={(instructions) =>
-                  step("motions", () => suggestMotionsApi(projectId, instructions))
-                }
+                report={creativeReport}
+                onOpenLibrary={() => {
+                  setLeftTab("biblioteca");
+                  setLibraryFilter("motions");
+                }}
+                sfx={sfxAssets}
+                illustrations={illustrations}
+                onGenerateIllustration={generateIllustration}
+                suggestingImages={busy === "imagens"}
+                pipelineBusy={busy !== null}
+                imagesReport={illustrationReport}
+                imagesVersion={imagesVersion}
+                onSuggestImages={suggestImages}
+                onSuggest={(instructions, force) => planMotions(instructions, force)}
                 onChange={update}
                 onSelect={setSelectedMotion}
                 onSeek={seek}
@@ -801,6 +1136,7 @@ export const Editor: React.FC<EditorProps> = ({
                 onServerUpdate={serverUpdate}
                 selectedClipId={selectedAudioClip}
                 onSelectClip={selectAudioClip}
+                musicAssets={musicAssets}
               />
             )}
             {tab === "midia" && (
@@ -814,6 +1150,14 @@ export const Editor: React.FC<EditorProps> = ({
                   onSelect={setSelectedOverlay}
                 />
               </>
+            )}
+            {tab === "cor" && (
+              <ColorPanel
+                recipe={recipe}
+                playheadSource={playheadSource}
+                onChange={update}
+                onCompare={setShowOriginalColor}
+              />
             )}
             {tab === "exportar" && (
               <RenderPanel
@@ -856,6 +1200,20 @@ export const Editor: React.FC<EditorProps> = ({
         selectedAudioClip={selectedAudioClip}
         onSelectSegment={selectSegment}
         onSelectAudioClip={selectAudioClip}
+        multiSelection={multi}
+        onMultiSelect={(s) => {
+          setMulti(s);
+          // com vários selecionados, Delete age neles (não no item único de antes)
+          if (s) {
+            setSelectedSegment(null);
+            setSelectedAudioClip(null);
+            setSelectedOverlay(null);
+          }
+        }}
+        onDeleteMulti={() => {
+          if (deleteSelection()) setDirty(true);
+        }}
+        onDropFiles={(files, at, hovered) => void addFiles(files, at, hovered)}
       />
 
       <section className="dock viewer">
@@ -870,7 +1228,11 @@ export const Editor: React.FC<EditorProps> = ({
             <Toggle checked={previewPending} onChange={setPreviewPending} label="Prévia das sugestões" />
           </label>
         </header>
-        <PlayerPanel recipe={recipe} playerRef={playerRef} previewPending={previewPending} />
+        <PlayerPanel
+          recipe={showOriginalColor ? withoutColor(recipe) : recipe}
+          playerRef={playerRef}
+          previewPending={previewPending}
+        />
         <DragLayer
           recipe={recipe}
           playerRef={playerRef}

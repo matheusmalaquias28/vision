@@ -1,5 +1,6 @@
 import {
   ASSET_TYPE_LABEL,
+  MOTION_GALLERY_ORDER,
   searchAssets,
   type Asset,
   type AssetType,
@@ -7,6 +8,7 @@ import {
 } from "@vision/recipe";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getLibrary, mediaUrl } from "../api";
+import { useDragScroll } from "../ui/controls";
 import { Icon } from "./Icon";
 
 /** Ordem dos filtros; tipos sem item no catálogo não aparecem */
@@ -46,19 +48,29 @@ function fmtDur(s: number | null): string {
 
 /** Tipo MIME do arrastar-e-soltar biblioteca → timeline (carrega o Asset em JSON) */
 export const ASSET_DRAG_TYPE = "application/x-vision-asset";
+/** + tipo do asset: o conteúdo só sai no drop, o tipo dá para ler no dragover (trilha de destino) */
+export const ASSET_KIND_PREFIX = "application/x-vision-kind-";
+
+/** Filtro aberto na Biblioteca: a galeria de motions ou um tipo de asset */
+export type LibraryFilter = "motions" | AssetType;
 
 interface LibraryPanelProps {
   playheadSeconds: number;
   /** Adiciona no playhead (sfx/visuais) ou aplica (música) */
   onAdd: (asset: Asset) => void;
   head: React.ReactNode;
+  filter: LibraryFilter;
+  onFilterChange: (f: LibraryFilter) => void;
+  /** Galeria do Motion Registry, mostrada no filtro "Motions" (não depende do catálogo) */
+  motionGallery: React.ReactNode;
 }
 
-export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onAdd, head }) => {
+export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onAdd, head, filter, onFilterChange, motionGallery }) => {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [type, setType] = useState<AssetType>("sfx");
+  const filtersRef = useDragScroll<HTMLDivElement>();
+  const type: AssetType | null = filter === "motions" ? null : filter;
   const [limit, setLimit] = useState(PAGE);
   const [selected, setSelected] = useState<Asset | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
@@ -82,11 +94,11 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
   // filtro escolhido sem itens (catálogo ainda vazio desse tipo): cai no primeiro disponível
   const available = FILTERS.filter((t) => (counts.get(t) ?? 0) > 0);
   useEffect(() => {
-    if (available.length > 0 && !available.includes(type)) setType(available[0]);
+    if (type !== null && available.length > 0 && !available.includes(type)) onFilterChange(available[0]);
   }, [available.join(), type]);
 
   const results = useMemo(
-    () => (catalog ? searchAssets(catalog.assets, query, [type]) : []),
+    () => (catalog && type ? searchAssets(catalog.assets, query, [type]) : []),
     [catalog, query, type]
   );
 
@@ -105,12 +117,13 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
     setPlaying(a.id);
   };
 
-  const isAudio = AUDIO_TYPES.includes(type);
+  const isAudio = type !== null && AUDIO_TYPES.includes(type);
   const shown = results.slice(0, limit);
 
   return (
     <section className="dock library-dock">
       {head}
+      {type !== null && (
       <div className="lib-search">
         <Icon name="search" size={14} className="lib-search-icon" />
         <input
@@ -119,13 +132,25 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
-      <div className="lib-filters">
+      )}
+      <div className="lib-filters" ref={filtersRef}>
+        <button
+          className={`chip ${filter === "motions" ? "on" : ""}`}
+          title="Motions e receitas com prévia; entram no playhead"
+          onClick={() => {
+            onFilterChange("motions");
+            setSelected(null);
+          }}
+        >
+          Motions
+          <span className="chip-count">{MOTION_GALLERY_ORDER.length}</span>
+        </button>
         {FILTERS.filter((t) => (counts.get(t) ?? 0) > 0).map((t) => (
           <button
             key={t}
             className={`chip ${t === type ? "on" : ""}`}
             onClick={() => {
-              setType(t);
+              onFilterChange(t);
               setSelected(null);
             }}
           >
@@ -136,7 +161,9 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
       </div>
 
       <div className="dock-body lib-body">
-        {error ? (
+        {type === null ? (
+          motionGallery
+        ) : error ? (
           <p className="empty-hint error">{error}</p>
         ) : !catalog ? (
           <p className="empty-hint">Carregando biblioteca…</p>
@@ -200,7 +227,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
         )}
       </div>
 
-      {selected && (
+      {selected && type !== null && (
         <div className="lib-detail">
           <div className="lib-detail-head">
             <span className="lib-detail-name" title={selected.name}>
@@ -252,6 +279,7 @@ export const LibraryPanel: React.FC<LibraryPanelProps> = ({ playheadSeconds, onA
 /** Miniatura; vídeos tocam em loop sem som ao passar o mouse */
 function dragAsset(e: React.DragEvent, asset: Asset) {
   e.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify(asset));
+  e.dataTransfer.setData(`${ASSET_KIND_PREFIX}${asset.type}`, "");
   e.dataTransfer.effectAllowed = "copy";
 }
 

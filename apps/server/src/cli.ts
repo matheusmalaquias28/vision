@@ -1,4 +1,5 @@
 import "./env";
+import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import {
@@ -15,18 +16,29 @@ import {
   type SuggestedCut,
 } from "@vision/recipe";
 import { acceptCuts, pendingCutIds, rejectCuts } from "./cuts";
+import crypto from "node:crypto";
+import { checkPasswordStrength, hashPassword } from "./auth";
 import { checkDatabase } from "./demands/dbCheck";
+import { runRetention } from "./retention";
+import { renderMotionSheet } from "./render/motionSheet";
+import { getStore } from "./demands/store";
 import { loadCatalog } from "./library/catalog";
 import { importPack } from "./library/importPack";
 import { tagAssets } from "./library/tagAssets";
+import { analyzeMusicLibrary } from "./library/analyzeMusic";
 import {
   defaultSilenceOptions,
   suggestCuts,
 } from "./pipeline/silence";
-import { suggestMotions } from "./pipeline/motions";
+import { planCreative } from "./creative/planner";
+import { analyzeAndApply } from "./creative/fastPath";
+import { motionCatalogMarkdown } from "./creative/catalogDoc";
 import { suggestSmartCuts } from "./pipeline/smartCuts";
 import { transcribeProject } from "./pipeline/transcribe";
+import { ensureWorkingSources } from "./pipeline/normalize";
+import { generateIllustration } from "./creative/illustrate";
 import { createProject, loadRecipe, saveRecipe } from "./project";
+import { releaseBundle } from "./render/bundle";
 import { renderRecipe } from "./render/renderJob";
 
 const program = new Command();
@@ -137,8 +149,17 @@ program
       console.log(`Aceito(s): ${ids.join(", ") || "(nenhum pendente)"}`);
       return;
     }
-    recipe = await suggestMotions(recipe, opts.instructions);
+    const result = await planCreative(recipe, { instructions: opts.instructions });
+    recipe = result.recipe;
     saveRecipe(recipe);
+    const r = result.report;
+    console.log(
+      `Estilo ${r.style} (${r.styleSource}) · ${r.applied}/${r.proposed} aplicados · ${r.timings.totalMs} ms` +
+        (r.tokens ? ` · tokens ${r.tokens.input}+${r.tokens.output}` : "") +
+        (r.cacheHit ? " · cache" : "") +
+        (r.fallback ? ` · fallback: ${r.fallback}` : "")
+    );
+    for (const x of r.rejected) console.log(`  recusado ${x.ref}: ${x.reason}`);
     const placed = placeMotions(recipe, true).filter((p) => p.motion.status === "pending");
     console.log(`${placed.length} motion(s) sugerido(s):`);
     for (const { motion: m, outputStart } of placed) {
@@ -191,6 +212,23 @@ library
       onProgress: (done, total) => console.log(`  ${done}/${total}`),
     });
     console.log(`${r.tagged} descrito(s), ${r.failed} sem resposta`);
+  });
+
+library
+  .command("music")
+  .description("Ouve um trecho de cada música com IA de áudio e grava o estilo (humor, energia, andamento, gênero, voz)")
+  .option("--force", "refaz também as que já foram analisadas")
+  .option("--limit <n>", "no máximo n músicas (teste)")
+  .option("--only <ids>", "só estes ids, separados por vírgula")
+  .action(async (opts: { force?: boolean; limit?: string; only?: string }) => {
+    const r = await analyzeMusicLibrary({
+      force: opts.force,
+      limit: opts.limit ? Number(opts.limit) : undefined,
+      only: opts.only ? opts.only.split(",").map((s) => s.trim()) : undefined,
+      onProgress: (msg) => console.log(`  ${msg}`),
+    });
+    console.log(`${r.analyzed} analisada(s), ${r.skipped} já tinham perfil, ${r.failed.length} falha(s)`);
+    for (const f of r.failed) console.log(`  FALHOU ${f.id}: ${f.error}`);
   });
 
 library
@@ -253,6 +291,28 @@ program
   );
 
 program
+  .command("normalize")
+  .description("Converte vídeos de câmera (10 bits, faixa 0–255, 4K…) do projeto para o formato de trabalho")
+  .argument("<projectId>")
+  .action(async (projectId: string) => {
+    const { recipe, changed } = await ensureWorkingSources(loadRecipe(projectId), (m) => console.log(`  ${m}`));
+    if (changed) saveRecipe(recipe);
+    console.log(changed ? "Fontes convertidas; o original ficou ao lado como original-*." : "Todas as fontes já estão no formato de trabalho.");
+  });
+
+program
+  .command("illustrate")
+  .description("Gera a imagem de uma ilustração (Magnific, 1:1 em 1K, colagem de papel) nos assets do projeto")
+  .argument("<projectId>")
+  .argument("<assunto...>", "o que desenhar")
+  .option("--fresh", "gera outra mesmo se a descrição já tiver imagem")
+  .action(async (projectId: string, subject: string[], opts: { fresh?: boolean }) => {
+    loadRecipe(projectId);
+    const r = await generateIllustration(projectId, subject.join(" "), { fresh: opts.fresh });
+    console.log(r.cached ? `Já existia: ${r.file}` : `Gerada em ${r.seconds}s: ${r.file}`);
+  });
+
+program
   .command("render")
   .description("Renderiza o vídeo final via Remotion")
   .argument("<projectId>")
@@ -262,14 +322,166 @@ program
       `Renderizando ${projectId} (${fmt(outputDuration(recipe.timeline.segments))} @ ${recipe.render.fps}fps)...`
     );
     let lastShown = -1;
-    const { outputPath } = await renderRecipe(recipe, (fraction) => {
-      const pct = Math.floor(fraction * 10) * 10;
-      if (pct > lastShown) {
-        lastShown = pct;
-        process.stdout.write(`  ${pct}%\n`);
-      }
+    try {
+      const { outputPath } = await renderRecipe(recipe, (fraction) => {
+        const pct = Math.floor(fraction * 10) * 10;
+        if (pct > lastShown) {
+          lastShown = pct;
+          process.stdout.write(`  ${pct}%\n`);
+        }
+      });
+      console.log(`Render concluído: ${outputPath}`);
+    } finally {
+      // uso pontual: o bundle (cópia de media/ no Windows) não fica no temp
+      await releaseBundle();
+    }
+  });
+
+const users = program.command("user").description("Pessoas com acesso ao Vision");
+
+/** Senha passada ou uma gerada (mostrada uma vez) */
+function passwordOrGenerated(given?: string): { password: string; generated: boolean } {
+  if (given) {
+    const weak = checkPasswordStrength(given);
+    if (weak) throw new Error(weak);
+    return { password: given, generated: false };
+  }
+  return { password: crypto.randomBytes(12).toString("base64url"), generated: true };
+}
+
+users
+  .command("add")
+  .description("Cria um acesso")
+  .requiredOption("--email <email>", "e-mail de login")
+  .requiredOption("--name <nome>", "nome que aparece nas notas e no War")
+  .option("--admin", "administrador (gerencia editores)")
+  .option("--superadmin", "super administrador (gerencia todos os acessos)")
+  .option("--password <senha>", "senha (sem ela, uma é gerada e mostrada uma vez)")
+  .action(async (opts: { email: string; name: string; admin?: boolean; superadmin?: boolean; password?: string }) => {
+    const store = getStore();
+    const email = opts.email.trim().toLowerCase();
+    if (await store.getUserByEmail(email)) throw new Error(`já existe um acesso com ${email}`);
+    const { password, generated } = passwordOrGenerated(opts.password);
+    const now = new Date().toISOString();
+    await store.upsertUser({
+      id: crypto.randomUUID(),
+      name: opts.name.trim(),
+      email,
+      passwordHash: hashPassword(password),
+      role: opts.superadmin ? "superadmin" : opts.admin ? "admin" : "editor",
+      active: true,
+      lastLoginAt: null,
+      createdAt: now,
+      updatedAt: now,
     });
-    console.log(`Render concluído: ${outputPath}`);
+    console.log(`Acesso criado: ${opts.name} <${email}> (${opts.superadmin ? "superadmin" : opts.admin ? "admin" : "editor"})`);
+    if (generated) console.log(`Senha gerada (anote agora, não aparece de novo): ${password}`);
+    process.exit(0);
+  });
+
+users
+  .command("list")
+  .description("Lista os acessos")
+  .action(async () => {
+    for (const u of await getStore().listUsers()) {
+      console.log(
+        `${u.active ? "ativo   " : "inativo "} ${u.role.padEnd(10)} ${u.name} <${u.email}>  último login: ${u.lastLoginAt ?? "nunca"}`
+      );
+    }
+    process.exit(0);
+  });
+
+users
+  .command("passwd")
+  .description("Define uma nova senha")
+  .requiredOption("--email <email>", "e-mail de login")
+  .option("--password <senha>", "nova senha (sem ela, uma é gerada)")
+  .action(async (opts: { email: string; password?: string }) => {
+    const store = getStore();
+    const user = await store.getUserByEmail(opts.email);
+    if (!user) throw new Error(`nenhum acesso com ${opts.email}`);
+    const { password, generated } = passwordOrGenerated(opts.password);
+    await store.upsertUser({ ...user, passwordHash: hashPassword(password), updatedAt: new Date().toISOString() });
+    console.log(`Senha de ${user.email} trocada.${generated ? ` Nova senha: ${password}` : ""}`);
+    process.exit(0);
+  });
+
+users
+  .command("disable")
+  .description("Bloqueia um acesso (o histórico de notas continua)")
+  .requiredOption("--email <email>", "e-mail de login")
+  .option("--enable", "reativa em vez de bloquear")
+  .action(async (opts: { email: string; enable?: boolean }) => {
+    const store = getStore();
+    const user = await store.getUserByEmail(opts.email);
+    if (!user) throw new Error(`nenhum acesso com ${opts.email}`);
+    await store.upsertUser({ ...user, active: Boolean(opts.enable), updatedAt: new Date().toISOString() });
+    console.log(`${user.email} ${opts.enable ? "reativado" : "bloqueado"}.`);
+    process.exit(0);
+  });
+
+program
+  .command("analyze")
+  .description("Fast Path: transcrição (se faltar) + cortes determinísticos + 1 chamada criativa, com tempos")
+  .argument("<projectId>")
+  .action(async (projectId: string) => {
+    const { recipe, report } = await analyzeAndApply(loadRecipe(projectId));
+    saveRecipe(recipe);
+    const s = report.stages;
+    console.log(
+      `Fast Path ${report.withinTarget ? "dentro" : "FORA"} da meta: ${(report.totalMs / 1000).toFixed(1)} s ` +
+        `(transcrição ${s.transcribeSkipped ? "reaproveitada" : `${(s.transcribeMs / 1000).toFixed(1)} s`}, ` +
+        `cortes ${(s.cutsMs / 1000).toFixed(1)} s, planner ${(s.plannerMs / 1000).toFixed(1)} s) · vídeo ${report.videoSeconds} s`
+    );
+    const c = report.creative;
+    console.log(`Estilo ${c.style} (${c.styleSource}) · ${c.applied}/${c.proposed} aplicados${c.tokens ? ` · tokens ${c.tokens.input}+${c.tokens.output}` : ""}${c.cacheHit ? " · cache" : ""}`);
+    process.exit(0);
+  });
+
+program
+  .command("motion-catalog")
+  .description("Gera docs/motion-catalog.md a partir do Motion Registry")
+  .option("--out <arquivo>", "arquivo de saída", "docs/motion-catalog.md")
+  .action((opts: { out: string }) => {
+    fs.writeFileSync(path.resolve(opts.out), `${motionCatalogMarkdown()}\n`, "utf8");
+    console.log(`Catálogo salvo em ${opts.out}`);
+  });
+
+program
+  .command("motion-sheet")
+  .description("Folha de contato dos motions (validação visual, mesmo render do MP4)")
+  .requiredOption("--out <arquivo>", "PNG de saída")
+  .option("--frame <n>", "frame congelado em cada célula (ou 'mid')", "mid")
+  .option("--file <media>", "vídeo de fundo (media/...)")
+  .option("--only <tipos>", "só estes tipos, separados por vírgula (ex.: chart,callout)")
+  .option("--image <media>", "imagem já gerada para os exemplos de ilustração")
+  .action(async (opts: { out: string; frame: string; file?: string; only?: string; image?: string }) => {
+    try {
+      const out = await renderMotionSheet({
+        out: path.resolve(opts.out),
+        frame: opts.frame === "mid" ? "mid" : Number(opts.frame),
+        file: opts.file ?? null,
+        only: opts.only,
+        image: opts.image ?? null,
+      });
+      console.log(`Folha salva em ${out}`);
+    } finally {
+      await releaseBundle();
+    }
+    process.exit(0);
+  });
+
+program
+  .command("retention")
+  .description("Apaga brutos vencidos e renders antigos (VISION_RAW_RETENTION_DAYS / VISION_IDLE_RETENTION_DAYS)")
+  .option("--dry-run", "só mostra o que seria apagado")
+  .option("--project <id>", "só este projeto")
+  .action(async (opts: { dryRun?: boolean; project?: string }) => {
+    const r = await runRetention({ dryRun: opts.dryRun, only: opts.project });
+    for (const x of r) console.log(`${x.projectId}: ${x.action} · ${(x.bytes / 1e6).toFixed(1)} MB`);
+    const mb = (r.reduce((a, x) => a + x.bytes, 0) / 1e6).toFixed(1);
+    console.log(r.length === 0 ? "Nada a apagar." : `${opts.dryRun ? "Liberaria" : "Liberado"}: ${mb} MB`);
+    process.exit(0);
   });
 
 program

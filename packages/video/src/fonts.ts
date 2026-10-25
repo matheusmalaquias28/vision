@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { continueRender, delayRender } from "remotion";
 
 const SYSTEM_FONTS = new Set([
@@ -35,16 +35,34 @@ function addStylesheet(id: string, href: string): Promise<void> {
  * O Google recusa pesos que a família não tem (ex.: Oswald 900); nesse caso
  * carrega a versão base e o navegador simula o peso.
  */
-export function useGoogleFont(family: string, weight = 900): void {
+export function useGoogleFont(family: string, weight = 900): boolean {
+  const isSystem = !family.trim() || SYSTEM_FONTS.has(family.trim());
+  const [ready, setReady] = useState(isSystem);
+  const pending = useRef<number | null>(null);
+
+  // o render só continua depois que o React redesenhou com a fonte pronta
+  // (quem mede texto precisa da medida certa no frame capturado)
+  useEffect(() => {
+    if (ready && pending.current !== null) {
+      continueRender(pending.current);
+      pending.current = null;
+    }
+  }, [ready]);
+
   useEffect(() => {
     const name = family.trim();
-    if (!name || SYSTEM_FONTS.has(name)) return;
+    if (!name || SYSTEM_FONTS.has(name)) {
+      setReady(true);
+      return;
+    }
+    setReady(false);
     const handle = delayRender(`google font ${name} ${weight}`);
+    pending.current = handle;
     let cancelled = false;
     const done = () => {
       if (!cancelled) {
         cancelled = true;
-        continueRender(handle);
+        setReady(true);
       }
     };
     const slug = name.replace(/\s+/g, "-").toLowerCase();
@@ -61,6 +79,17 @@ export function useGoogleFont(family: string, weight = 900): void {
       )
       .then(() => document.fonts.load(`${weight} 16px "${name}"`))
       .then(done, done);
-    return done;
+    return () => {
+      // desmontou antes de carregar: libera o render
+      if (!cancelled) {
+        cancelled = true;
+        if (pending.current !== null) {
+          continueRender(pending.current);
+          pending.current = null;
+        }
+      }
+    };
   }, [family, weight]);
+
+  return ready;
 }

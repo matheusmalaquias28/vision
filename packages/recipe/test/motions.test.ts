@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { migrateRecipeData } from "../src/migrate";
+import { motionGroupLabel } from "../src/motionCombos";
 import {
+  captionHiddenRanges,
   mergeMotionSuggestions,
   placeMotions,
+  PUNCH_IN_GROUP,
+  withPunchIn,
   retimeMotion,
   reviewMotions,
   zoomScaleAt,
@@ -40,7 +45,9 @@ const keyword = (sourceTime: number, text = "PRAZO"): MotionCandidate => ({
   sourceTime,
   durationSeconds: 1.5,
   note: "",
-  params: { text, position: "top" },
+  group: null,
+  accentColor: null,
+  params: { text, position: "top", variant: "pop", intensity: "normal" },
 });
 
 describe("MotionSchema", () => {
@@ -120,7 +127,9 @@ describe("mergeMotionSuggestions / reviewMotions", () => {
       sourceTime: 5.5,
       durationSeconds: 2,
       note: "",
-      params: { from: 0, to: 2, decimals: 0, prefix: "", suffix: " meses", label: "" },
+      group: null,
+      accentColor: null,
+      params: { from: 0, to: 2, decimals: 0, prefix: "", suffix: " meses", label: "", variant: "bold" },
     };
     const merged = mergeMotionSuggestions(r, [keyword(5), counter]);
     expect(merged.motions.map((m) => m.kind)).toEqual(["keyword"]);
@@ -151,5 +160,68 @@ describe("retimeMotion", () => {
     r = retimeMotion(r, "m1", 99, 0.01);
     expect(r.motions[0].sourceTime).toBeCloseTo(29.95, 2);
     expect(r.motions[0].durationSeconds).toBe(0.1);
+  });
+});
+
+describe("zoom nos cortes (antigo effects.punchIn)", () => {
+  const raw = () => ({
+    version: 2,
+    projectId: "t",
+    createdAt: "2026-10-01T00:00:00Z",
+    template: "dinamico",
+    sources: [{ id: "src_01", file: "media/a.mp4", durationInSeconds: 30, width: 1080, height: 1920, fps: 30 }],
+    timeline: {
+      segments: [
+        { id: "seg_01", sourceId: "src_01", sourceStart: 1, sourceEnd: 5 },
+        { id: "seg_02", sourceId: "src_01", sourceStart: 7.5, sourceEnd: 12 },
+        { id: "seg_03", sourceId: "src_01", sourceStart: 14, sourceEnd: 20 },
+      ],
+    },
+    captions: { blocks: [] },
+    motions: [{ id: "k1", kind: "keyword", sourceId: "src_01", sourceTime: 3, params: { text: "OI" } }],
+    effects: { punchIn: true },
+    render: { width: 1080, height: 1920, fps: 30 },
+  });
+
+  it("projeto antigo: o zoom escondido vira um motion de zoom por trecho, visível na timeline", () => {
+    const r = parseRecipe(migrateRecipeData(raw()));
+    expect(r.effects.punchIn).toBe(false);
+    const punch = r.motions.filter((m) => m.group === PUNCH_IN_GROUP);
+    expect(punch).toHaveLength(3);
+    expect(punch.every((m) => m.kind === "zoom" && m.status === "accepted")).toBe(true);
+    // cada um começa exatamente no início do trecho no vídeo final
+    const starts = placeMotions(r, false).filter((p) => p.motion.group === PUNCH_IN_GROUP).map((p) => p.outputStart);
+    expect(starts).toEqual([0, 4, 8.5]);
+    expect(r.motions.find((m) => m.id === "k1")).toBeTruthy();
+    // migrar de novo não duplica
+    expect(migrateRecipeData(r)).toBe(r);
+  });
+
+  it("ligar/desligar recria ou remove só os zooms nos cortes", () => {
+    const r = parseRecipe(migrateRecipeData(raw()));
+    const off = withPunchIn(r, false);
+    expect(off.motions.map((m) => m.id)).toEqual(["k1"]);
+    const on = withPunchIn(off, true);
+    expect(on.motions.filter((m) => m.group === PUNCH_IN_GROUP)).toHaveLength(3);
+    expect(motionGroupLabel(PUNCH_IN_GROUP)).toBe("Zoom nos cortes");
+  });
+});
+
+describe("tela cheia esconde a legenda (opção do motion)", () => {
+  it("só enquanto está no ar e só com hideCaptions", () => {
+    const base = parseRecipe({
+      version: 2,
+      projectId: "t",
+      createdAt: "2026-10-01T00:00:00Z",
+      sources: [{ id: "src_01", file: "media/a.mp4", durationInSeconds: 30, width: 1080, height: 1920, fps: 30 }],
+      timeline: { segments: [{ id: "seg_01", sourceId: "src_01", sourceStart: 0, sourceEnd: 30 }] },
+      captions: { blocks: [] },
+      motions: [
+        { id: "s1", kind: "screen", sourceId: "src_01", sourceTime: 4, durationSeconds: 2.5, params: { text: "Oi" } },
+        { id: "s2", kind: "screen", sourceId: "src_01", sourceTime: 20, durationSeconds: 2, params: { text: "Tchau", hideCaptions: false } },
+      ],
+      render: { width: 1080, height: 1920, fps: 30 },
+    });
+    expect(captionHiddenRanges(placeMotions(base, false))).toEqual([[4, 6.5]]);
   });
 });

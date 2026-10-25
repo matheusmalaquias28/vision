@@ -10,7 +10,12 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { outputDuration, type Overlay, type Recipe } from "@vision/recipe";
+import {
+  framingStyle,
+  outputDuration,
+  type Overlay,
+  type Recipe,
+} from "@vision/recipe";
 import { mediaSrc } from "./media";
 import { AtPoint, dragProps } from "./Positioned";
 
@@ -70,9 +75,10 @@ const Media: React.FC<{ overlay: Overlay; fit: "cover" | "contain" }> = ({ overl
   const src = mediaSrc(overlay.file);
   // sticker não tem altura fixa: a mídia define a altura pela própria proporção
   const natural = fit === "contain";
+  // cortada para caber (cover): o enquadramento escolhe o que aparece (subir/descer, zoom)
   const style: React.CSSProperties = natural
     ? { width: "100%", height: "auto", display: "block" }
-    : { width: "100%", height: "100%", objectFit: fit };
+    : { width: "100%", height: "100%", objectFit: fit, ...(fit === "cover" ? framingStyle(overlay.framing) : {}) };
   if (overlay.kind !== "video") return <Img src={src} style={style} />;
   // WebM da biblioteca tem canal alfa (personagens recortados, transições chroma)
   const video = (
@@ -164,9 +170,15 @@ const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
 
   const media = <Media overlay={overlay} fit="cover" />;
 
-  if (overlay.layout === "split-bottom") {
-    // metade de baixo da tela para o overlay; o vídeo principal fica em cima
-    return <AbsoluteFill style={{ top: "50%" }}>{media}</AbsoluteFill>;
+  if (overlay.layout === "split-bottom" || overlay.layout === "split-top") {
+    // uma metade da tela para o clipe; o vídeo principal vai para a outra
+    // (VisionComposition) — cada um com o próprio enquadramento
+    return (
+      // AbsoluteFill fixa height 100%: a metade precisa de height explícito
+      <AbsoluteFill style={{ overflow: "hidden", height: "50%", top: overlay.layout === "split-top" ? 0 : "50%" }}>
+        {media}
+      </AbsoluteFill>
+    );
   }
   if (overlay.layout === "pip") {
     const box: React.CSSProperties = overlay.placement

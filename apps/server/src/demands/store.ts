@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { repoRoot } from "../paths";
-import type { Client, Demand, DemandEvent, DemandVideo, Notification } from "./types";
+import type { Client, Demand, DemandEvent, DemandVideo, Notification, User } from "./types";
 
 /**
  * Persistência de clientes/demandas. Com VISION_DATABASE_URL usa o Postgres
@@ -27,6 +27,10 @@ export interface DemandStore {
   addNotification(n: Omit<Notification, "id" | "createdAt" | "readAt">): Promise<void>;
   /** sem demandId marca todas */
   markNotificationsRead(demandId?: string): Promise<void>;
+  listUsers(): Promise<User[]>;
+  getUser(id: string): Promise<User | null>;
+  getUserByEmail(email: string): Promise<User | null>;
+  upsertUser(u: User): Promise<void>;
   getSetting<T>(key: string): Promise<T | null>;
   setSetting(key: string, value: unknown): Promise<void>;
   deleteSetting(key: string): Promise<void>;
@@ -40,6 +44,7 @@ interface LocalData {
   videos: DemandVideo[];
   events: DemandEvent[];
   notifications?: Notification[];
+  users?: User[];
   settings: Record<string, unknown>;
 }
 
@@ -47,19 +52,25 @@ class LocalStore implements DemandStore {
   readonly kind = "local" as const;
   // fora de media/, que é servido como estático
   private file = path.join(repoRoot, "data", "demands-db.json");
-  private data: LocalData;
+  private cache: LocalData = { clients: [], demands: [], videos: [], events: [], settings: {} };
+  private loadedMtime = -1;
 
-  constructor() {
-    this.data = fs.existsSync(this.file)
-      ? (JSON.parse(fs.readFileSync(this.file, "utf8")) as LocalData)
-      : { clients: [], demands: [], videos: [], events: [], settings: {} };
+  /** Relê o arquivo se outro processo (a CLI) o alterou */
+  private get data(): LocalData {
+    const mtime = fs.existsSync(this.file) ? fs.statSync(this.file).mtimeMs : -1;
+    if (mtime !== this.loadedMtime) {
+      if (mtime >= 0) this.cache = JSON.parse(fs.readFileSync(this.file, "utf8")) as LocalData;
+      this.loadedMtime = mtime;
+    }
+    return this.cache;
   }
 
   private save() {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), "utf8");
+    fs.writeFileSync(tmp, JSON.stringify(this.cache, null, 2), "utf8");
     fs.renameSync(tmp, this.file);
+    this.loadedMtime = fs.statSync(this.file).mtimeMs;
   }
 
   private put<T>(list: T[], item: T, same: (a: T) => boolean) {
@@ -129,6 +140,18 @@ class LocalStore implements DemandStore {
       if (!n.readAt && (!demandId || n.demandId === demandId)) n.readAt = now;
     }
     this.save();
+  }
+  async listUsers() {
+    return [...(this.data.users ?? [])];
+  }
+  async getUser(id: string) {
+    return (this.data.users ?? []).find((u) => u.id === id) ?? null;
+  }
+  async getUserByEmail(email: string) {
+    return (this.data.users ?? []).find((u) => u.email === email.toLowerCase()) ?? null;
+  }
+  async upsertUser(u: User) {
+    this.put((this.data.users ??= []), u, (x) => x.id === u.id);
   }
   async getSetting<T>(key: string) {
     return (this.data.settings[key] as T | undefined) ?? null;
@@ -258,6 +281,18 @@ class PgStore implements DemandStore {
     } else {
       await this.pool.query("update vision.notifications set read_at = now() where read_at is null");
     }
+  }
+  listUsers() {
+    return this.rows<User>("select * from vision.users order by name");
+  }
+  async getUser(id: string) {
+    return (await this.rows<User>("select * from vision.users where id = $1", [id]))[0] ?? null;
+  }
+  async getUserByEmail(email: string) {
+    return (await this.rows<User>("select * from vision.users where email = $1", [email.toLowerCase()]))[0] ?? null;
+  }
+  upsertUser(u: User) {
+    return this.upsert("users", u, ["id"]);
   }
   async getSetting<T>(key: string) {
     const [row] = await this.rows<{ value: T }>("select value from vision.settings where key = $1", [key]);

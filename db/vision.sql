@@ -141,6 +141,19 @@ create table if not exists vision.settings (
   updated_at timestamptz not null default now()
 );
 
+-- login próprio do Vision (não usa auth.users do Supabase, que é do outro sistema)
+create table if not exists vision.users (
+  id            text primary key,
+  name          text not null,
+  email         text not null unique,      -- sempre minúsculo
+  password_hash text not null,             -- scrypt$<sal>$<hash>
+  role          text not null default 'editor',  -- admin | editor
+  active        boolean not null default true,
+  last_login_at timestamptz,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
 -- 4. Permissões: vision_app lê/grava dados SÓ no schema vision (sem DDL)
 grant usage on schema vision to vision_app;
 grant select, insert, update, delete on all tables in schema vision to vision_app;
@@ -165,7 +178,7 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['clients', 'demands', 'demand_videos', 'demand_events', 'notifications', 'settings'] loop
+  foreach t in array array['clients', 'demands', 'demand_videos', 'demand_events', 'notifications', 'settings', 'users'] loop
     execute format('alter table vision.%I enable row level security', t);
     if not exists (
       select 1 from pg_policies where schemaname = 'vision' and tablename = t and policyname = 'vision_app_all'

@@ -9,8 +9,13 @@ import {
   useVideoConfig,
 } from "remotion";
 import {
+  activeSplitAt,
+  captionHiddenRanges,
+  colorFilterCss,
+  framingStyle,
   placeMotions,
-  zoomScaleAt,
+  temperatureLayer,
+  zoomAt,
   type Recipe,
   type Segment,
   type Source,
@@ -22,38 +27,40 @@ import { Motions } from "./Motions";
 import { Overlays } from "./Overlays";
 import { mediaSrc } from "./media";
 
-/** Vídeo de um segmento, com punch-in opcional no início */
+/** Vídeo de um segmento com o ajuste de cor da fonte (zoom é sempre motion, visível na timeline) */
 const SegmentVideo: React.FC<{
   source: Source;
   segment: Segment;
   originalVolume: number;
   useEnhanced: boolean;
-  punchIn: boolean;
-}> = ({ source, segment, originalVolume, useEnhanced, punchIn }) => {
-  const frame = useCurrentFrame(); // relativo à Sequence
+}> = ({ source, segment, originalVolume, useEnhanced }) => {
   const { fps } = useVideoConfig();
   const enhanced = useEnhanced && source.enhancedAudio !== null;
-  const scale = punchIn
-    ? interpolate(frame, [0, Math.round(fps * 0.4)], [1.08, 1], {
-        extrapolateRight: "clamp",
-      })
-    : 1;
   const trim = Math.round(segment.sourceStart * fps);
+  const temp = temperatureLayer(source.color);
   return (
     <>
-      <OffthreadVideo
-        src={mediaSrc(source.file)}
-        trimBefore={trim}
-        volume={enhanced ? 0 : originalVolume}
-        muted={enhanced}
-        pauseWhenBuffering
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transform: `scale(${scale})`,
-        }}
-      />
+      {/* isolado: a camada de temperatura só mistura com o vídeo, nunca com legenda/motions */}
+      <AbsoluteFill style={{ isolation: "isolate", overflow: "hidden" }}>
+        <OffthreadVideo
+          src={mediaSrc(source.file)}
+          trimBefore={trim}
+          volume={enhanced ? 0 : originalVolume}
+          muted={enhanced}
+          pauseWhenBuffering
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            // enquadramento: o que aparece quando o vídeo é cortado (metade do split, vídeo horizontal)
+            ...framingStyle(source.framing),
+            filter: colorFilterCss(source.color),
+          }}
+        />
+        {temp && (
+          <AbsoluteFill style={{ backgroundColor: temp.color, opacity: temp.opacity, mixBlendMode: "soft-light" }} />
+        )}
+      </AbsoluteFill>
       {enhanced && source.enhancedAudio ? (
         <Audio
           src={mediaSrc(source.enhancedAudio)}
@@ -82,7 +89,8 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
     () => placeMotions(recipe, previewPending),
     [recipe, previewPending]
   );
-  const zoom = zoomScaleAt(placed, frame / fps);
+  // um único compositor de câmera: escala e foco do zoom dominante
+  const camera = zoomAt(placed, frame / fps);
   const sourcesById = new Map(recipe.sources.map((s) => [s.id, s]));
 
   let cursor = 0;
@@ -109,22 +117,35 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
           segment={seg}
           originalVolume={recipe.audio.originalVolume}
           useEnhanced={recipe.audio.useEnhanced}
-          punchIn={recipe.effects.punchIn}
         />
       </Sequence>
     );
   });
 
+  // split ativo: o vídeo principal ocupa só a outra metade (não fica escondido atrás do clipe)
+  const split = activeSplitAt(recipe, frame / fps);
+  // (AbsoluteFill fixa height 100%: a metade precisa de height explícito)
+  const videoArea: React.CSSProperties = !split
+    ? {}
+    : { height: "50%", top: split.mainHalf === "top" ? 0 : "50%", overflow: "hidden" };
+
   const layers: Record<VisualLayer, React.ReactNode> = {
     video: (
-      // origem um pouco acima do centro: enquadra rosto em vídeo vertical
-      <AbsoluteFill style={{ transform: `scale(${zoom})`, transformOrigin: "50% 40%" }}>
-        {sequences}
+      <AbsoluteFill style={videoArea}>
+        {/* foco padrão um pouco acima do centro: enquadra rosto em vídeo vertical */}
+        <AbsoluteFill
+          style={{ transform: `scale(${camera.scale})`, transformOrigin: `${camera.focusX}% ${camera.focusY}%` }}
+        >
+          {sequences}
+        </AbsoluteFill>
       </AbsoluteFill>
     ),
     overlays: <Overlays recipe={recipe} />,
-    motions: <Motions placed={placed} style={recipe.captions.style} />,
-    captions: <Captions recipe={recipe} />,
+    motions: (
+      <Motions placed={placed} style={recipe.captions.style} defaultAccent={recipe.motionStyle?.accentColor ?? null} />
+    ),
+    // tela cheia com texto: a legenda sai enquanto ela está no ar (opção do motion)
+    captions: <Captions recipe={recipe} hiddenRanges={captionHiddenRanges(placed)} />,
   };
 
   return (
@@ -141,7 +162,8 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
           />
         </Sequence>
       ) : null}
-      <AudioClips clips={recipe.audioClips} />
+      {/* trilha sugerida pela IA (pendente) só toca no preview, nunca no MP4 */}
+      <AudioClips clips={recipe.audioClips.filter((c) => c.status !== "pending" || previewPending)} />
     </AbsoluteFill>
   );
 };

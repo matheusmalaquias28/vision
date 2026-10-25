@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { outputDuration, type AudioClip, type Recipe } from "@vision/recipe";
+import { outputDuration, withPunchIn, type AudioClip, type Recipe } from "@vision/recipe";
 import { musicDir } from "./paths";
 
 export interface TemplateInfo {
@@ -19,7 +19,7 @@ export const TEMPLATES: TemplateInfo[] = [
     id: "dinamico",
     name: "Dinâmico",
     description:
-      "Punch-in nos cortes, legenda grande com contorno forte e destaque amarelo, SFX de transição (se houver em media/sfx).",
+      "Zoom nos cortes (motions na timeline), legenda grande com contorno forte e destaque amarelo, SFX de transição (se houver em media/sfx).",
   },
   {
     id: "podcast",
@@ -62,6 +62,10 @@ function sfxAtCuts(recipe: Recipe): AudioClip[] {
         loop: false,
         mediaDurationSeconds: null,
         assetId: null,
+        motionId: null,
+        status: "accepted",
+        origin: "manual",
+        note: "",
       });
     }
     acc += s.sourceEnd - s.sourceStart;
@@ -74,9 +78,8 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
   switch (templateId) {
     case "clean":
       return {
-        ...recipe,
+        ...withPunchIn(recipe, false),
         template: templateId,
-        effects: { ...recipe.effects, punchIn: false },
         audioClips: recipe.audioClips.filter((c) => c.kind !== "sfx"),
         captions: {
           ...recipe.captions,
@@ -94,9 +97,9 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
       };
     case "dinamico":
       return {
-        ...recipe,
+        // zoom nos cortes vira motions comuns: o operador vê e remove na timeline
+        ...withPunchIn(recipe, true),
         template: templateId,
-        effects: { ...recipe.effects, punchIn: true },
         audioClips: [...recipe.audioClips.filter((c) => c.kind !== "sfx"), ...sfxAtCuts(recipe)],
         captions: {
           ...recipe.captions,
@@ -114,9 +117,8 @@ export function applyTemplate(recipe: Recipe, templateId: string): Recipe {
       };
     case "podcast":
       return {
-        ...recipe,
+        ...withPunchIn(recipe, false),
         template: templateId,
-        effects: { ...recipe.effects, punchIn: false },
         captions: {
           ...recipe.captions,
           style: {

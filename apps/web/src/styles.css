@@ -62,6 +62,19 @@
   --mo-lowerThird: oklch(0.77 0.13 160);
   --mo-counter: oklch(0.73 0.14 300);
   --mo-flash: oklch(0.9 0.01 265);
+  --mo-kinetic: oklch(0.8 0.13 120);
+  --mo-statement: oklch(0.78 0.08 220);
+  --mo-list: oklch(0.76 0.12 190);
+  --mo-bubble: oklch(0.82 0.08 330);
+  --mo-arrow: oklch(0.8 0.15 60);
+  --mo-combo: oklch(0.83 0.13 192);
+  --mo-annotation: oklch(0.82 0.15 100);
+  --mo-chart: oklch(0.75 0.12 235);
+  --mo-callout: oklch(0.78 0.16 25);
+  --mo-speedLines: oklch(0.85 0.03 265);
+  --mo-screen: oklch(0.8 0.06 75);
+  --mo-transition: oklch(0.74 0.15 320);
+  --mo-illustration: oklch(0.84 0.07 65);
 
   /* forma */
   --r-xs: 3px;
@@ -965,6 +978,15 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* rola por arrasto quando não cabe (useDragScroll); o resto do topo fica fixo */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.steps > * {
+  flex-shrink: 0;
 }
 
 .step {
@@ -2331,6 +2353,19 @@ kbd {
 .kind-lowerThird { --mo: var(--mo-lowerThird); }
 .kind-counter { --mo: var(--mo-counter); }
 .kind-flash { --mo: var(--mo-flash); }
+.kind-kinetic { --mo: var(--mo-kinetic); }
+.kind-statement { --mo: var(--mo-statement); }
+.kind-list { --mo: var(--mo-list); }
+.kind-bubble { --mo: var(--mo-bubble); }
+.kind-arrow { --mo: var(--mo-arrow); }
+.kind-combo { --mo: var(--mo-combo); }
+.kind-annotation { --mo: var(--mo-annotation); }
+.kind-chart { --mo: var(--mo-chart); }
+.kind-callout { --mo: var(--mo-callout); }
+.kind-speedLines { --mo: var(--mo-speedLines); }
+.kind-screen { --mo: var(--mo-screen); }
+.kind-transition { --mo: var(--mo-transition); }
+.kind-illustration { --mo: var(--mo-illustration); }
 
 .trk-video { --trk: var(--trk-video); }
 .trk-video-audio { --trk: var(--trk-audio); }
@@ -4017,4 +4052,963 @@ a.drive-status:hover {
 .bell-text time {
   font-size: 11px;
   color: var(--text-4);
+}
+
+/* login */
+
+.login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--n-0);
+}
+
+.login-card {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px 24px 24px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+}
+
+.login-card > svg,
+.login-card > :first-child {
+  margin: 0 auto 8px;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.login-card input,
+.user-pass input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  height: 34px;
+  padding: 0 10px;
+  background: var(--n-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.login-card input:focus-visible,
+.user-pass input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.login-card .note {
+  margin: 0;
+}
+
+/* menu do usuário */
+
+.user-btn {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-pop {
+  left: auto;
+  right: 0;
+  width: 260px;
+}
+
+.user-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.user-head strong {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.user-pass {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+
+.user-pass input {
+  height: var(--ctl-h);
+  font-size: 12.5px;
+}
+
+.user-pop .note {
+  margin: 0 8px 6px;
+}
+
+/* usuários */
+
+.users-page {
+  max-width: 1080px;
+}
+
+.user-form {
+  margin: 0 0 26px;
+  padding: 14px 16px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  border: 1px solid var(--line);
+}
+
+.user-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 140px minmax(0, 1.1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.user-form-row input {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  height: var(--ctl-h);
+  padding: 0 9px;
+  min-width: 0;
+  background: var(--n-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.user-form-row input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+@media (max-width: 860px) {
+  .user-form-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.users-table tbody tr {
+  cursor: default;
+}
+
+.users-table tr.inactive td {
+  opacity: 0.55;
+}
+
+.users-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.role-select {
+  width: 140px;
+}
+
+.you-tag,
+.off-tag {
+  margin-left: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.off-tag {
+  background: var(--n-4);
+  color: var(--text-3);
+}
+
+.pw-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  font-size: 12.5px;
+}
+
+.pw-reveal code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  background: var(--n-0);
+  color: var(--text);
+  user-select: all;
+}
+
+/* confirmação na própria tela (substitui window.confirm) */
+.confirm-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.confirm-inline > span {
+  margin-right: 2px;
+}
+
+/* ─── Biblioteca de motions (registry) e relatório da IA ───────────── */
+
+.gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* a galeria vive na Biblioteca (coluna que muda de largura): a prévia empilha quando aperta */
+  container-type: inline-size;
+}
+
+.gallery-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--ctl-h);
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--n-1);
+  color: var(--text-3);
+}
+
+.gallery-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.gallery-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.gallery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gallery-item {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--n-1);
+}
+
+.gallery-item.open {
+  border-color: var(--line-2);
+  background: var(--n-2);
+}
+
+.gallery-row {
+  width: 100%;
+  height: auto;
+  display: grid;
+  grid-template-columns: 10px 116px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: none;
+  border: none;
+  text-align: left;
+  white-space: normal;
+}
+
+.gallery-row:hover:not(:disabled) {
+  background: var(--n-3);
+  border: none;
+}
+
+.gallery-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gallery-purpose {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-detail {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  padding: 4px 10px 12px;
+}
+
+.gallery-preview {
+  width: 132px;
+  aspect-ratio: 9 / 16;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--line-2);
+}
+
+.gallery-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+@container (max-width: 300px) {
+  .gallery-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gallery-preview {
+    width: min(100%, 180px);
+  }
+}
+
+.gallery-uses {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 8px;
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.gallery-uses dt {
+  color: var(--text-4);
+}
+
+.gallery-uses dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.gallery-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.variant-chip {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  background: var(--n-4);
+  color: var(--text-2);
+  cursor: help;
+}
+
+.gallery-meta,
+.prop-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.prop-hint {
+  margin-bottom: 8px;
+}
+
+.creative-report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-radius: var(--r);
+  background: var(--n-1);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.cr-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cr-muted {
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+.cr-rejected {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.cr-rejected code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.lr-group {
+  color: var(--text-4);
+  font-size: 11px;
+}
+
+.group-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+
+.prop-hint.inline {
+  margin: 0;
+  align-self: center;
+}
+
+/* ─── Ajuste de cor ────────────────────────────────────────────────── */
+
+.color-actions,
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+/* som ligado a um motion: tracejado para distinguir dos efeitos soltos */
+.clip.aclip.linked {
+  border-style: dashed;
+}
+
+/* ─── Seleção de vários itens na timeline ──────────────────────────── */
+
+.tl-marquee {
+  position: absolute;
+  z-index: 6;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.blk.multi,
+.clip.multi {
+  box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft);
+  z-index: 3;
+}
+
+.tl-multi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: 12px;
+}
+
+.tl-multi-note {
+  color: var(--text-3);
+}
+
+/* trilha que recebe o que está sendo arrastado (regra das camadas: áudio só em áudio) */
+.tl-lane.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* subtítulo de grupo dentro das propriedades (ex.: enquadramento do clipe / do vídeo principal) */
+.prop-group {
+  margin: 12px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ─── Faixas roláveis por arrasto (abas, filtros) ──────────────────── */
+
+.drag-scroll.can-scroll {
+  cursor: grab;
+}
+
+.drag-scroll.dragging,
+.drag-scroll.dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* bordas esmaecem quando há item escondido daquele lado */
+.drag-scroll.fade-right {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+
+.drag-scroll.fade-left {
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+
+.drag-scroll.fade-left.fade-right {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+
+.tabs button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.lib-filters .chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ─── Fluxo do topo em setas (Transcrever → Sugerir cortes → Sugerir motions) ─── */
+
+.pipeline {
+  display: inline-flex;
+  align-items: stretch;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.pipe {
+  --notch: 11px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 calc(var(--notch) + 9px) 0 calc(var(--notch) + 10px);
+  /* encaixa na seta anterior: o entalhe mostra o fundo como uma linha em ">" */
+  margin-left: calc(var(--notch) * -1 + 3px);
+  background: var(--n-3);
+  clip-path: polygon(0 0, calc(100% - var(--notch)) 0, 100% 50%, calc(100% - var(--notch)) 100%, 0 100%, var(--notch) 50%);
+  transition: background 0.25s var(--ease);
+  overflow: hidden;
+}
+
+.pipe.first {
+  margin-left: 0;
+  padding-left: 12px;
+  clip-path: polygon(0 0, calc(100% - var(--notch)) 0, 100% 50%, calc(100% - var(--notch)) 100%, 0 100%);
+  border-radius: 7px 0 0 7px;
+}
+
+.pipe:hover:not(.disabled):not(.running) {
+  background: var(--n-4);
+}
+
+.pipe.disabled {
+  opacity: 0.5;
+}
+
+.pipe-btn {
+  height: 100%;
+  padding: 0;
+  gap: 7px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+}
+
+.pipe-btn:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.pipe-btn:disabled {
+  opacity: 1;
+}
+
+.pipe-num {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--n-5);
+  color: var(--text-2);
+  transition: background 0.25s var(--ease), color 0.25s var(--ease);
+}
+
+/* ritmo dos cortes dentro da seta */
+.pipe .pace-select {
+  position: relative;
+  z-index: 1;
+}
+
+.pipe .pace-select select {
+  height: 22px;
+  border: none;
+  border-left: 1px solid var(--line-2);
+  border-radius: 0;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* concluído: seta esverdeada e ✓ */
+.pipe.done {
+  background: color-mix(in oklch, var(--ok) 14%, var(--n-2));
+}
+
+.pipe.done:hover:not(.disabled):not(.running) {
+  background: color-mix(in oklch, var(--ok) 20%, var(--n-3));
+}
+
+.pipe.done .pipe-num {
+  background: var(--ok);
+  color: var(--n-1);
+}
+
+/* processando: luz correndo por dentro da seta */
+.pipe.running {
+  background: color-mix(in oklch, var(--accent) 16%, var(--n-2));
+}
+
+.pipe.running .pipe-btn {
+  color: var(--text);
+}
+
+.pipe.running .pipe-num {
+  background: var(--accent);
+  color: var(--accent-ink);
+  animation: pipe-breathe 1.1s var(--ease) infinite alternate;
+}
+
+/* faixa estreita (~30% da seta) correndo da esquerda para a direita */
+.pipe.running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 40%, oklch(1 0 0 / 0.5) 50%, transparent 60%);
+  background-size: 300% 100%;
+  animation: pipe-light 1.6s linear infinite;
+  animation-delay: var(--light-delay, 0s);
+  pointer-events: none;
+}
+
+/* atravessa em 70% do ciclo e descansa fora da seta antes da próxima passada */
+@keyframes pipe-light {
+  0% {
+    background-position: 100% 0;
+  }
+  70%,
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+@keyframes pipe-breathe {
+  to {
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+}
+
+/* acabou de concluir: faixa verde varre a seta e o ✓ entra com um pulo */
+.pipe.just-done::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, color-mix(in oklch, var(--ok) 70%, transparent), transparent);
+  transform: translateX(-100%);
+  animation: pipe-done-sweep 0.8s var(--ease) forwards;
+  pointer-events: none;
+}
+
+.pipe.just-done .pipe-num {
+  animation: pipe-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes pipe-done-sweep {
+  to {
+    /* 45% da seta × 260% ≈ atravessa a seta inteira */
+    transform: translateX(260%);
+  }
+}
+
+@keyframes pipe-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipe.running::after,
+  .pipe.just-done::before,
+  .pipe.running .pipe-num,
+  .pipe.just-done .pipe-num {
+    animation: none;
+  }
+}
+
+/* ─── Ilustração (imagem gerada) no painel do motion ─── */
+
+.illus-field {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.illus-thumb {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--n-3);
+  border: 1px solid var(--line-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.illus-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.illus-thumb.busy {
+  background: linear-gradient(100deg, var(--n-3) 30%, var(--n-4) 50%, var(--n-3) 70%);
+  background-size: 250% 100%;
+  animation: pipe-light 1.4s linear infinite;
+}
+
+.illus-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.illus-actions button {
+  align-self: flex-start;
+}
+
+.illus-error {
+  font-size: 11.5px;
+  color: var(--danger);
+  line-height: 1.35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .illus-thumb.busy {
+    animation: none;
+  }
+}
+
+.images-report {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.dd-hint.err {
+  color: var(--danger);
+}
+
+.dm-analyzing {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ─── Galeria das imagens geradas (controle de gasto e reaproveitamento) ─── */
+
+.illus-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.illus-gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.illus-new {
+  display: flex;
+  gap: 6px;
+}
+
+.illus-new input {
+  flex: 1;
+  min-width: 0;
+}
+
+.illus-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.illus-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.illus-card-img {
+  position: relative;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--n-3);
+}
+
+.illus-card-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.illus-card.used .illus-card-img {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px var(--ok);
+}
+
+.illus-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--ok);
+  color: var(--n-1);
+}
+
+.illus-card-subject {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.illus-card-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.illus-card-busy {
+  font-size: 10.5px;
+  color: var(--accent);
+}
+
+/* ─── Trilha sugerida pela IA (pendente) ─── */
+
+.aclip.pending {
+  border-style: dashed;
+  opacity: 0.75;
+  background-image: repeating-linear-gradient(135deg, transparent 0 8px, oklch(1 0 0 / 0.06) 8px 16px);
+}
+
+.music-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.music-choice-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.music-choice-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-choice .row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ─── Modelos de legenda ─── */
+
+.caption-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }

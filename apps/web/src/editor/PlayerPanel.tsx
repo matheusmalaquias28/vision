@@ -4,6 +4,9 @@ import { recipeMetadata, VisionComposition } from "@vision/video";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { TransportBar } from "./TransportBar";
 
+/** Canais de áudio do Player (padrão do Remotion: 5); folga para trechos curtos + música + sons */
+const PLAYER_AUDIO_TAGS = 32;
+
 interface PlayerPanelProps {
   recipe: Recipe;
   playerRef: React.RefObject<PlayerRef | null>;
@@ -55,6 +58,11 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = React.memo(
               fps={meta.fps}
               compositionWidth={meta.width}
               compositionHeight={meta.height}
+              // cada trecho tem seu <Audio> e é montado 3 s antes (premount): vídeo com
+              // muitos cortes curtos + música + sons dos motions passa fácil dos 5
+              // padrão e o Player quebra ("simultaneously mount 6 <Html5Audio />").
+              // Valor fixo: o Remotion não deixa mudar depois de montado.
+              numberOfSharedAudioTags={PLAYER_AUDIO_TAGS}
               clickToPlay
               style={{ width: "100%", height: "100%" }}
             />

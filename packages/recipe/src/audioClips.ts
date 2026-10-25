@@ -90,5 +90,9 @@ export function createAudioClip(opts: {
     loop: isMusic && media === null,
     mediaDurationSeconds: media,
     assetId: opts.assetId ?? null,
+    motionId: null,
+    status: "accepted",
+    origin: "manual",
+    note: "",
   };
 }

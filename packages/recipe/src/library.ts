@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MusicProfileSchema } from "./music";
 
 /**
  * Biblioteca de assets (packs importados). Fica em media/library/ com os
@@ -68,6 +69,8 @@ export const AssetSchema = z.object({
   source: z.string().min(1),
   sourceSize: z.number().int().nonnegative(),
   sourceMtimeMs: z.number().nonnegative(),
+  /** Só músicas: estilo ouvido por IA (`library/analyzeMusic.ts`); null = ainda não analisada */
+  music: MusicProfileSchema.nullable().default(null),
 });
 
 export const CatalogSchema = z.object({

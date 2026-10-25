@@ -37,10 +37,15 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
     setDelivering(true);
     try {
       const r = await deliverProject(recipe.projectId);
+      const all = r.delivered === r.total;
       setDelivered(
-        r.delivered === r.total
-          ? `Enviado. Todos os ${r.total} vídeos da demanda estão no Drive — mude o status no quadro.`
-          : `Enviado (${r.delivered}/${r.total} vídeos da demanda no Drive).`
+        !all
+          ? `Enviado (${r.delivered}/${r.total} vídeos da demanda no Drive).`
+          : r.autoStatus && !r.autoStatus.syncError
+            ? `Enviado. Todos os ${r.total} vídeos estão no Drive; demanda movida para "${r.autoStatus.status}" e o War foi avisado.`
+            : r.autoStatus?.syncError
+              ? `Enviado. Todos os ${r.total} vídeos estão no Drive, mas o status não chegou ao War: ${r.autoStatus.syncError}`
+              : `Enviado. Todos os ${r.total} vídeos da demanda estão no Drive.`
       );
       onDelivered();
     } catch (e) {

@@ -72,7 +72,7 @@ function validRecipe() {
       { id: "sfx_01", kind: "sfx", file: "media/sfx/whoosh.mp3", start: 10, duration: 1.2, volume: 0.8 },
     ],
     audio: { originalVolume: 1, useEnhanced: false, narration: null },
-    effects: { punchIn: true },
+    effects: { punchIn: false },
     render: { width: 1080, height: 1920, fps: 30, codec: "h264" },
   };
 }

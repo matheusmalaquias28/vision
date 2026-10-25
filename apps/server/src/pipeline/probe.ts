@@ -41,3 +41,15 @@ export async function probeVideo(absPath: string): Promise<ProbeResult> {
     fps: parseFrameRate(video.r_frame_rate),
   };
 }
+
+/** Duração de vídeo ou áudio (null se o ffprobe não souber) */
+export async function probeDuration(absPath: string): Promise<number | null> {
+  const { stdout } = await runOrThrow(ffprobePath, [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "csv=p=0",
+    absPath,
+  ]);
+  const d = Number(stdout.trim());
+  return Number.isFinite(d) && d > 0 ? d : null;
+}

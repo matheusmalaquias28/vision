@@ -513,6 +513,8 @@ export async function importPack(packRoot: string, opts: ImportOptions = {}): Pr
           source: job.rel,
           sourceSize: job.stat.size,
           sourceMtimeMs: job.stat.mtimeMs,
+          // estilo ouvido por IA: só refaz se mandar analisar de novo
+          music: job.type === "music" ? (prev?.music ?? null) : null,
         });
         report.imported++;
       }

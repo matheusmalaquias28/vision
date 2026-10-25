@@ -7,6 +7,7 @@ import {
   type Source,
 } from "@vision/recipe";
 import { projectDir, projectsDir, recipePath, toRecipePath } from "./paths";
+import { normalizeVideo } from "./pipeline/normalize";
 import { probeVideo } from "./pipeline/probe";
 
 export function slugify(name: string): string {
@@ -54,8 +55,10 @@ export async function createProject(
   for (let i = 0; i < videoAbsPaths.length; i++) {
     const srcId = `src_${String(i + 1).padStart(2, "0")}`;
     const ext = path.extname(videoAbsPaths[i]).toLowerCase() || ".mp4";
-    const destAbs = path.join(dir, `source-${srcId}${ext}`);
-    fs.copyFileSync(videoAbsPaths[i], destAbs);
+    const copied = path.join(dir, `source-${srcId}${ext}`);
+    fs.copyFileSync(videoAbsPaths[i], copied);
+    // arquivo de câmera (10 bits, faixa 0–255…) vira formato de trabalho: preview = render
+    const { abs: destAbs } = await normalizeVideo(copied);
     const probe = await probeVideo(destAbs);
     sources.push({
       id: srcId,
@@ -66,6 +69,8 @@ export async function createProject(
       height: probe.height,
       fps: probe.fps,
       enhancedAudio: null,
+      color: null,
+      framing: null,
     });
   }
 

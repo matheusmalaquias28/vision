@@ -9,13 +9,16 @@ set -a
 source /etc/vision-backup.env
 set +a
 
-# Fica de fora o que o VISION gera de novo sozinho: caches de waveform,
-# filmstrips e miniaturas. Os renders (MP4) entram — pode excluir com
-# --exclude '/opt/vision/media/projects/*/renders' se o espaço apertar.
+# Fica de fora o que o VISION gera de novo sozinho (caches de waveform,
+# filmstrips, miniaturas) e os vídeos brutos: eles continuam no Drive de
+# Materiais do cliente e a limpeza automática os apaga mesmo. Entram as
+# receitas (o trabalho de edição), transcrições, áudios tratados e renders.
 restic backup /opt/vision/media /opt/vision/.env \
   --exclude '/opt/vision/media/.cache' \
   --exclude '/opt/vision/media/projects/*/filmstrip' \
   --exclude '/opt/vision/media/projects/*/thumbnail.jpg' \
+  --exclude '/opt/vision/media/projects/*/source-*' \
+  --exclude '/opt/vision/media/projects/*/original-*' \
   --tag vision
 
 # 7 diários, 4 semanais, 6 mensais

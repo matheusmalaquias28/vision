@@ -108,5 +108,6 @@ export function overlayFromAsset(
     assetId: asset.id,
     mediaDurationSeconds: kind === "video" ? media : null,
     placement: null,
+    framing: null,
   };
 }

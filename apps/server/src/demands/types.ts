@@ -108,3 +108,21 @@ export const WAR_VIDEO_STATUSES = [
   "Aprovação de Copy",
   "Concluído",
 ];
+
+export type UserRole = "superadmin" | "admin" | "editor";
+
+/** Pessoa que entra no Vision (login próprio, schema vision; nada do auth do Supabase) */
+export interface User {
+  id: string;
+  name: string;
+  /** sempre minúsculo */
+  email: string;
+  /** scrypt$<sal>$<hash> */
+  passwordHash: string;
+  /** superadmin gerencia todos; admin gerencia editores; editor só usa */
+  role: UserRole;
+  active: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

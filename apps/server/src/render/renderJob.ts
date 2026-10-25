@@ -1,10 +1,11 @@
 import path from "node:path";
-import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import type { Recipe } from "@vision/recipe";
-import { mediaDir, projectDir, repoRoot } from "../paths";
+import { recipeMediaFiles, type Recipe } from "@vision/recipe";
+import { projectDir } from "../paths";
+import { freeTempBytes, getServeUrl, MIN_FREE_BYTES, syncBundleMedia } from "./bundle";
+import { ensureWorkingSources } from "../pipeline/normalize";
+import { saveRecipe } from "../project";
 
-const ENTRY_POINT = path.join(repoRoot, "packages", "video", "src", "index.ts");
 const COMPOSITION_ID = "Vision";
 
 export interface RenderResult {
@@ -15,10 +16,24 @@ export async function renderRecipe(
   recipe: Recipe,
   onProgress?: (fraction: number) => void
 ): Promise<RenderResult> {
-  const serveUrl = await bundle({
-    entryPoint: ENTRY_POINT,
-    publicDir: mediaDir,
-  });
+  // folga de disco: sem ela o render falha no meio (ENOSPC) e deixa lixo para trás
+  const free = freeTempBytes();
+  if (free !== null && free < MIN_FREE_BYTES) {
+    throw new Error(
+      `pouco espaço em disco para renderizar (${(free / 1024 ** 3).toFixed(1)} GB livres, mínimo ${(MIN_FREE_BYTES / 1024 ** 3).toFixed(0)} GB): rode a limpeza (npm run cli -- retention) ou libere espaço`
+    );
+  }
+  // projeto criado antes da conversão na entrada: arquivo de câmera é lido mais
+  // escuro pelo render do que pelo navegador; converte antes (uma vez só)
+  const ensured = await ensureWorkingSources(recipe, (msg) => console.log(`[render ${recipe.projectId}] ${msg}`));
+  if (ensured.changed) saveRecipe(ensured.recipe);
+  recipe = ensured.recipe;
+
+  // um bundle por processo (não copia a mídia de novo a cada render)
+  const serveUrl = await getServeUrl();
+  // Windows: o bundle é uma cópia de media/ da hora em que nasceu; leva o que é novo
+  const synced = syncBundleMedia(serveUrl, recipeMediaFiles(recipe));
+  if (synced > 0) console.log(`[render ${recipe.projectId}] ${synced} arquivo(s) novo(s) copiado(s) para o bundle`);
 
   const inputProps = { recipe };
   const composition = await selectComposition({

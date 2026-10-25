@@ -1,17 +1,8 @@
 import React, { useState } from "react";
 import { addDemandNote, resendDemandNote, type DemandNote } from "../api";
 import { Icon } from "../editor/Icon";
+import { useCurrentUser } from "../ui/user";
 import { fmtDateTime, safeUrl } from "./demandUtil";
-
-const AUTHOR_KEY = "vision.author";
-
-function readAuthor(): string {
-  try {
-    return localStorage.getItem(AUTHOR_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
 
 interface DemandNotesProps {
   demandId: string;
@@ -21,23 +12,18 @@ interface DemandNotesProps {
 
 /** Conversa da demanda: notas do War e do Vision na mesma linha do tempo */
 export const DemandNotes: React.FC<DemandNotesProps> = ({ demandId, notes, onChanged }) => {
-  const [author, setAuthor] = useState(readAuthor);
+  const user = useCurrentUser();
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const visible = notes.filter((n) => !n.apagadoEm);
 
   const send = async () => {
-    if (!text.trim() || !author.trim() || sending) return;
+    if (!text.trim() || sending) return;
     setSending(true);
     setError(null);
     try {
-      localStorage.setItem(AUTHOR_KEY, author.trim());
-    } catch {
-      // sem storage: só não lembra o nome
-    }
-    try {
-      const n = await addDemandNote(demandId, text, author);
+      const n = await addDemandNote(demandId, text);
       if (n.syncError) setError(`Salvo no Vision, mas o War não recebeu: ${n.syncError}`);
       setText("");
       onChanged();
@@ -103,14 +89,6 @@ export const DemandNotes: React.FC<DemandNotesProps> = ({ demandId, notes, onCha
         </ul>
       )}
       <div className="dd-composer">
-        {!readAuthor() && (
-          <input
-            className="dd-author"
-            placeholder="Seu nome (aparece no War)"
-            value={author}
-            onChange={(e) => setAuthor(e.target.value)}
-          />
-        )}
         <textarea
           rows={2}
           placeholder="Escreva para o gestor… (Ctrl+Enter envia)"
@@ -125,19 +103,8 @@ export const DemandNotes: React.FC<DemandNotesProps> = ({ demandId, notes, onCha
           }}
         />
         <div className="dd-composer-bar">
-          {readAuthor() && (
-            <button className="sm ghost dd-author-change" title="Trocar nome" onClick={() => {
-              try {
-                localStorage.removeItem(AUTHOR_KEY);
-              } catch {
-                // ignora
-              }
-              setAuthor("");
-            }}>
-              como {author}
-            </button>
-          )}
-          <button className="sm primary" disabled={!text.trim() || !author.trim() || sending} onClick={send}>
+          <span className="dd-author-change">como {user?.name}</span>
+          <button className="sm primary" disabled={!text.trim() || sending} onClick={send}>
             {sending ? "Enviando…" : "Comentar"}
           </button>
         </div>

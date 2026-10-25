@@ -1,7 +1,9 @@
-import { outputDuration, type Overlay, type Recipe } from "@vision/recipe";
+import { isSplitLayout, outputDuration, outputToSource, type Framing, type Overlay, type Recipe } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import { listAssets, uploadAsset, type MusicTrack } from "../api";
+import { inspectMediaFile } from "./mediaFiles";
 import { Prop, ScrubNumber, Section, Segmented, Select, Slider, Toggle } from "../ui/controls";
+import { FramingFields } from "./FramingFields";
 import { Icon } from "./Icon";
 
 /** Campos novos do overlay com valor neutro (uploads avulsos) */
@@ -12,6 +14,7 @@ const DEFAULTS = {
   assetId: null,
   mediaDurationSeconds: null,
   placement: null,
+  framing: null,
 };
 
 function newId(overlays: Overlay[]): string {
@@ -49,6 +52,11 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
   useEffect(refreshAssets, [recipe.projectId]);
 
   const setOverlays = (overlays: Overlay[]) => onChange({ ...recipe, overlays });
+  // vídeo que fica na outra metade do split (o que toca no início do clipe)
+  const mainAt = overlay ? outputToSource(recipe.timeline.segments, overlay.start) : null;
+  const mainSource = mainAt ? (recipe.sources.find((s) => s.id === mainAt.sourceId) ?? null) : null;
+  const setSourceFraming = (sourceId: string, framing: Framing | null) =>
+    onChange({ ...recipe, sources: recipe.sources.map((s) => (s.id === sourceId ? { ...s, framing } : s)) });
 
   const patch = (p: Partial<Overlay>) => {
     if (!overlay) return;
@@ -73,6 +81,11 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
 
   const addMedia = async (file: File) => {
     setError(null);
+    const info = await inspectMediaFile(file);
+    if ("error" in info || info.kind === "audio") {
+      setError("error" in info ? info.error : `${file.name}: áudio vai na trilha de áudio (Música/Efeitos), não em Overlays`);
+      return;
+    }
     try {
       const uploaded = await uploadAsset(recipe.projectId, file);
       refreshAssets();
@@ -206,6 +219,7 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
                 <option value="sticker">Sticker (solto)</option>
                 <option value="pip">PiP (janela no canto)</option>
                 <option value="split-bottom">Split (metade de baixo)</option>
+                <option value="split-top">Split (metade de cima)</option>
                 <option value="overlay">Destaque central</option>
               </Select>
             </Prop>
@@ -251,17 +265,44 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
               </Prop>
             </>
           )}
-          <Prop label="Posição">
-            <Segmented
-              value={overlay.position}
-              options={[
-                { value: "top", label: "Topo" },
-                { value: "center", label: "Centro" },
-                { value: "bottom", label: "Base" },
-              ]}
-              onChange={(v) => patch({ position: v })}
-            />
-          </Prop>
+          {isSplitLayout(overlay.layout) ? (
+            <Prop label="Metade" hint="O vídeo principal vai para a outra metade">
+              <Segmented
+                value={overlay.layout}
+                options={[
+                  { value: "split-top", label: "Cima" },
+                  { value: "split-bottom", label: "Baixo" },
+                ]}
+                onChange={(v) => patch({ layout: v })}
+              />
+            </Prop>
+          ) : overlay.layout !== "fullscreen" ? (
+            <Prop label="Posição">
+              <Segmented
+                value={overlay.position}
+                options={[
+                  { value: "top", label: "Topo" },
+                  { value: "center", label: "Centro" },
+                  { value: "bottom", label: "Base" },
+                ]}
+                onChange={(v) => patch({ position: v })}
+              />
+            </Prop>
+          ) : null}
+          {overlay.kind !== "title" && overlay.layout !== "sticker" && (
+            <>
+              <p className="prop-group">Enquadramento do clipe</p>
+              <FramingFields value={overlay.framing} onChange={(framing) => patch({ framing })} />
+            </>
+          )}
+          {overlay.kind !== "title" && isSplitLayout(overlay.layout) && mainSource && (
+            <>
+              <p className="prop-group" title="Vale para todos os trechos desse vídeo">
+                Vídeo principal (outra metade)
+              </p>
+              <FramingFields value={mainSource.framing} onChange={(f) => setSourceFraming(mainSource.id, f)} />
+            </>
+          )}
           <div className="row row-end">
             <button
               className="sm danger"

@@ -12,6 +12,10 @@ export interface RenderJobInfo {
 }
 
 const jobs = new Map<string, RenderJobInfo>();
+/**
+ * Um render por vez (uso single-user, vídeo curto): os jobs entram numa fila
+ * encadeada. Render em paralelo dobraria CPU, RAM e disco temporário na VPS.
+ */
 let chain: Promise<void> = Promise.resolve();
 let counter = 0;
 

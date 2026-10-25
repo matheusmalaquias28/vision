@@ -24,6 +24,52 @@ const GOOGLE_FONTS = [
   "Barlow Condensed",
   "Nunito",
   "Titan One",
+  "Playfair Display",
+];
+
+type CaptionStyle = Recipe["captions"]["style"];
+
+/** Modelos prontos: fonte + contorno + animação de uma vez (o resto do estilo fica) */
+const CAPTION_MODELS: { id: string; label: string; title: string; patch: Partial<CaptionStyle> }[] = [
+  {
+    id: "classico",
+    label: "Clássico",
+    title: "Poppins Black, contorno grosso, entra com pop (o padrão)",
+    patch: { fontFamily: "Poppins", fontWeight: 900, strokeWidthPx: 6, uppercase: true, animation: "pop" },
+  },
+  {
+    id: "suave",
+    label: "Suave",
+    title: "A frase sobe e aparece com desaceleração; a palavra falada ganha cor aos poucos",
+    patch: { fontFamily: "Poppins", fontWeight: 800, strokeWidthPx: 4, uppercase: true, animation: "smooth" },
+  },
+  {
+    id: "palavra",
+    label: "Palavra a palavra",
+    title: "Cada palavra surge quando é dita, subindo e saindo do desfoque",
+    patch: { fontFamily: "Montserrat", fontWeight: 900, strokeWidthPx: 5, uppercase: true, animation: "reveal" },
+  },
+  {
+    id: "caixa",
+    label: "Caixa",
+    title: "Uma pílula na cor de destaque aparece atrás da palavra falada",
+    patch: { fontFamily: "Poppins", fontWeight: 800, strokeWidthPx: 3, uppercase: true, animation: "box" },
+  },
+  {
+    id: "elegante",
+    label: "Elegante",
+    title: "Serifada, sem contorno, sai do desfoque com as letras se aproximando",
+    patch: { fontFamily: "Playfair Display", fontWeight: 700, strokeWidthPx: 0, uppercase: false, animation: "blur" },
+  },
+];
+
+const ANIMATION_OPTIONS: { value: CaptionStyle["animation"]; label: string }[] = [
+  { value: "pop", label: "Pop (padrão)" },
+  { value: "smooth", label: "Suave" },
+  { value: "reveal", label: "Palavra a palavra" },
+  { value: "box", label: "Caixa no destaque" },
+  { value: "blur", label: "Desfoque elegante" },
+  { value: "none", label: "Nenhuma" },
 ];
 
 const WEIGHT_LABEL: Record<number, string> = {
@@ -96,8 +142,30 @@ export const StylePanel: React.FC<StylePanelProps> = ({ recipe, onChange }) => {
     else setFontDraft(style.fontFamily);
   };
 
+  const activeModel = CAPTION_MODELS.find(
+    (m) => m.patch.animation === style.animation && m.patch.fontFamily === style.fontFamily
+  )?.id;
+
   return (
     <>
+      <Section title="Modelo da legenda">
+        <div className="caption-models">
+          {CAPTION_MODELS.map((m) => (
+            <button
+              key={m.id}
+              className={`sm ${activeModel === m.id ? "primary" : ""}`}
+              title={m.title}
+              onClick={() => {
+                setCustomFont(!GOOGLE_FONTS.includes(m.patch.fontFamily ?? style.fontFamily));
+                setStyle(m.patch);
+              }}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <p className="prop-hint">Ajusta fonte, contorno e animação; cores, tamanho e posição continuam os seus.</p>
+      </Section>
       <Section title="Texto">
         <Prop label="Fonte">
           <Select
@@ -222,18 +290,28 @@ export const StylePanel: React.FC<StylePanelProps> = ({ recipe, onChange }) => {
             onChange={(v) => setStyle({ wordsPerLine: v })}
           />
         </Prop>
-        <Prop label="Ajustar à largura">
-          <Toggle checked={style.autoFit} onChange={(v) => setStyle({ autoFit: v })} label="Ajustar à largura" />
-        </Prop>
-        <Prop label="Entrada">
+        <Prop label="Linhas por vez">
           <Segmented
-            value={style.animation}
+            value={style.maxLines}
             options={[
-              { value: "pop", label: "Pop" },
-              { value: "none", label: "Nenhuma" },
+              { value: 1, label: "1", title: "Uma linha; frase longa vira mais partes" },
+              { value: 2, label: "2" },
+              { value: 3, label: "3" },
             ]}
-            onChange={(v) => setStyle({ animation: v })}
+            onChange={(v) => setStyle({ maxLines: v })}
           />
+        </Prop>
+        <Prop label="Animação">
+          <Select
+            value={style.animation}
+            onChange={(e) => setStyle({ animation: e.target.value as CaptionStyle["animation"] })}
+          >
+            {ANIMATION_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
         </Prop>
         <Prop label="Palavras/bloco">
           <ScrubNumber

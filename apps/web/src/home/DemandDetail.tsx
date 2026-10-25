@@ -49,7 +49,15 @@ const VideoRow: React.FC<{
 }> = ({ video, disabled, onOpen, onFiles }) => {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  const state = video.deliveredAt ? "Entregue" : video.projectId ? "Em edição" : "Não iniciado";
+  const a = video.analysis;
+  const analyzing = a?.status === "queued" || a?.status === "running";
+  const state = video.deliveredAt
+    ? "Entregue"
+    : analyzing
+      ? "IA analisando"
+      : video.projectId
+        ? "Em edição"
+        : "Não iniciado";
   return (
     <li
       className={`dd-video ${over ? "over" : ""}`}
@@ -72,6 +80,12 @@ const VideoRow: React.FC<{
         </span>
         {video.deliveredAt && video.driveFileUrl ? (
           <ExtLink href={video.driveFileUrl}>enviado {fmtDateTime(video.deliveredAt)}</ExtLink>
+        ) : analyzing ? (
+          <span className="dd-hint">{a!.stage}…</span>
+        ) : a?.status === "error" && !video.deliveredAt ? (
+          <span className="dd-hint err" title={a.error ?? ""}>análise falhou: rode Analisar no editor</span>
+        ) : a?.status === "done" && !video.deliveredAt ? (
+          <span className="dd-hint">sugestões da IA prontas para revisar</span>
         ) : (
           !video.projectId && <span className="dd-hint">arraste os brutos aqui ou clique em começar</span>
         )}

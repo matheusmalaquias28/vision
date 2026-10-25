@@ -1,4 +1,4 @@
-import type { Catalog, CutPace, Recipe, Source } from "@vision/recipe";
+import type { Catalog, ColorGrade, CutPace, Recipe, Source } from "@vision/recipe";
 
 export interface ProjectSummary {
   id: string;
@@ -6,14 +6,17 @@ export interface ProjectSummary {
   updatedAt: string;
   clipCount: number;
   durationInSeconds: number;
+  /** a limpeza apagou o vídeo bruto: abre para consulta, não renderiza */
+  rawPurgedAt: string | null;
 }
 
-export interface DirectorJob {
-  id: string;
-  projectId: string;
-  status: "running" | "done" | "error";
+/** Análise automática ao subir os brutos (transcrição, cortes e motions no servidor) */
+export interface AnalysisStatus {
+  status: "queued" | "running" | "done" | "error";
   stage: string;
-  error?: string;
+  startedAt: string;
+  finishedAt: string | null;
+  error: string | null;
 }
 
 export interface TemplateInfo {
@@ -37,6 +40,10 @@ export interface RenderJob {
 }
 
 async function json<T>(res: Response): Promise<T> {
+  // sessão expirada ou ausente: o App volta para a tela de login
+  if (res.status === 401 && !res.url.endsWith("/api/auth/login")) {
+    window.dispatchEvent(new Event("vision:unauthorized"));
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
     throw new Error((body as { error?: string }).error ?? res.statusText);
@@ -56,15 +63,8 @@ export const uploadProject = (files: File[], briefing = "") => {
   );
 };
 
-export const startDirect = (id: string, briefing: string) =>
-  fetch(`/api/projects/${id}/direct`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ briefing }),
-  }).then((r) => json<DirectorJob>(r));
-
-export const getDirectorJob = (jobId: string) =>
-  fetch(`/api/director-jobs/${jobId}`).then((r) => json<DirectorJob>(r));
+export const getAnalysis = (id: string) =>
+  fetch(`/api/projects/${id}/analysis`).then((r) => json<AnalysisStatus | null>(r));
 
 export const listTemplates = () =>
   fetch("/api/templates").then((r) => json<TemplateInfo[]>(r));
@@ -94,22 +94,37 @@ export const listSfx = () =>
 export const listAssets = (id: string) =>
   fetch(`/api/projects/${id}/assets`).then((r) => json<MusicTrack[]>(r));
 
-export const uploadAsset = (id: string, file: File) => {
-  const fd = new FormData();
-  fd.append("asset", file);
-  return fetch(`/api/projects/${id}/assets`, { method: "POST", body: fd }).then(
-    (r) => json<{ file: string; name: string }>(r)
-  );
-};
+/** Envio com progresso (fetch não informa o upload); fração 0–1 */
+function uploadWithProgress<T>(url: string, file: File, onProgress?: (fraction: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("asset", file);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
+    xhr.onerror = () => reject(new Error("falha de rede no envio"));
+    xhr.onload = () => {
+      if (xhr.status === 401) window.dispatchEvent(new Event("vision:unauthorized"));
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // resposta sem JSON
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
+      else reject(new Error((body as { error?: string } | null)?.error ?? xhr.statusText));
+    };
+    xhr.send(fd);
+  });
+}
+
+/** Mídia avulsa do projeto (overlay, música, efeito) */
+export const uploadAsset = (id: string, file: File, onProgress?: (fraction: number) => void) =>
+  uploadWithProgress<{ file: string; name: string }>(`/api/projects/${id}/assets`, file, onProgress);
 
 /** Sobe um vídeo, faz probe e devolve o Source pronto para virar segmento */
-export const addSourceClip = (id: string, file: File) => {
-  const fd = new FormData();
-  fd.append("asset", file);
-  return fetch(`/api/projects/${id}/sources`, { method: "POST", body: fd }).then(
-    (r) => json<{ source: Source }>(r)
-  );
-};
+export const addSourceClip = (id: string, file: File, onProgress?: (fraction: number) => void) =>
+  uploadWithProgress<{ source: Source }>(`/api/projects/${id}/sources`, file, onProgress);
 
 export const getRecipe = (id: string) =>
   fetch(`/api/projects/${id}/recipe`).then((r) => json<Recipe>(r));
@@ -140,12 +155,111 @@ export const suggestSmartCutsApi = (id: string, pace: CutPace = "normal", ai = t
   }).then((r) => json<Recipe>(r));
 
 /** Plano de motions da IA (pendentes); instructions = pedido extra do editor */
-export const suggestMotionsApi = (id: string, instructions = "") =>
-  fetch(`/api/projects/${id}/motions/suggest`, {
+/** Resumo de uma rodada do Creative Planner (1 chamada de IA) */
+export interface CreativeReport {
+  jobId: string;
+  model: string;
+  style: "balanced" | "dynamic" | "premium" | "minimal" | "educational";
+  styleSource: "briefing" | "ia" | "padrão";
+  avoid: string[];
+  catalog: { motions: string[]; combos: string[] };
+  proposed: number;
+  applied: number;
+  rejected: { ref: string; reason: string }[];
+  tokens: { input: number; output: number; cached: number } | null;
+  timings: { prepareMs: number; plannerMs: number; compileMs: number; totalMs: number };
+  cacheHit: boolean;
+  fallback: string | null;
+  promptChars: number;
+  /** Trilha sugerida (pendente na trilha Música) */
+  music?: { name: string; why: string } | null;
+}
+
+export interface FastPathReport {
+  stages: { transcribeMs: number; transcribeSkipped: boolean; cutsMs: number; plannerMs: number };
+  totalMs: number;
+  withinTarget: boolean;
+  videoSeconds: number;
+  creative: CreativeReport;
+}
+
+/** Fast Path: transcrição (se faltar) + cortes + 1 chamada criativa */
+export const analyzeApi = (id: string, pace: CutPace) =>
+  fetch(`/api/projects/${id}/creative/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pace }),
+  }).then((r) => json<{ recipe: Recipe; report: FastPathReport }>(r));
+
+export interface AutoColorResult {
+  grade: ColorGrade;
+  /** Luma (percentis 10/90, 0–1 da tela) e saturação média medidas pelo ffmpeg */
+  stats: { yLow: number; yHigh: number; satAvg: number };
+}
+
+/** Mede os vídeos e devolve o ajuste de cor de cada um (não grava a receita) */
+export const autoColorApi = (id: string, sourceIds?: string[]) =>
+  fetch(`/api/projects/${id}/color/auto`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourceIds }),
+  }).then((r) => json<{ grades: Record<string, AutoColorResult> }>(r));
+
+/** Ilustração (Magnific, 1:1 em 1K): gera a imagem e devolve o caminho; fresh = outra para a mesma descrição */
+export const generateIllustrationApi = (id: string, subject: string, fresh = false) =>
+  fetch(`/api/projects/${id}/illustrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject, fresh }),
+  }).then((r) => json<{ file: string; cached: boolean; seconds: number }>(r));
+
+/** Galeria de imagens geradas no projeto (controle de gasto e reaproveitamento) */
+export interface IllustrationList {
+  items: { file: string; subject: string; createdAt: string }[];
+  generated: number;
+  limit: number;
+  enabled: boolean;
+}
+
+export const listIllustrationsApi = (id: string) =>
+  fetch(`/api/projects/${id}/illustrations`).then((r) => json<IllustrationList>(r));
+
+export const deleteIllustrationApi = (id: string, file: string) =>
+  fetch(`/api/projects/${id}/illustrations?file=${encodeURIComponent(file)}`, { method: "DELETE" }).then((r) =>
+    json<Omit<IllustrationList, "enabled">>(r)
+  );
+
+/** Resultado do botão "Sugerir imagens" */
+export interface IllustrationReport {
+  proposed: number;
+  added: number;
+  images: number;
+  errors: string[];
+  rejected: { ref: string; reason: string }[];
+  seconds: number;
+}
+
+/** IA escolhe 2–3 pontos-chave e gera as imagens (Magnific); entram como sugestão */
+export const suggestIllustrationsApi = (id: string, instructions = "") =>
+  fetch(`/api/projects/${id}/illustrations/suggest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ instructions }),
-  }).then((r) => json<Recipe>(r));
+  }).then((r) => json<{ recipe: Recipe; report: IllustrationReport }>(r));
+
+/** Estado da geração de imagem de uma ilustração no editor */
+export interface IllustrationJob {
+  busy: boolean;
+  error: string | null;
+}
+
+/** Briefing do War + pedido do editor → motions e receitas pendentes */
+export const planCreativeApi = (id: string, instructions = "", force = false) =>
+  fetch(`/api/projects/${id}/creative/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instructions, force }),
+  }).then((r) => json<{ recipe: Recipe; report: CreativeReport }>(r));
 
 export interface WaveformData {
   binsPerSecond: number;
@@ -232,6 +346,8 @@ export interface DemandVideo {
   driveFileId: string | null;
   driveFileUrl: string | null;
   deliveredAt: string | null;
+  /** Análise automática do projeto (só nas respostas de demanda) */
+  analysis?: AnalysisStatus | null;
 }
 
 export interface Demand {
@@ -352,15 +468,21 @@ export const getProjectDemand = (projectId: string) =>
 
 export const deliverProject = (projectId: string) =>
   postJson(`/api/projects/${projectId}/deliver`).then((r) =>
-    json<{ video: DemandVideo; delivered: number; total: number }>(r)
+    json<{
+      video: DemandVideo;
+      delivered: number;
+      total: number;
+      /** último vídeo entregue: status para onde a demanda foi (ou o erro do War) */
+      autoStatus: { status: string; syncError: string | null } | null;
+    }>(r)
   );
 
 export const getIntegrations = () => fetch("/api/integrations").then((r) => json<Integrations>(r));
 
 export const disconnectDrive = () => postJson("/api/google/disconnect").then((r) => json<{ ok: true }>(r));
 
-export const addDemandNote = (id: string, texto: string, autor: string) =>
-  postJson(`/api/demands/${encodeURIComponent(id)}/notes`, { texto, autor }).then((r) => json<DemandNote>(r));
+export const addDemandNote = (id: string, texto: string) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/notes`, { texto }).then((r) => json<DemandNote>(r));
 
 export const resendDemandNote = (id: string, criadoEm: string) =>
   postJson(`/api/demands/${encodeURIComponent(id)}/notes/resend`, { criadoEm }).then((r) =>
@@ -372,3 +494,47 @@ export const listNotifications = () =>
 
 export const markNotificationsRead = (demandId?: string) =>
   postJson("/api/notifications/read", { demandId }).then((r) => json<{ ok: true }>(r));
+
+// ─── Login ───────────────────────────────────────────────────────────
+
+export type UserRole = "superadmin" | "admin" | "editor";
+
+export interface CurrentUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+}
+
+export interface ManagedUser extends CurrentUser {
+  active: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export const getMe = () => fetch("/api/auth/me").then((r) => json<CurrentUser>(r));
+
+export const login = (email: string, password: string) =>
+  postJson("/api/auth/login", { email, password }).then((r) => json<CurrentUser>(r));
+
+export const logout = () => postJson("/api/auth/logout").then((r) => json<{ ok: true }>(r));
+
+export const changePassword = (current: string, next: string) =>
+  postJson("/api/auth/password", { current, next }).then((r) => json<{ ok: true }>(r));
+
+// ─── Usuários (admin) ────────────────────────────────────────────────
+
+export const listUsers = () => fetch("/api/users").then((r) => json<ManagedUser[]>(r));
+
+export const createUser = (u: { name: string; email: string; role: UserRole; password: string }) =>
+  postJson("/api/users", u).then((r) => json<{ user: ManagedUser; generatedPassword: string | null }>(r));
+
+export const updateUser = (id: string, patch: { name?: string; role?: UserRole; active?: boolean }) =>
+  fetch(`/api/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).then((r) => json<ManagedUser>(r));
+
+export const resetUserPassword = (id: string) =>
+  postJson(`/api/users/${id}/password`, {}).then((r) => json<{ generatedPassword: string | null }>(r));

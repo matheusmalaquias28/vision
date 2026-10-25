@@ -1,7 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const API = "http://localhost:4000";
+// VISION_API_URL: aponta o editor para outro server (ex.: instância de teste)
+const API = process.env.VISION_API_URL ?? "http://localhost:4000";
 
 export default defineConfig({
   plugins: [react()],

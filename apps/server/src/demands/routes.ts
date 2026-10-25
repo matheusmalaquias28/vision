@@ -4,6 +4,7 @@ import express from "express";
 import { projectDir } from "../paths";
 import { slugify } from "../project";
 import { createProjectFromUploads, upload } from "../uploads";
+import { readAnalysis, startAutoAnalysis } from "../creative/autoAnalyze";
 import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from "./drive";
 import { getStore } from "./store";
 import type { Demand, DemandVideo } from "./types";
@@ -37,7 +38,8 @@ function withProgress(d: Demand, videos: DemandVideo[]) {
   return {
     ...d,
     raw: undefined,
-    videos: mine,
+    // andamento da análise automática de cada vídeo (lido do projeto)
+    videos: mine.map((v) => ({ ...v, analysis: v.projectId ? readAnalysis(v.projectId) : null })),
     started: mine.filter((v) => v.projectId).length,
     delivered: mine.filter((v) => v.deliveredAt).length,
   };
@@ -126,7 +128,7 @@ demandsRouter.post(
       res.status(400).json({ error: "status é obrigatório" });
       return;
     }
-    const demand = await changeStatus(String(req.params.id), status, req.body?.updatedBy);
+    const demand = await changeStatus(String(req.params.id), status, req.user?.name);
     res.json({ ...demand, raw: undefined });
   })
 );
@@ -140,7 +142,7 @@ demandsRouter.post(
       res.status(404).json({ error: "demanda não encontrada" });
       return;
     }
-    res.json({ ...(await changeStatus(demand.id, demand.status)), raw: undefined });
+    res.json({ ...(await changeStatus(demand.id, demand.status, req.user?.name)), raw: undefined });
   })
 );
 
@@ -150,7 +152,7 @@ demandsRouter.post(
   "/api/demands/:id/notes",
   wrap(async (req, res) => {
     res.json(
-      await addNote(String(req.params.id), String(req.body?.texto ?? ""), String(req.body?.autor ?? ""))
+      await addNote(String(req.params.id), String(req.body?.texto ?? ""), req.user?.name ?? "")
     );
   })
 );
@@ -208,6 +210,8 @@ demandsRouter.post(
       demand.briefing || demand.briefingText || ""
     );
     await store.upsertVideo({ ...video, projectId: recipe.projectId, updatedAt: new Date().toISOString() });
+    // transcrição, cortes e motions com o briefing já começam no servidor (tudo entra como sugestão)
+    startAutoAnalysis(recipe.projectId);
     res.json(recipe);
   })
 );
@@ -317,11 +321,21 @@ demandsRouter.post(
     };
     await store.upsertVideo(updated);
     const videos = await store.listVideos(demand.id);
-    res.json({
-      video: updated,
-      delivered: videos.filter((v) => v.deliveredAt).length,
-      total: videos.length,
-    });
+    const delivered = videos.filter((v) => v.deliveredAt).length;
+
+    // último vídeo entregue: a demanda segue sozinha para o status de revisão
+    let autoStatus: { status: string; syncError: string | null } | null = null;
+    const target = process.env.VISION_STATUS_ON_DELIVERY ?? "Aprovação do Gestor";
+    if (target && delivered === videos.length && demand.status.toLowerCase() !== target.toLowerCase()) {
+      try {
+        const moved = await changeStatus(demand.id, target, req.user?.name);
+        autoStatus = { status: moved.status, syncError: moved.syncError };
+      } catch (e) {
+        // status não permitido pelo War: a entrega vale, só não move a demanda
+        autoStatus = { status: demand.status, syncError: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    res.json({ video: updated, delivered, total: videos.length, autoStatus });
   })
 );
 

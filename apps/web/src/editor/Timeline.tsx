@@ -1,13 +1,26 @@
 import {
   audioClipEnd,
+  captionBlockOutputRange,
   CUT_REASON_LABEL,
+  keptCaptionWords,
   MIN_AUDIO_CLIP_SECONDS,
   MOTION_LABEL,
   motionSummary,
   outputDuration,
   placeMotions,
   retimeMotion,
+  dropTarget,
+  libraryDropTarget,
+  mediaKindOf,
+  mergeSelections,
   reviewSuggestions,
+  selectionCount,
+  selectionFromKeys,
+  selectionHas,
+  toggleInSelection,
+  type DropTarget,
+  type TimelineSelection,
+  type TrackId,
   sourceToOutput,
   splitAudioClip,
   splitSegmentAt,
@@ -30,7 +43,7 @@ import {
   type WaveformData,
 } from "../api";
 import { Icon } from "./Icon";
-import { ASSET_DRAG_TYPE } from "./LibraryPanel";
+import { ASSET_DRAG_TYPE, ASSET_KIND_PREFIX } from "./LibraryPanel";
 
 const MIN_SEGMENT = 0.1;
 const HEAD_W = 148;
@@ -246,6 +259,12 @@ interface TimelineProps {
   selectedAudioClip: string | null;
   onSelectSegment: (id: string | null) => void;
   onSelectAudioClip: (id: string | null) => void;
+  /** Vários itens de uma vez (retângulo ou Shift/Ctrl+clique) */
+  multiSelection: TimelineSelection | null;
+  onMultiSelect: (s: TimelineSelection | null) => void;
+  onDeleteMulti: () => void;
+  /** Arquivos soltos do computador (vídeo, áudio, imagem), na trilha sob o cursor */
+  onDropFiles: (files: File[], atSeconds: number, hovered: TrackId | null) => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -268,13 +287,28 @@ export const Timeline: React.FC<TimelineProps> = ({
   selectedAudioClip,
   onSelectSegment,
   onSelectAudioClip,
+  multiSelection,
+  onMultiSelect,
+  onDeleteMulti,
+  onDropFiles,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  /** Retângulo de seleção em px do grid */
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const inMulti = (key: string) => (selectionHas(multiSelection, key) ? "multi" : "");
   const rulerRef = useRef<HTMLDivElement>(null);
   const [viewW, setViewW] = useState(900);
   const [zoom, setZoom] = useState(1);
   /** Instante sob o cursor durante um arrastar da biblioteca */
   const [dropAt, setDropAt] = useState<number | null>(null);
+  /** Trilha que vai receber o que está sendo arrastado (regra das camadas) */
+  const [dropTrack, setDropTrack] = useState<DropTarget | null>(null);
+  const trackAt = (el: EventTarget | null): TrackId | null =>
+    ((el as HTMLElement | null)?.closest?.("[data-track]") as HTMLElement | null)?.dataset.track as TrackId | null ?? null;
+  // clipe de vídeo leva o som junto: acende também a trilha "Áudio do vídeo"
+  const laneDrop = (track: TrackId) =>
+    dropTrack !== null && (dropTrack === track || (dropTrack === "video" && track === "videoAudio")) ? "drop-target" : "";
   /** Onde a ferramenta de corte cortaria (linha guia sob o cursor) */
   const [bladeAt, setBladeAt] = useState<number | null>(null);
   const fileWaves = useFileWaveforms(recipe.audioClips.map((c) => c.file));
@@ -299,7 +333,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const multiClip = recipe.sources.length > 1;
   /** Nome do arquivo enviado (sem extensão) ou o id em projetos antigos */
   const sourceLabel = (id: string) =>
-    recipe.sources.find((s) => s.id === id)?.name.replace(/\.[^.]+$/, "") || id;
+    recipe.sources.find((s) => s.id === id)?.name?.replace(/\.[^.]+$/, "") || id;
 
   // Ctrl/⌘ + roda = zoom ancorado no cursor (listener nativo: precisa de passive:false)
   const zoomRef = useRef({ zoom, fitPps });
@@ -370,9 +404,62 @@ export const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener("pointerup", onUp);
   };
 
-  /** Clique no fundo vazio de uma trilha = seek */
-  const laneSeek = (e: React.PointerEvent) => {
-    if (e.target === e.currentTarget) startScrub(e);
+  /**
+   * Fundo vazio de uma trilha: clique = seek; arrastar = retângulo que
+   * seleciona tudo o que tocar (Shift/Ctrl soma à seleção atual).
+   */
+  const laneDown = (e: React.PointerEvent) => {
+    const t = e.target as HTMLElement;
+    if (e.button !== 0 || (t !== e.currentTarget && !t.classList.contains("lane-empty"))) return;
+    const grid = gridRef.current;
+    if (tool === "blade" || !grid) return startScrub(e);
+    e.preventDefault();
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    const base = additive ? multiSelection : null;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    let active = false;
+    const onMove = (ev: PointerEvent) => {
+      if (!active && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 4) return;
+      active = true;
+      const g = grid.getBoundingClientRect();
+      const r = {
+        left: Math.min(x0, ev.clientX),
+        right: Math.max(x0, ev.clientX),
+        top: Math.min(y0, ev.clientY),
+        bottom: Math.max(y0, ev.clientY),
+      };
+      setMarquee({ x: r.left - g.left, y: r.top - g.top, w: r.right - r.left, h: r.bottom - r.top });
+      const keys = Array.from(grid.querySelectorAll<HTMLElement>("[data-sel]"))
+        .filter((el) => {
+          const b = el.getBoundingClientRect();
+          return b.right > r.left && b.left < r.right && b.bottom > r.top && b.top < r.bottom;
+        })
+        .map((el) => el.dataset.sel!);
+      const hit = selectionFromKeys(keys);
+      onMultiSelect(base ? mergeSelections(base, hit) : selectionCount(hit) > 0 ? hit : null);
+    };
+    const onUp = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setMarquee(null);
+      if (!active) {
+        if (!additive) onMultiSelect(null);
+        onSeek(timeAt(ev.clientX));
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  /** Shift/Ctrl+clique num bloco: põe ou tira da seleção (sem arrastar nem abrir) */
+  const modifierTarget = (e: React.PointerEvent | React.MouseEvent): HTMLElement | null => {
+    if (!(e.shiftKey || e.ctrlKey || e.metaKey) || e.button !== 0 || tool === "blade") return null;
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-sel]");
+    if (!el || !gridRef.current?.contains(el)) return null;
+    e.preventDefault();
+    e.stopPropagation();
+    return el;
   };
 
   const setSegments = (next: Segment[]) =>
@@ -671,9 +758,10 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
     return (
       <div
         key={c.id}
-        className={`clip aclip kind-${c.kind} ${selectedAudioClip === c.id ? "selected" : ""}`}
+        data-sel={`audio:${c.id}`}
+        className={`clip aclip kind-${c.kind} ${c.motionId ? "linked" : ""} ${c.status === "pending" ? "pending" : ""} ${selectedAudioClip === c.id ? "selected" : ""} ${inMulti(`audio:${c.id}`)}`}
         style={{ left: c.start * pxPerSec, width: Math.max(width, 4) }}
-        title={`${fileName(c.file)} · ${c.start.toFixed(2)}s → ${audioClipEnd(c).toFixed(2)}s · ${Math.round(c.volume * 100)}%${c.loop ? " · loop" : ""}`}
+        title={`${c.status === "pending" ? "Sugestão da IA (só no preview até aceitar) · " : ""}${fileName(c.file)} · ${c.start.toFixed(2)}s → ${audioClipEnd(c).toFixed(2)}s · ${Math.round(c.volume * 100)}%${c.loop ? " · loop" : ""}${c.motionId ? " · som de motion (acompanha o motion)" : ""}`}
         onPointerDown={drag("move")}
       >
         {wave && (
@@ -687,7 +775,12 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
             color={c.kind === "music" ? "oklch(0.86 0.11 155 / 0.75)" : "oklch(0.9 0.12 80 / 0.8)"}
           />
         )}
-        {width > 40 && <span className="clip-label">{fileName(c.file)}</span>}
+        {width > 40 && (
+          <span className="clip-label">
+            {c.status === "pending" ? "sugestão · " : c.motionId ? "♪ " : ""}
+            {fileName(c.file)}
+          </span>
+        )}
         <div className="handle handle-l" onPointerDown={drag("start")} />
         <div className="handle handle-r" onPointerDown={drag("end")} />
       </div>
@@ -742,13 +835,14 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
       <>
         {/* vídeo */}
         {head("trk-video", "Vídeo", segments.length, "video")}
-        <div className="tl-lane" onPointerDown={laneSeek}>
+        <div className={`tl-lane ${laneDrop("video")}`} data-track="video" onPointerDown={laneDown}>
           {segments.map((seg, i) => {
             const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
             return (
               <div
                 key={seg.id}
-                className={`clip ${selectedSegment === seg.id ? "selected" : ""}`}
+                data-sel={`segment:${seg.id}`}
+                className={`clip ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
                 style={{ left: segmentPositions[i] * pxPerSec, width }}
                 title={`${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
                 onPointerDown={(e) => segmentPointerDown(e, seg)}
@@ -815,22 +909,21 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
       <>
         {/* legenda */}
         {head("trk-caption", "Legenda", spoken, "captions")}
-        <div className="tl-lane alt" onPointerDown={laneSeek}>
+        <div className={`tl-lane alt ${laneDrop("captions")}`} data-track="captions" onPointerDown={laneDown}>
           {spoken === 0 && <span className="lane-empty">Transcreva para gerar a legenda</span>}
           {recipe.captions.blocks.map((block) => {
-            const start = blockOutputStart(segments, block.sourceId, block.words[0].start);
-            if (start === null) return null;
-            const endRaw = blockOutputStart(
-              segments,
-              block.sourceId,
-              block.words[block.words.length - 1].end - 0.01
-            );
-            const end = endRaw ?? start + 0.3;
-            const text = block.words.map((w) => w.text).join(" ");
+            // mesma regra do preview: palavra cortada some, o resto do bloco fica
+            const range = captionBlockOutputRange(segments, block);
+            if (range === null) return null;
+            const { start, end } = range;
+            const text = keptCaptionWords(segments, block)
+              .map((w) => w.text)
+              .join(" ");
             return (
               <div
                 key={block.id}
-                className={`blk cap-blk ${selectedCaption === block.id ? "selected" : ""} ${block.sourceId === null ? "narration" : ""}`}
+                data-sel={`caption:${block.id}`}
+                className={`blk cap-blk ${selectedCaption === block.id ? "selected" : ""} ${block.sourceId === null ? "narration" : ""} ${inMulti(`caption:${block.id}`)}`}
                 style={{ left: start * pxPerSec, width: Math.max((end - start) * pxPerSec, 10) }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => onSelectCaption(block.id === selectedCaption ? null : block.id)}
@@ -852,12 +945,13 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
         recipe.motions.filter((m) => m.status !== "rejected").length,
         "motions"
         )}
-        <div className="tl-lane" onPointerDown={laneSeek}>
+        <div className={`tl-lane ${laneDrop("motions")}`} data-track="motions" onPointerDown={laneDown}>
           {placedMotions.length === 0 && <span className="lane-empty">Sem motions</span>}
           {placedMotions.map(({ motion: m, outputStart }) => (
             <div
               key={m.id}
-              className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""}`}
+              data-sel={`motion:${m.id}`}
+              className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""} ${inMulti(`motion:${m.id}`)}`}
               style={{
                 left: outputStart * pxPerSec,
                 width: Math.max(m.durationSeconds * pxPerSec, 12),
@@ -877,14 +971,15 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
       <>
         {/* overlays */}
         {head("trk-overlay", "Overlays", recipe.overlays.length, "overlays")}
-        <div className="tl-lane alt" onPointerDown={laneSeek}>
+        <div className={`tl-lane alt ${laneDrop("overlays")}`} data-track="overlays" onPointerDown={laneDown}>
           {recipe.overlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
           {recipe.overlays.map((o) => {
             const end = o.end ?? duration;
             return (
               <div
                 key={o.id}
-                className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""}`}
+                data-sel={`overlay:${o.id}`}
+                className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""} ${inMulti(`overlay:${o.id}`)}`}
                 style={{ left: o.start * pxPerSec, width: Math.max((end - o.start) * pxPerSec, 16) }}
                 onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
                 title={o.kind === "title" ? o.text : (o.file ?? "")}
@@ -919,12 +1014,28 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
             Aprovar todos os cortes ({pendingCuts.length})
           </button>
         )}
+        {multiSelection && selectionCount(multiSelection) > 0 && (
+          <span className="tl-multi">
+            <strong>{selectionCount(multiSelection)}</strong>&nbsp;selecionado(s)
+            {multiSelection.segments.length > 0 && multiSelection.segments.length >= segments.length && (
+              <span className="tl-multi-note" title="O vídeo precisa de ao menos um trecho">
+                &nbsp;· trechos ficam
+              </span>
+            )}
+            <button className="sm danger" title="Apaga tudo o que está selecionado (Delete) · Ctrl+Z desfaz" onClick={onDeleteMulti}>
+              <Icon name="trash" size={13} /> Apagar
+            </button>
+            <button className="sm icon ghost" title="Limpar seleção (Esc)" onClick={() => onMultiSelect(null)}>
+              <Icon name="x" size={13} />
+            </button>
+          </span>
+        )}
         <div className="tl-tools" role="radiogroup" aria-label="Ferramenta">
           <button
             className={`sm icon ghost ${tool === "select" ? "active" : ""}`}
             role="radio"
             aria-checked={tool === "select"}
-            title="Seleção (V): clique seleciona, arraste move · Delete apaga · Ctrl+D duplica"
+            title="Seleção (V): clique seleciona, arraste move · arraste no fundo seleciona vários · Shift/Ctrl+clique soma · Delete apaga · Ctrl+D duplica"
             onClick={() => onToolChange("select")}
           >
             <Icon name="pointer" size={15} />
@@ -972,17 +1083,36 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
         }}
         onPointerLeave={() => setBladeAt(null)}
         onDragOver={(e) => {
-          if (!e.dataTransfer.types.includes(ASSET_DRAG_TYPE)) return;
+          const types = Array.from(e.dataTransfer.types);
+          const isAsset = types.includes(ASSET_DRAG_TYPE);
+          if (!isAsset && !types.includes("Files")) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
           setDropAt(timeAt(e.clientX));
+          if (isAsset) {
+            const kind = types.find((t) => t.startsWith(ASSET_KIND_PREFIX))?.slice(ASSET_KIND_PREFIX.length);
+            setDropTrack(kind ? libraryDropTarget(kind) : null);
+          } else {
+            const item = e.dataTransfer.items[0];
+            const kind = item ? mediaKindOf("", item.type) : null;
+            setDropTrack(kind ? dropTarget(kind, trackAt(e.target), null) : null);
+          }
         }}
         onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropAt(null);
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDropAt(null);
+            setDropTrack(null);
+          }
         }}
         onDrop={(e) => {
-          const raw = e.dataTransfer.getData(ASSET_DRAG_TYPE);
           setDropAt(null);
+          setDropTrack(null);
+          if (e.dataTransfer.files.length > 0) {
+            e.preventDefault();
+            onDropFiles(Array.from(e.dataTransfer.files), timeAt(e.clientX), trackAt(e.target));
+            return;
+          }
+          const raw = e.dataTransfer.getData(ASSET_DRAG_TYPE);
           if (!raw) return;
           e.preventDefault();
           try {
@@ -994,6 +1124,13 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
       >
         <div
           className="tl-grid"
+          ref={gridRef}
+          onPointerDownCapture={(e) => {
+            const el = modifierTarget(e);
+            if (el) onMultiSelect(toggleInSelection(multiSelection, el.dataset.sel!));
+          }}
+          // o clique que vem depois não abre o item (a legenda seleciona no click)
+          onClickCapture={(e) => void modifierTarget(e)}
           style={{
             gridTemplateColumns: `${HEAD_W}px ${contentW}px`,
             gridTemplateRows: [
@@ -1019,13 +1156,14 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
 
           {/* áudio do vídeo: mesmos trechos da trilha de vídeo (cortar um corta o outro) */}
           {head("trk-video-audio", "Áudio do vídeo", recipe.audio.useEnhanced ? "tratado" : "")}
-          <div className="tl-lane" onPointerDown={laneSeek}>
+          <div className={`tl-lane ${laneDrop("videoAudio")}`} data-track="videoAudio" onPointerDown={laneDown}>
             {segments.map((seg, i) => {
               const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
               return (
                 <div
                   key={seg.id}
-                  className={`clip clip-audio ${selectedSegment === seg.id ? "selected" : ""}`}
+                  data-sel={`segment:${seg.id}`}
+                  className={`clip clip-audio ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
                   style={{ left: segmentPositions[i] * pxPerSec, width }}
                   title={`Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
                   onPointerDown={(e) => segmentPointerDown(e, seg)}
@@ -1052,7 +1190,7 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
             "Música",
             recipe.audio.narration ? "+ narração" : musicClips.length || ""
           )}
-          <div className="tl-lane" onPointerDown={laneSeek}>
+          <div className={`tl-lane ${laneDrop("music")}`} data-track="music" onPointerDown={laneDown}>
             {musicClips.length === 0 && (
               <span className="lane-empty">Arraste uma música da Biblioteca para cá</span>
             )}
@@ -1060,10 +1198,14 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
           </div>
 
           {head("trk-sfx", "Efeitos", sfxClips.length || "")}
-          <div className="tl-lane alt" onPointerDown={laneSeek}>
+          <div className={`tl-lane alt ${laneDrop("sfx")}`} data-track="sfx" onPointerDown={laneDown}>
             {sfxClips.length === 0 && <span className="lane-empty">Arraste efeitos sonoros para cá</span>}
             {sfxClips.map(renderAudioClip)}
           </div>
+
+          {marquee && (
+            <div className="tl-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />
+          )}
 
           {/* playhead: camada sobre todas as trilhas, abaixo dos cabeçalhos */}
           <div className="tl-ph-layer">

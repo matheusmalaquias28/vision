@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupWordsIntoBlocks, regroupBlocks, spreadCollapsedWords } from "../src/captions";
-import type { Word } from "../src/schema";
+import { captionBlockOutputRange, groupWordsIntoBlocks, keptCaptionWords, regroupBlocks, spreadCollapsedWords } from "../src/captions";
+import type { CaptionBlock, Segment, Word } from "../src/schema";
 
 const word = (text: string, start: number, end: number): Word => ({
   text,
@@ -65,5 +65,37 @@ describe("spreadCollapsedWords", () => {
   it("não mexe em palavras com timing normal", () => {
     const ws = [word("a", 0, 0.2), word("b", 0.2, 0.4)];
     expect(spreadCollapsedWords(ws)).toEqual(ws);
+  });
+});
+
+describe("captionBlockOutputRange", () => {
+  const seg = (id: string, sourceId: string, sourceStart: number, sourceEnd: number): Segment => ({ id, sourceId, sourceStart, sourceEnd });
+  // "Então quando existe essa" com a muleta "Então" (0,92–1,40) cortada
+  const block: CaptionBlock = {
+    id: "cap_05",
+    sourceId: "src_02",
+    words: [word("Então", 0.92, 1.4), word("quando", 1.75, 2.0), word("existe", 2.0, 2.35), word("essa", 2.35, 2.7)],
+  };
+  const segments = [seg("a", "src_01", 0, 5), seg("b", "src_02", 1.71, 3.18)];
+
+  it("muleta cortada no começo não esconde o resto do bloco", () => {
+    expect(keptCaptionWords(segments, block).map((w) => w.text)).toEqual(["quando", "existe", "essa"]);
+    const r = captionBlockOutputRange(segments, block)!;
+    expect(r.start).toBeCloseTo(5 + (1.75 - 1.71), 6);
+    expect(r.end).toBeCloseTo(5 + (2.7 - 1.71), 6);
+  });
+
+  it("última palavra cortada: o bloco termina na última mantida", () => {
+    const cut = [seg("a", "src_02", 0.9, 2.36)];
+    const r = captionBlockOutputRange(cut, block)!;
+    expect(keptCaptionWords(cut, block).map((w) => w.text)).toEqual(["Então", "quando", "existe"]);
+    expect(r.start).toBeCloseTo(0.02, 6);
+    expect(r.end).toBeCloseTo(2.35 - 0.9, 6);
+  });
+
+  it("bloco todo cortado some; narração usa o tempo final", () => {
+    expect(captionBlockOutputRange([seg("a", "src_02", 5, 9)], block)).toBeNull();
+    const narration: CaptionBlock = { ...block, sourceId: null };
+    expect(captionBlockOutputRange([], narration)).toEqual({ start: 0.92, end: 2.7 });
   });
 });

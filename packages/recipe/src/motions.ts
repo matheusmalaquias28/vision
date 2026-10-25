@@ -1,14 +1,11 @@
-import type { Motion, MotionKind, Recipe, Segment } from "./schema";
+import { MOTION_REGISTRY } from "./motionRegistry";
+import { TRANSITION_PRESETS } from "./transitions";
+import { MOTION_KINDS, type Motion, type MotionKind, type Recipe, type Segment } from "./schema";
 import { outputDuration, outputToSource, sourceToOutput } from "./time";
 
-export const MOTION_LABEL: Record<MotionKind, string> = {
-  zoom: "Zoom",
-  keyword: "Palavra-chave",
-  emoji: "Emoji",
-  lowerThird: "Nome/cargo",
-  counter: "Número",
-  flash: "Flash",
-};
+export const MOTION_LABEL = Object.fromEntries(
+  MOTION_KINDS.map((k) => [k, MOTION_REGISTRY[k].label])
+) as Record<MotionKind, string>;
 
 /** Motion sem os campos que o merge/revisão controlam */
 /** O que a IA propõe: posição livre é só do operador (arrastada no preview) */
@@ -58,7 +55,17 @@ function smoothstep(v: number): number {
  * duração e volta no último 15%. Zooms sobrepostos: vale o maior.
  */
 export function zoomScaleAt(placed: PlacedMotion[], t: number): number {
+  return zoomAt(placed, t).scale;
+}
+
+/**
+ * Câmera no instante `t`: um único compositor para todos os zooms (escala do
+ * maior ativo e o ponto de foco dele), aplicado num só transform do vídeo.
+ */
+export function zoomAt(placed: PlacedMotion[], t: number): { scale: number; focusX: number; focusY: number } {
   let scale = 1;
+  let focusX = 50;
+  let focusY = 40;
   for (const { motion, outputStart, outputEnd } of placed) {
     if (motion.kind !== "zoom" || t < outputStart || t >= outputEnd) continue;
     const local = t - outputStart;
@@ -72,13 +79,58 @@ export function zoomScaleAt(placed: PlacedMotion[], t: number): number {
     } else {
       f = Math.min(smoothstep(local / (dur * 0.7)), smoothstep((dur - local) / (dur * 0.15)));
     }
-    scale = Math.max(scale, 1 + (target - 1) * f);
+    const s = 1 + (target - 1) * f;
+    if (s > scale) {
+      scale = s;
+      focusX = motion.params.focusX;
+      focusY = motion.params.focusY;
+    }
   }
-  return scale;
+  return { scale, focusX, focusY };
 }
 
-/** Motions "de tela" que disputam o mesmo espaço visual */
-const TEXT_KINDS: MotionKind[] = ["keyword", "lowerThird", "counter"];
+/** Trechos do vídeo final em que a legenda some: tela cheia com `hideCaptions` */
+export function captionHiddenRanges(placed: PlacedMotion[]): [number, number][] {
+  return placed
+    .filter((p) => p.motion.kind === "screen" && p.motion.params.hideCaptions)
+    .map((p) => [p.outputStart, p.outputEnd]);
+}
+
+/** Grupo dos zooms nos cortes (template Dinâmico): removíveis um a um ou todos juntos */
+export const PUNCH_IN_GROUP = "punch-in";
+
+/**
+ * Zoom curto no começo de cada trecho, como motions comuns na timeline.
+ * Substitui o antigo `effects.punchIn`, que era aplicado escondido no render.
+ */
+export function punchInMotions(segments: Pick<Segment, "sourceId" | "sourceStart">[]): Motion[] {
+  return segments.map(
+    (s, i) =>
+      ({
+        id: `mo_punch_${String(i + 1).padStart(2, "0")}`,
+        kind: "zoom",
+        sourceId: s.sourceId,
+        sourceTime: Math.round(s.sourceStart * 1000) / 1000,
+        durationSeconds: 0.6,
+        status: "accepted",
+        origin: "manual",
+        note: "Zoom no corte (template Dinâmico)",
+        placement: null,
+        group: PUNCH_IN_GROUP,
+        accentColor: null,
+        params: { scale: 1.08, style: "punch", focusX: 50, focusY: 40 },
+      }) as Motion
+  );
+}
+
+/** Liga (recria a partir dos trechos atuais) ou remove os zooms nos cortes */
+export function withPunchIn(recipe: Recipe, on: boolean): Recipe {
+  const others = recipe.motions.filter((m) => m.group !== PUNCH_IN_GROUP);
+  return { ...recipe, motions: on ? [...others, ...punchInMotions(recipe.timeline.segments)] : others };
+}
+
+/** Motions "de tela" que disputam o mesmo espaço visual (camada text do registry) */
+const TEXT_KINDS: MotionKind[] = MOTION_KINDS.filter((k) => MOTION_REGISTRY[k].layer === "text");
 
 /**
  * Substitui as sugestões PENDENTES da IA pelos candidatos. Motions manuais e
@@ -86,8 +138,15 @@ const TEXT_KINDS: MotionKind[] = ["keyword", "lowerThird", "counter"];
  * mesmo tipo já existente/rejeitado são descartados, assim como os ancorados
  * em trecho cortado e os de texto que sobrepõem outro de texto.
  */
-export function mergeMotionSuggestions(recipe: Recipe, candidates: MotionCandidate[]): Recipe {
-  const kept = recipe.motions.filter((m) => !(m.status === "pending" && m.origin === "ai"));
+export function mergeMotionSuggestions(
+  recipe: Recipe,
+  candidates: MotionCandidate[],
+  /** Só substitui as sugestões pendentes destes tipos (ex.: o botão de imagens mexe só nas ilustrações) */
+  opts: { onlyKinds?: MotionKind[] } = {}
+): Recipe {
+  const kept = recipe.motions.filter(
+    (m) => !(m.status === "pending" && m.origin === "ai" && (!opts.onlyKinds || opts.onlyKinds.includes(m.kind)))
+  );
   const taken = new Set(kept.map((m) => m.id));
   let n = 0;
   const nextId = () => {
@@ -192,5 +251,59 @@ export function motionSummary(m: Motion): string {
       return `${m.params.prefix}${m.params.to}${m.params.suffix}`;
     case "flash":
       return "";
+    case "kinetic":
+    case "statement":
+    case "bubble":
+      return m.params.text;
+    case "list":
+      return m.params.items.join(" · ");
+    case "arrow":
+      return m.params.label || { down: "↓", up: "↑", left: "←", right: "→" }[m.params.direction];
+    case "annotation":
+    case "callout":
+    case "screen":
+      return m.params.text;
+    case "transition":
+      return TRANSITION_PRESETS[m.params.style].label;
+    case "illustration":
+      return m.params.label || m.params.subject;
+    case "chart":
+      return m.params.title || m.params.items.map((i) => `${i.label} ${i.value}`).join(" · ");
+    case "speedLines":
+      return "";
   }
+}
+
+/**
+ * Cor de destaque de um motion: a dele > a padrão dos motions do vídeo >
+ * a cor de destaque da legenda (comportamento original).
+ */
+export function resolveMotionAccent(
+  own: string | null,
+  videoDefault: string | null,
+  captionHighlight: string
+): string {
+  return own ?? videoDefault ?? captionHighlight;
+}
+
+/** Cor padrão efetiva dos motions do vídeo */
+export function videoMotionAccent(recipe: Recipe): string {
+  return recipe.motionStyle.accentColor ?? recipe.captions.style.highlightColor;
+}
+
+/**
+ * Aplica uma cor a todos os motions do vídeo: vira a cor padrão e as cores
+ * individuais são limpas (null = voltar para a cor da legenda).
+ */
+export function applyAccentToAll(recipe: Recipe, color: string | null): Recipe {
+  return {
+    ...recipe,
+    motionStyle: { ...recipe.motionStyle, accentColor: color },
+    motions: recipe.motions.map((m) => (m.accentColor === null ? m : { ...m, accentColor: null })),
+  };
+}
+
+/** Remove de uma vez todas as peças de um combo */
+export function removeMotionGroup(recipe: Recipe, group: string): Recipe {
+  return { ...recipe, motions: recipe.motions.filter((m) => m.group !== group) };
 }
