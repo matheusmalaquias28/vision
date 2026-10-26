@@ -11,7 +11,7 @@ import { TRANSITION_PRESETS, TRANSITION_STYLES } from "./transitions";
  * `version` sobe quando o contrato de params ou o visual padrão de um tipo
  * muda; `MOTION_REGISTRY_VERSION` entra na chave de cache do planner.
  */
-export const MOTION_REGISTRY_VERSION = 2;
+export const MOTION_REGISTRY_VERSION = 3;
 
 export type MotionCategory = "typography" | "data" | "overlay" | "camera" | "element";
 
@@ -622,15 +622,17 @@ const callout: MotionManifest<"callout"> = {
 const screen: MotionManifest<"screen"> = {
   kind: "screen",
   usesAccent: true,
-  version: 1,
+  version: 2,
   label: "Tela cheia",
   category: "typography",
   layer: "fullscreen",
-  purpose: "Quebra o quadro do vídeo: tela cheia com fundo animado (papel, grid, pontos ou gradiente) e uma frase grande entrando palavra a palavra.",
+  purpose:
+    "Quebra o quadro do vídeo: tela cheia com fundo animado (papel, grid, pontos ou gradiente) e uma frase grande entrando palavra a palavra — ou, com itens, um título e uma lista de 2 a 5 itens entrando um a um.",
   useWhen: [
     "tese, virada ou pergunta que merece parar o vídeo",
     "abrir uma parte: “passo 1”, “o problema”, “a solução” (eyebrow)",
     "promessa ou conclusão curta que precisa de destaque total",
+    "com items: passos, documentos ou direitos ENUMERADOS na fala que merecem a tela inteira",
   ],
   avoidWhen: [
     "mais de uma a cada 15 s",
@@ -639,7 +641,8 @@ const screen: MotionManifest<"screen"> = {
     "enquanto a pessoa mostra algo na câmera",
   ],
   intensity: 3,
-  seconds: { min: 1.5, default: 2.6, max: 5 },
+  // a lista precisa de tempo para os itens entrarem um a um
+  seconds: { min: 1.5, default: 2.6, max: 6 },
   variants: [
     { value: "paper", label: "Papel", use: "textura de papel animada: caderno, educativo, próximo" },
     { value: "grid", label: "Grid", use: "grid sutil em movimento: tecnologia, dados, método" },
@@ -647,9 +650,10 @@ const screen: MotionManifest<"screen"> = {
     { value: "gradient", label: "Gradiente", use: "gradiente em movimento: premium, emocional" },
   ],
   aiParams: {
-    text: "frase da fala, 2–10 palavras",
+    text: "frase da fala, 2–10 palavras (com items: o título da lista)",
     emphasis: "palavra(s) DA FRASE em destaque",
     eyebrow: "rótulo curto opcional (PASSO 1, O PROBLEMA)",
+    items: "opcional: 2–5 itens DITOS separados por | (até 4 palavras cada) — vira lista; dê 3–4 s",
     variant: "paper|grid|dots|gradient",
   },
   styles: ["balanced", "dynamic", "educational", "premium"],
@@ -657,6 +661,9 @@ const screen: MotionManifest<"screen"> = {
   costHint: "low",
   defaults: () => ({
     text: "O segredo é a constância",
+    layout: "phrase",
+    items: [],
+    marker: "number",
     eyebrow: "",
     emphasis: "constância",
     variant: "paper",
@@ -665,14 +672,25 @@ const screen: MotionManifest<"screen"> = {
     align: "center",
     hideCaptions: true,
   }),
-  fromSlots: (s) =>
-    clean({
+  fromSlots: (s) => {
+    const items = str(s.items)
+      .split("|")
+      .map((i) => i.trim().slice(0, 40))
+      .filter(Boolean)
+      .slice(0, 5);
+    return clean({
       text: str(s.text).slice(0, 90),
       emphasis: str(s.emphasis).slice(0, 40),
       eyebrow: str(s.eyebrow).slice(0, 30),
       variant: pick(s.variant ?? s.style, ["paper", "grid", "dots", "gradient"]),
-    }),
+      // com 2+ itens vira o modelo lista (a lista fica alinhada à esquerda)
+      ...(items.length >= 2 ? { layout: "list", items, align: "left" } : {}),
+    });
+  },
 };
+
+/** Modelo lista da tela cheia: o que entra ao trocar de "Frase" para "Lista" sem itens */
+export const SCREEN_LIST_EXAMPLE = ["Primeiro ponto", "Segundo ponto", "Terceiro ponto"];
 
 const transition: MotionManifest<"transition"> = {
   kind: "transition",

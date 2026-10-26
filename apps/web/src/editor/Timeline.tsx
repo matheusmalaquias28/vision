@@ -1,19 +1,22 @@
 import {
   audioClipEnd,
   captionBlockOutputRange,
-  CUT_REASON_LABEL,
   keptCaptionWords,
   MIN_AUDIO_CLIP_SECONDS,
   MOTION_LABEL,
+  MOTION_REGISTRY,
   motionSummary,
+  packRows,
   outputDuration,
   placeMotions,
   retimeMotion,
   dropTarget,
+  edgeLimits,
+  laneSpansFor,
   libraryDropTarget,
   mediaKindOf,
   mergeSelections,
-  reviewSuggestions,
+  applyCutSuggestions,
   selectionCount,
   selectionFromKeys,
   selectionHas,
@@ -27,13 +30,14 @@ import {
   type Asset,
   type AudioClip,
   type Motion,
+  type MotionLayer,
   type Overlay,
   type Recipe,
   type Segment,
-  type SuggestedCut,
   type VisualLayer,
 } from "@vision/recipe";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Kbd, useDismiss } from "../ui/controls";
 import {
   getFileWaveform,
   type FileWaveform,
@@ -61,11 +65,31 @@ const SNAP_PX = 6;
 
 export type TimelineTool = "select" | "blade";
 
+/** Ações do menu do botão direito (o editor executa; ver timelineAction) */
+export type TimelineItemAction = "cut" | "copy" | "paste" | "duplicate" | "split" | "delete" | "accept" | "reject";
+
+/** Menu aberto: item clicado ("tipo:id", null = espaço vazio) e o instante sob o cursor */
+interface ContextMenuState {
+  x: number;
+  y: number;
+  key: string | null;
+  at: number;
+}
+
 const LAYER_ROW: Record<VisualLayer, number> = {
   video: ROW.video,
   captions: ROW.caption,
   motions: ROW.motion,
   overlays: ROW.overlay,
+};
+
+/** Sub-linhas da trilha de motions, de cima para baixo */
+const MOTION_LAYER_ORDER: MotionLayer[] = ["camera", "text", "element", "fullscreen"];
+const LAYER_LABEL: Record<MotionLayer, string> = {
+  camera: "câmera",
+  text: "texto",
+  element: "elemento",
+  fullscreen: "tela cheia",
 };
 
 function fileName(file: string): string {
@@ -265,6 +289,10 @@ interface TimelineProps {
   onDeleteMulti: () => void;
   /** Arquivos soltos do computador (vídeo, áudio, imagem), na trilha sob o cursor */
   onDropFiles: (files: File[], atSeconds: number, hovered: TrackId | null) => void;
+  /** Menu do botão direito: ação no item `key` ("tipo:id"; null = espaço vazio) no instante `at` */
+  onItemAction: (action: TimelineItemAction, key: string | null, at: number) => void;
+  /** Há algo copiado (habilita Colar) */
+  canPaste: boolean;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -291,7 +319,12 @@ export const Timeline: React.FC<TimelineProps> = ({
   onMultiSelect,
   onDeleteMulti,
   onDropFiles,
+  onItemAction,
+  canPaste,
 }) => {
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+  const ctxMenuRef = useDismiss(ctxMenu !== null, closeCtxMenu);
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   /** Retângulo de seleção em px do grid */
@@ -503,6 +536,7 @@ export const Timeline: React.FC<TimelineProps> = ({
    * Se não houve arrasto real, trata como clique (seleciona/desseleciona).
    */
   const startOverlayDrag = (e: React.PointerEvent, id: string, mode: "move" | "start" | "end") => {
+    if (e.button !== 0) return; // botão direito abre o menu
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
@@ -512,6 +546,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     const o0 = orig[idx];
     const end0 = o0.end ?? duration;
     const dur0 = Math.max(end0 - o0.start, MIN_SEGMENT);
+    // bordas param no overlay vizinho (dois overlays nunca ao mesmo tempo)
+    const lim = edgeLimits(laneSpansFor(recipe, `overlay:${id}`), o0.start, end0);
     let moved = false;
     const onMove = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - startX) > 3) moved = true;
@@ -523,9 +559,9 @@ export const Timeline: React.FC<TimelineProps> = ({
         o.start = start;
         if (o0.end !== null) o.end = round2(start + dur0);
       } else if (mode === "start") {
-        o.start = round2(clamp(o0.start + deltaSec, 0, end0 - MIN_SEGMENT));
+        o.start = round2(clamp(o0.start + deltaSec, lim.minStart, end0 - MIN_SEGMENT));
       } else {
-        o.end = round2(clamp(end0 + deltaSec, o0.start + MIN_SEGMENT, duration));
+        o.end = round2(clamp(end0 + deltaSec, o0.start + MIN_SEGMENT, Math.min(duration, lim.maxEnd)));
       }
       setOverlays(next);
     };
@@ -618,7 +654,12 @@ export const Timeline: React.FC<TimelineProps> = ({
     const end0 = audioClipEnd(clip);
     // sem loop, o clipe não passa do fim do arquivo
     const maxEnd = clip.loop || mediaDuration === null ? Infinity : clip.start + (mediaDuration - clip.offset);
-    const minStart = clip.loop ? 0 : Math.max(0, clip.start - clip.offset);
+    // música: as bordas param na música vizinha (duas trilhas nunca juntas)
+    const lim =
+      clip.kind === "music"
+        ? edgeLimits(laneSpansFor(recipe, `audio:${clip.id}`), clip.start, end0)
+        : { minStart: 0, maxEnd: Infinity };
+    const minStart = Math.max(lim.minStart, clip.loop ? 0 : Math.max(0, clip.start - clip.offset));
     const onMove = (ev: PointerEvent) => {
       const deltaSec = (ev.clientX - startX) / pxPerSec;
       let next: AudioClip;
@@ -640,7 +681,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           offset: round2(Math.max(0, clip.offset + moved)),
         };
       } else {
-        const end = round2(clamp(snap(end0 + deltaSec, points), clip.start + MIN_AUDIO_CLIP_SECONDS, maxEnd));
+        const end = round2(clamp(snap(end0 + deltaSec, points), clip.start + MIN_AUDIO_CLIP_SECONDS, Math.min(maxEnd, lim.maxEnd)));
         next = { ...clip, duration: round2(end - clip.start) };
       }
       setAudioClips(recipe.audioClips.map((c) => (c.id === clip.id ? next : c)));
@@ -679,6 +720,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     onSelectMotion(m.id);
     const startX = e.clientX;
     const end0 = outputStart + m.durationSeconds;
+    // bordas param no motion vizinho da mesma camada (texto com texto, elemento com elemento...)
+    const lim = edgeLimits(laneSpansFor(recipe, `motion:${m.id}`), outputStart, end0);
     const points = [
       0,
       duration,
@@ -702,10 +745,10 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (byStart !== 0 && (byEnd === 0 || Math.abs(byStart) <= Math.abs(byEnd))) start += byStart;
         else start += byEnd;
       } else if (mode === "start") {
-        start = Math.min(snap(outputStart + deltaSec, points), end0 - 0.1);
+        start = clamp(snap(outputStart + deltaSec, points), lim.minStart, end0 - 0.1);
         dur = end0 - start;
       } else {
-        dur = snap(end0 + deltaSec, points) - outputStart;
+        dur = Math.min(snap(end0 + deltaSec, points), lim.maxEnd) - outputStart;
       }
       onChange(retimeMotion(recipe, m.id, start, dur));
     };
@@ -717,9 +760,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener("pointerup", onUp);
   };
 
-  const reviewSuggestion = (cut: SuggestedCut, accept: boolean) =>
-    onChange(reviewSuggestions(recipe, [cut.id], accept));
-
   let cursor = 0;
   const segmentPositions = segments.map((s) => {
     const left = cursor;
@@ -727,6 +767,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     return left;
   });
 
+  // cortes entram aplicados; pendente só sobra em projeto de antes dessa mudança
   const pendingCuts = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending");
   const placedMotions = placeMotions(recipe, true);
   const spoken = recipe.captions.blocks.length;
@@ -746,8 +787,24 @@ export const Timeline: React.FC<TimelineProps> = ({
     }
   }
 
-const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
+  const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
   const sfxClips = recipe.audioClips.filter((c) => c.kind === "sfx");
+
+  // motions: uma sub-linha por camada em uso (câmera, texto, elemento, tela
+  // cheia) — dentro de cada uma nada se sobrepõe (enforceLanes)
+  const motionLayers = MOTION_LAYER_ORDER.filter((l) =>
+    placedMotions.some((p) => MOTION_REGISTRY[p.motion.kind].layer === l)
+  );
+  const motionRows = Math.max(1, motionLayers.length);
+  const motionRowOf = (m: Motion) => Math.max(0, motionLayers.indexOf(MOTION_REGISTRY[m.kind].layer));
+  // efeitos podem tocar juntos: os sobrepostos descem para outra sub-linha
+  const sfxRowOf = new Map(
+    packRows(sfxClips.map((c) => ({ id: c.id, start: c.start, end: audioClipEnd(c) }))).map((x) => [x.item.id, x.row])
+  );
+  const sfxRows = Math.max(1, ...[...sfxRowOf.values()].map((r) => r + 1));
+  const laneHeight = (l: VisualLayer) => (l === "motions" ? ROW.motion * motionRows : LAYER_ROW[l]);
+  /** Bloco numa sub-linha: posição explícita no lugar do top/bottom fixo do CSS */
+  const subRow = (row: number, rowH: number): React.CSSProperties => ({ top: row * rowH + 4, bottom: "auto", height: rowH - 8 });
 
   const renderAudioClip = (c: AudioClip) => {
     const wave = fileWaves[c.file];
@@ -760,7 +817,11 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
         key={c.id}
         data-sel={`audio:${c.id}`}
         className={`clip aclip kind-${c.kind} ${c.motionId ? "linked" : ""} ${c.status === "pending" ? "pending" : ""} ${selectedAudioClip === c.id ? "selected" : ""} ${inMulti(`audio:${c.id}`)}`}
-        style={{ left: c.start * pxPerSec, width: Math.max(width, 4) }}
+        style={{
+          left: c.start * pxPerSec,
+          width: Math.max(width, 4),
+          ...(c.kind === "sfx" && sfxRows > 1 ? subRow(sfxRowOf.get(c.id) ?? 0, ROW.sfx) : {}),
+        }}
         title={`${c.status === "pending" ? "Sugestão da IA (só no preview até aceitar) · " : ""}${fileName(c.file)} · ${c.start.toFixed(2)}s → ${audioClipEnd(c).toFixed(2)}s · ${Math.round(c.volume * 100)}%${c.loop ? " · loop" : ""}${c.motionId ? " · som de motion (acompanha o motion)" : ""}`}
         onPointerDown={drag("move")}
       >
@@ -783,6 +844,74 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
         )}
         <div className="handle handle-l" onPointerDown={drag("start")} />
         <div className="handle handle-r" onPointerDown={drag("end")} />
+      </div>
+    );
+  };
+
+  // ─── Menu do botão direito ─────────────────────────────────────────
+
+  const openContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-sel]");
+    const key = el?.dataset.sel ?? null;
+    // o item clicado vira o selecionado (a não ser que já esteja numa seleção múltipla)
+    if (key && !selectionHas(multiSelection, key)) {
+      const id = key.slice(key.indexOf(":") + 1);
+      if (key.startsWith("segment:")) onSelectSegment(id);
+      else if (key.startsWith("audio:")) onSelectAudioClip(id);
+      else if (key.startsWith("overlay:")) onSelectOverlay(id);
+      else if (key.startsWith("motion:")) onSelectMotion(id);
+      else if (key.startsWith("caption:")) onSelectCaption(id);
+    }
+    setCtxMenu({
+      x: Math.min(e.clientX, window.innerWidth - 230),
+      y: Math.min(e.clientY, window.innerHeight - 300),
+      key,
+      at: clamp(timeAt(e.clientX), 0, duration),
+    });
+  };
+
+  const renderContextMenu = (m: ContextMenuState) => {
+    const kind = m.key ? m.key.slice(0, m.key.indexOf(":")) : null;
+    const motion = kind === "motion" ? recipe.motions.find((x) => x.id === m.key!.slice(7)) : undefined;
+    const run = (action: TimelineItemAction) => {
+      setCtxMenu(null);
+      onItemAction(action, m.key, m.at);
+    };
+    const item = (action: TimelineItemAction, label: string, icon: Parameters<typeof Icon>[0]["name"], kbd?: string, disabled = false) => (
+      <button key={action} className={`menu-item ${action === "delete" ? "danger" : ""}`} disabled={disabled} onClick={() => run(action)}>
+        <Icon name={icon} size={14} />
+        {label}
+        {kbd && <span className="ctx-kbd"><Kbd>{kbd}</Kbd></span>}
+      </button>
+    );
+    const editable = kind === "segment" || kind === "audio" || kind === "overlay" || kind === "motion";
+    const splittable = kind === "segment" || kind === "audio" || kind === "overlay";
+    return (
+      <div ref={ctxMenuRef} className="popover ctx-menu" style={{ left: m.x, top: m.y }} onContextMenu={(e) => e.preventDefault()}>
+        {motion?.status === "pending" && (
+          <>
+            {item("accept", "Aceitar sugestão", "check")}
+            {item("reject", "Recusar sugestão", "x")}
+            <div className="ctx-sep" />
+          </>
+        )}
+        {editable && (
+          <>
+            {item("cut", "Recortar", "scissors", "Ctrl X")}
+            {item("copy", "Copiar", "copy", "Ctrl C")}
+          </>
+        )}
+        {/* sem nada copiado o item fica desabilitado (cinza): o rótulo não precisa explicar */}
+        {kind !== "caption" && item("paste", "Colar", "plus", "Ctrl V", !canPaste)}
+        {editable && item("duplicate", "Duplicar", "layers", "Ctrl D")}
+        {splittable && item("split", "Dividir aqui", "fit")}
+        {m.key && (
+          <>
+            <div className="ctx-sep" />
+            {item("delete", kind === "caption" ? "Apagar legenda" : "Apagar", "trash", "Del")}
+          </>
+        )}
       </div>
     );
   };
@@ -877,31 +1006,6 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
               </div>
             );
           })}
-          {pendingCuts.map((cut) => {
-            const outStart = sourceToOutput(segments, cut.sourceId, cut.sourceStart);
-            if (outStart === null) return null;
-            return (
-              <div
-                key={cut.id}
-                className={`cut-sug reason-${cut.reason}`}
-                style={{
-                  left: outStart * pxPerSec,
-                  width: Math.max((cut.sourceEnd - cut.sourceStart) * pxPerSec, 40),
-                }}
-                title={`${CUT_REASON_LABEL[cut.reason]} · confiança ${cut.confidence}${cut.note ? ` · ${cut.note}` : ""}`}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
-                <span className="cut-sug-actions">
-                  <button className="ok" title="Aceitar corte" onClick={() => reviewSuggestion(cut, true)}>
-                    <Icon name="check" size={11} />
-                  </button>
-                  <button className="no" title="Rejeitar" onClick={() => reviewSuggestion(cut, false)}>
-                    <Icon name="x" size={11} />
-                  </button>
-                </span>
-              </div>
-            );
-          })}
         </div>
       </>
     ),
@@ -955,8 +1059,9 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
               style={{
                 left: outputStart * pxPerSec,
                 width: Math.max(m.durationSeconds * pxPerSec, 12),
+                ...(motionRows > 1 ? subRow(motionRowOf(m), ROW.motion) : {}),
               }}
-              title={`${MOTION_LABEL[m.kind]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
+              title={`${MOTION_LABEL[m.kind]} · camada ${LAYER_LABEL[MOTION_REGISTRY[m.kind].layer]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
               onPointerDown={(e) => startMotionDrag(e, m, outputStart, "move")}
             >
               <div className="handle handle-l" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "start")} />
@@ -1001,17 +1106,16 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
       <div className="tl-toolbar">
         <span className="tl-stats">
           {segments.length} {segments.length === 1 ? "trecho" : "trechos"} ·{" "}
-          {pendingCuts.length > 0 ? `${pendingCuts.length} cortes sugeridos · ` : ""}
           {duration.toFixed(1)}s no corte
         </span>
         {pendingCuts.length > 0 && (
           <button
             className="sm primary"
-            title="Aceita todas as sugestões de corte pendentes"
-            onClick={() => onChange(reviewSuggestions(recipe, pendingCuts.map((c) => c.id), true))}
+            title="Projeto antigo: cortes detectados antes de eles entrarem aplicados"
+            onClick={() => onChange(applyCutSuggestions(recipe))}
           >
-            <Icon name="check" size={13} />
-            Aprovar todos os cortes ({pendingCuts.length})
+            <Icon name="scissors" size={13} />
+            Aplicar cortes pendentes ({pendingCuts.length})
           </button>
         )}
         {multiSelection && selectionCount(multiSelection) > 0 && (
@@ -1082,6 +1186,8 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
           if (tool === "blade") setBladeAt(bladeTime(e.clientX));
         }}
         onPointerLeave={() => setBladeAt(null)}
+        onContextMenu={openContextMenu}
+        onScroll={closeCtxMenu}
         onDragOver={(e) => {
           const types = Array.from(e.dataTransfer.types);
           const isAsset = types.includes(ASSET_DRAG_TYPE);
@@ -1135,10 +1241,10 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
             gridTemplateColumns: `${HEAD_W}px ${contentW}px`,
             gridTemplateRows: [
               ROW.ruler,
-              ...recipe.layerOrder.map((l) => LAYER_ROW[l]),
+              ...recipe.layerOrder.map(laneHeight),
               ROW.clipAudio,
               ROW.music,
-              ROW.sfx,
+              ROW.sfx * sfxRows,
             ]
               .map((h) => `${h}px`)
               .join(" "),
@@ -1219,6 +1325,7 @@ const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
           </div>
         </div>
       </div>
+      {ctxMenu && renderContextMenu(ctxMenu)}
     </div>
   );
 };

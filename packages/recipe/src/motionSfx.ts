@@ -170,6 +170,41 @@ export function attachMotionSfx(recipe: Recipe, motionIds: string[], assets: Ass
   return clips.length === recipe.audioClips.length ? recipe : { ...recipe, audioClips: clips };
 }
 
+/** Qualquer whoosh serve de reserva se o som do modelo da transição não estiver na biblioteca */
+const ANY_WHOOSH = /wh?oosh|swoosh|transition/i;
+
+/**
+ * Toda transição tem som, sempre — independente de `autoSfx`, de quando foi
+ * aceita e de o trecho estar no corte na hora. O som segue o status da
+ * transição: sugestão (pendente) → som pendente (toca só no preview);
+ * aceita → aceito. Roda a cada mudança (applyMotionSfxRules) e no render.
+ * Se o operador trocar o arquivo ou o volume, fica o que ele escolheu.
+ */
+export function ensureTransitionSfx(recipe: Recipe, assets: Asset[]): Recipe {
+  const segments = recipe.timeline.segments;
+  let clips = recipe.audioClips;
+  let changed = false;
+  for (const m of recipe.motions) {
+    if (m.kind !== "transition" || m.status === "rejected") continue;
+    const want: AudioClip["status"] = m.status === "accepted" ? "accepted" : "pending";
+    const current = clips.find((c) => c.motionId === m.id);
+    if (current) {
+      if (current.status !== want) {
+        clips = clips.map((c) => (c === current ? { ...c, status: want } : c));
+        changed = true;
+      }
+      continue;
+    }
+    const start = motionOutputStart(segments, m);
+    if (start === null) continue;
+    const asset = pickMotionSfx(m, assets) ?? sfxOnly(assets).find((a) => ANY_WHOOSH.test(a.name)) ?? null;
+    if (!asset) continue;
+    clips = [...clips, { ...clipFor(m, start, asset), status: want, origin: m.origin }];
+    changed = true;
+  }
+  return changed ? { ...recipe, audioClips: clips } : recipe;
+}
+
 /** Troca o som do motion (mantém início e volume que o operador ajustou) ou cria um */
 export function setMotionSfx(recipe: Recipe, motionId: string, asset: Asset): Recipe {
   const m = recipe.motions.find((x) => x.id === motionId);
@@ -229,7 +264,8 @@ export function applyMotionSfxRules(prev: Recipe | null, next: Recipe, assets: A
     const fresh = out.motions.filter((m) => m.status === "accepted" && !was.has(m.id)).map((m) => m.id);
     if (fresh.length) out = attachMotionSfx(out, fresh, assets);
   }
-  return out;
+  // transição nunca fica muda (vale mesmo com o som automático desligado)
+  return ensureTransitionSfx(out, assets);
 }
 
 /** Nome do estilo de som de um motion (para o painel) */

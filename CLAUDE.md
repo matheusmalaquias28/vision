@@ -1,7 +1,9 @@
 # VISION — editor de vídeo com IA (uso pessoal)
 
 Vídeos curtos (máx 1:30). A IA gera uma "receita de edição" em JSON; o Remotion
-renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
+renderiza. Cortes entram APLICADOS (sem aprovação; o operador desfaz no
+editor). O resto da IA (motions, transições, música, imagens) entra pendente
+e é planejado DEPOIS dos cortes, sobre o vídeo final.
 
 ## Arquitetura
 
@@ -19,15 +21,24 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
 - Timestamps em segundos no tempo do VÍDEO BRUTO (exceto overlays e
   `audioClips`: tempo do vídeo final). Conversão via `packages/recipe/src/time.ts`.
 - Timeline guarda segmentos MANTIDOS, ordenados e sem sobreposição.
-- Sugestões de IA vivem em `timeline.suggestedCuts` com status
-  pending/accepted/rejected; aceitar recorta os segmentos via
-  `applyCutToSegments`. Motivos (`reason`): silence (ffmpeg), pause/filler/
+- Cortes detectados vivem em `timeline.suggestedCuts` (registro do que foi
+  cortado e por quê). Motivos (`reason`): silence (ffmpeg), pause/filler/
   repeat (determinísticos sobre a transcrição, `transcript.ts`) e retake (LLM
-  aponta índices de palavras; o servidor converte para tempo). Novas
-  sugestões entram por `mergeSuggestions` (dedupe, respeita o que o operador
-  já rejeitou); revisão por `reviewSuggestions`.
+  aponta índices de palavras; o servidor converte para tempo). Entram por
+  `mergeSuggestions` (dedupe) e são APLICADOS na hora por
+  `applySuggestedCuts` (`apps/server/src/pipeline/applyCuts.ts`:
+  `applyCutSuggestions` → legenda reagrupada pelo vídeo cortado
+  (`regroupBlocks` com `timeline`: o limite conta só palavras que ficam,
+  quebra em pausa cortada) → sons dos motions acompanham). Sem aprovação no
+  editor: palavra cortada aparece riscada no texto e restaura com ⌫.
+  "Cortar" de novo (outro ritmo) desfaz as pausas aplicadas antes
+  (`undoAppliedCuts`, não devolve clipe apagado) e mede de novo. Status
+  pending só sobra em projeto antigo (botão "Aplicar cortes pendentes").
 - Antes de detectar, `refineTranscriptTimings` apara das palavras do Whisper o
-  silêncio real do áudio (ele estica palavras sobre pausas). Vícios/muletas
+  silêncio real do áudio (ele estica palavras sobre pausas). Silêncio =
+  silencedetect −35 dB ∪ limiar do próprio clipe (`quietRangesFromLevels`:
+  RMS em janelas de 50 ms, entre o fundo p10 e a fala p90) — em sala com
+  ruído o limiar fixo não acha nada. Vícios/muletas
   usam contexto (pausa em volta, abertura de fala) + a mesma chamada de LLM das
   retomadas (kind "filler"). Ritmo das pausas: `PAUSE_PACES` (suave/normal/
   acelerado), escolhido no editor e enviado em `smart-cuts`.
@@ -38,7 +49,9 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   `packages/video/src/Motions.tsx` (+ `ElementsMotions.tsx`: marcação desenhada,
   gráfico, selo e linhas de velocidade adaptados do Remotion Elements; +
   `ScreenMotion.tsx`: tela cheia com fundo animado — papel, grid, pontos,
-  gradiente — que quebra o quadro; esconde a legenda se `hideCaptions`, no
+  gradiente — que quebra o quadro; modelo `layout` "phrase" (padrão, frase
+  palavra a palavra) ou "list" (título + 2–5 `items` entrando um a um,
+  `marker` número/check; a IA pede passando items com |); esconde a legenda se `hideCaptions`, no
   máx. 1 a cada 15 s e nada de texto por baixo, regras em `validateComposition`); metadados no **Motion Registry**
   (`packages/recipe/src/motionRegistry.ts`: finalidade, usar/evitar, camada,
   durações, variantes, campos da IA). Tipo novo = schema + manifesto +
@@ -54,7 +67,15 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   código (`interpretBriefing`: estilo e proibições), catálogo filtrado
   (`getCandidateMotions`), UMA chamada com Structured Outputs, depois
   `compilePlan` (âncora, params, fatos) e `validateComposition` (densidade e
-  camadas por estilo). Cache por hash em `creative-cache.json` do projeto;
+  camadas por estilo; mesmo tipo solto no máx. ~1/3 da cota). Roda depois
+  dos cortes aplicados (projeto antigo com corte pendente: planeja como se
+  aplicado, `withPendingCutsApplied`); cortes marcados com ‖ no prompt; `transitionFillers` completa transições
+  nas trocas de clipe se a IA puser poucas. Fala que vira lista ("em casos
+  de", "esses são os pontos", "3 erros", "primeiro… segundo";
+  `detectEnumerations`) põe a tela cheia no catálogo (qualquer estilo, salvo
+  proibição), é listada no prompt e a tela cheia em modelo lista entra com
+  prioridade máxima na composição. Modelo padrão `gpt-4.1`
+  (`CREATIVE_MODEL` troca). Cache por hash em `creative-cache.json` do projeto;
   métricas em `data/creative-metrics.jsonl`. Sem perfil por cliente: só o
   briefing da demanda + estilos globais. O briefing é o MÍNIMO, não o limite
   (prompt): pedidos e proibições valem, e a IA completa a edição (gancho,
@@ -127,7 +148,11 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   próprio. Sempre num corte (`snapToCut`, ±1,5 s da palavra, centralizada),
   máx. 3 por vídeo, ≥ 10 s entre elas, fora dos 1,5 s das pontas
   (`validateComposition`). Planner só oferece se os arquivos existem no
-  catálogo; render pula (onError) se faltarem.
+  catálogo; render pula (onError) se faltarem. O vídeo da transição toca
+  mudo: o som é um clipe sfx comum, e TODA transição tem o seu
+  (`ensureTransitionSfx`, mesmo com `autoSfx` desligado): roda em todo
+  commit, no planner, ao abrir o projeto e antes do render; som segue o
+  status da transição (sugestão → som pendente, só no preview).
 - Ilustração (`illustration.ts`, kind `illustration`): imagem gerada na
   Magnific (Nano Banana Pro Flash), SEMPRE 1:1 em 1K, estilo colagem de papel
   fixo em `illustrationPrompt` (a IA só descreve O QUE desenhar: slot text →
@@ -135,26 +160,31 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   `creative/illustrate.ts` (POST + polling, baixa a imagem para
   `assets/illus-<hash>`, cache por descrição em `illustrations.json`, teto de
   12 por projeto) via `POST /api/projects/:id/illustrations` ou
-  `cli illustrate`. NUNCA entra no plano automático (`getCandidateMotions`
-  exclui; Analisar/Sugerir motions não geram imagem): só pelo botão "Sugerir
-  imagens" (`creative/illustrationPlanner.ts`, `POST .../illustrations/suggest`:
+  `cli illustrate`. Fora do plano de motions (`getCandidateMotions` exclui;
+  replanejar não apaga imagem pendente). `analyzeAndApply` (Analisar e
+  aplicar + análise automática) gera 2 (`AUTO_IMAGES`) no fim, só se o
+  projeto ainda não tem nenhuma ilustração e com `MAGNIFIC_API_KEY`; falha
+  não derruba a análise. Mais imagens pelo botão "Sugerir imagens"
+  (`creative/illustrationPlanner.ts`, `POST .../illustrations/suggest`:
   1 chamada de IA escolhe os pontos-chave → `compilePlan` +
   `validateComposition`/`mergeMotionSuggestions` com `onlyKinds:
   ["illustration"]`, que não mexem nas outras sugestões pendentes → imagens
   geradas em paralelo, entram pendentes já com a imagem) ou pelo "Gerar
   imagem" do painel. Sem `params.image` não entra no MP4 (o Player mostra um
   cartão "ainda não gerada").
-- Densidade (`validateComposition`): câmera (zooms, inclusive punch-in) e
-  transições não contam na cota de motions por janela de 10 s (não poluem a
-  tela e têm regras próprias).
+- Densidade (`validateComposition`): câmera (zooms, inclusive punch-in),
+  transições e ilustrações não contam na cota de motions por janela de 10 s
+  (têm regras próprias; a ilustração ainda respeita a camada ocupada).
+  Transições e ilustrações também ficam fora da cota total do estilo.
 - Controle das imagens geradas: galeria no painel de Motions
   (`IllustrationGallery.tsx`; `GET/DELETE /api/projects/:id/illustrations`):
   reaproveitar sem gastar crédito (inserir no playhead, trocar na selecionada),
   variação, apagar só fora de uso (apagada segue contando no teto;
   `MAGNIFIC_MAX_PER_PROJECT`, padrão 12).
 - Análise automática (`creative/autoAnalyze.ts`): subir os brutos (demanda ou
-  avulso) dispara no servidor transcrição → cortes (com a IA das retomadas) →
-  plano de motions, tudo pendente, em fila (1 projeto por vez). Andamento em
+  avulso) dispara no servidor transcrição → cortes aplicados (com a IA das
+  retomadas) + legenda reagrupada → plano de motions → 2 imagens (motions e
+  imagens pendentes), em fila (1 projeto por vez). Andamento em
   `analysis.json` do projeto (`GET /api/projects/:id/analysis`; também em cada
   vídeo da demanda); o editor acende a seta da etapa e recarrega a receita no
   fim. Substitui o antigo Diretor IA (que aplicava cortes de silêncio,
@@ -186,6 +216,27 @@ renderiza. Nenhuma decisão da IA é aplicada sem revisão do operador.
   o editor desenha as alças em `DragLayer.tsx` e grava via `setPlacement`.
 - `recipe.layerOrder` empilha as camadas visuais (primeira = na frente); a
   composição e a timeline seguem essa ordem.
+- Uma camada nunca tem dois itens ao mesmo tempo (`lanes.ts`): cada camada
+  de motion do registry (câmera, texto, elemento, tela cheia; combo pode ter
+  peças em camadas diferentes), overlays e música. `enforceLanes(antes,
+  depois)` roda em todo `commit` do editor (antes do som dos motions): item
+  novo ou que MUDOU DE LUGAR e caiu em cima de outro vai para o espaço livre
+  mais perto (combo anda inteiro); sem espaço, a mudança é desfeita. Item
+  que não mudou fica (corte e edição de texto nunca empurram nada). Bordas
+  arrastadas param no vizinho (`edgeLimits`). Na timeline, motions ganham
+  uma sub-linha por camada em uso; efeitos sonoros PODEM tocar juntos (o som
+  acompanha o motion) e só descem para sub-linhas (`packRows`).
+- Menu do botão direito na timeline + Ctrl+C/X/V/D (`clipboard.ts`:
+  `copyItems`/`pasteItems`/`splitItemAt`, por chave "tipo:id" do
+  `data-sel`): recortar, copiar, colar no instante clicado (Ctrl+V: no
+  playhead), duplicar logo depois, dividir aqui (trecho, áudio, overlay),
+  apagar, aceitar/recusar sugestão. Colado vira aceito; combo colado ganha
+  grupo novo; som colado se solta do motion. Ações em `timelineAction`
+  (`Editor.tsx`); seleção única é exclusiva entre trecho/áudio/overlay/motion.
+- Ação do servidor que lê a receita gravada (Tratar áudio, narração, passos
+  do topo) grava antes as edições não salvas (`saveIfDirty`); o áudio
+  tratado entra por `serverPatch` sobre a receita atual (edição feita
+  enquanto o servidor trabalhava não some).
 - Caminhos de mídia na receita são relativos à raiz do repo com "/". O dir
   `media/` é servido como raiz estática (publicDir no render); componentes usam
   `mediaSrc()` que remove o prefixo `media/`.

@@ -261,8 +261,9 @@ export function motionSummary(m: Motion): string {
       return m.params.label || { down: "↓", up: "↑", left: "←", right: "→" }[m.params.direction];
     case "annotation":
     case "callout":
-    case "screen":
       return m.params.text;
+    case "screen":
+      return m.params.layout === "list" ? `${m.params.text}: ${m.params.items.join(" · ")}` : m.params.text;
     case "transition":
       return TRANSITION_PRESETS[m.params.style].label;
     case "illustration":

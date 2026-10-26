@@ -25,7 +25,7 @@ import {
   TRANSITION_PRESETS,
   type TransitionStyle,
 } from "./transitions";
-import { outputDuration, outputToSource, sourceToOutput } from "./time";
+import { applyCutToSegments, outputDuration, outputToSource, segmentDuration, sourceToOutput } from "./time";
 import { isWordKept, transcriptWords, type TranscriptWord } from "./transcript";
 
 // ─── Presets globais (iguais para todas as demandas; nada por cliente) ───
@@ -181,6 +181,22 @@ export interface SpokenWord {
   outputTime: number;
 }
 
+/**
+ * A receita como fica quando o operador aceitar os cortes pendentes. O
+ * planner trabalha nela: no bruto, as trocas de clipe ficam longe das
+ * palavras (o ar de cada ponta) e a transição não acha corte; e o que fosse
+ * ancorado numa pausa a ser cortada sumiria depois. Âncoras são no tempo do
+ * bruto, então servem nos dois.
+ */
+export function withPendingCutsApplied(recipe: Recipe): Recipe {
+  let segments = recipe.timeline.segments;
+  for (const c of recipe.timeline.suggestedCuts) {
+    if (c.status === "pending") segments = applyCutToSegments(segments, c.sourceId, c.sourceStart, c.sourceEnd);
+  }
+  if (segments === recipe.timeline.segments || segments.length === 0) return recipe;
+  return { ...recipe, timeline: { ...recipe.timeline, segments } };
+}
+
 /** Palavras que estão no corte, na ordem do vídeo final */
 export function spokenWords(recipe: Recipe): SpokenWord[] {
   const segments = recipe.timeline.segments;
@@ -193,6 +209,111 @@ export function spokenWords(recipe: Recipe): SpokenWord[] {
         sourceToOutput(segments, word.sourceId, (word.start + word.end) / 2)!,
     }))
     .sort((a, b) => a.outputTime - b.outputTime);
+}
+
+/** Instantes de corte no vídeo final (fronteiras entre trechos) e se trocam de clipe */
+function cutPoints(recipe: Recipe): { at: number; clipChange: boolean }[] {
+  const segments = recipe.timeline.segments;
+  const out: { at: number; clipChange: boolean }[] = [];
+  let acc = 0;
+  segments.forEach((s, i) => {
+    if (i > 0) out.push({ at: acc, clipChange: s.sourceId !== segments[i - 1].sourceId });
+    acc += segmentDuration(s);
+  });
+  return out;
+}
+
+// ─── Momentos de lista na fala (tela cheia em modelo lista tem prioridade) ───
+
+/** Frases que anunciam uma enumeração ("em casos de", "esses são os pontos"...) */
+const ENUM_PHRASES = [
+  "em casos de",
+  "nos casos de",
+  "em caso de",
+  "em situacoes de",
+  "nas situacoes de",
+  "em situacoes como",
+  "esses sao os",
+  "estes sao os",
+  "essas sao as",
+  "estas sao as",
+  "sao eles",
+  "sao elas",
+  "sao os seguintes",
+  "sao as seguintes",
+  "os seguintes",
+  "as seguintes",
+  "esses topicos",
+  "estes topicos",
+  "esses pontos",
+  "estes pontos",
+  "os pontos",
+  "os topicos",
+  "entre eles",
+  "entre elas",
+  "por exemplo",
+  "passo a passo",
+  "primeiro passo",
+  "em primeiro lugar",
+].map((p) => p.split(" "));
+
+/** Contáveis: "3 erros", "três dicas", "os documentos" */
+const ENUM_NOUNS =
+  /^(passos|etapas|pontos|topicos|itens|dicas|erros|motivos|razoes|formas|maneiras|tipos|sinais|documentos|requisitos|direitos|beneficios|vantagens|regras|cuidados|perguntas|criterios|fatores|situacoes|casos|hipoteses)$/;
+const COUNT_WORDS = /^(\d+|dois|duas|tres|quatro|cinco|seis|sete)$/;
+
+const normWord = (t: string) => norm(t).replace(/[^a-z0-9]/g, "");
+
+export interface EnumerationCue {
+  /** Índice (em spokenWords) da palavra onde a enumeração é anunciada */
+  word: number;
+  /** Trecho que disparou ("em casos de", "3 erros", "primeiro … segundo") */
+  cue: string;
+}
+
+/**
+ * Onde a fala vira lista: frase de abertura ("em casos de", "esses são os
+ * pontos", "analisar esses tópicos"), número + contável ("3 erros", "dois
+ * documentos") ou "primeiro … segundo" perto um do outro. Uma pista a cada
+ * 8 s no máximo (a tela cheia também só vale 1 a cada 15 s).
+ */
+export function detectEnumerations(words: SpokenWord[]): EnumerationCue[] {
+  const toks = words.map((w) => normWord(w.word.text));
+  const raw: EnumerationCue[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const phrase = ENUM_PHRASES.find((p) => p.every((t, k) => toks[i + k] === t));
+    if (phrase) {
+      raw.push({ word: i, cue: words.slice(i, i + phrase.length).map((w) => w.word.text).join(" ") });
+      continue;
+    }
+    // "3 erros", "esses tópicos", "os documentos são"
+    if ((COUNT_WORDS.test(toks[i]) || /^(esses|estes|essas|estas)$/.test(toks[i])) && ENUM_NOUNS.test(toks[i + 1] ?? "")) {
+      raw.push({ word: i, cue: `${words[i].word.text} ${words[i + 1].word.text}` });
+      continue;
+    }
+    // "primeiro … segundo" em até 25 palavras
+    if (/^(primeiro|primeira)$/.test(toks[i]) && toks.slice(i + 1, i + 26).some((t) => /^(segundo|segunda|depois)$/.test(t))) {
+      raw.push({ word: i, cue: "primeiro … segundo" });
+    }
+  }
+  const out: EnumerationCue[] = [];
+  for (const c of raw) {
+    const last = out[out.length - 1];
+    if (!last || words[c.word].outputTime - words[last.word].outputTime >= 8) out.push(c);
+  }
+  return out;
+}
+
+/** Índices das palavras que vêm logo depois de um corte (marcados no prompt) */
+export function wordsAfterCut(recipe: Recipe, words: SpokenWord[]): Set<number> {
+  const cuts = cutPoints(recipe).map((c) => c.at);
+  const out = new Set<number>();
+  words.forEach((w, i) => {
+    if (i === 0) return;
+    const prev = words[i - 1].outputTime;
+    if (cuts.some((c) => c > prev && c <= w.outputTime + 0.05)) out.add(i);
+  });
+  return out;
 }
 
 // ─── Motion Retrieval (filtro e pontuação locais, sem embeddings) ────
@@ -356,7 +477,7 @@ function visibleText(m: Pick<Motion, "kind" | "params">): string {
       return String(p.label ?? "");
     case "statement":
     case "screen":
-      return `${p.eyebrow ?? ""} ${p.text ?? ""}`;
+      return `${p.eyebrow ?? ""} ${p.text ?? ""} ${((p.items as string[] | undefined) ?? []).join(" ")}`;
     case "arrow":
       return String(p.label ?? "");
     case "chart":
@@ -538,6 +659,41 @@ export function compilePlan(
   return { candidates, rejected };
 }
 
+/** Modelos que o código usa quando completa as transições (combinam com quase tudo) */
+const FILLER_TRANSITIONS: TransitionStyle[] = ["swipe", "flare", "burn"];
+
+/**
+ * Transições que o código oferece nos cortes, para quando a IA põe poucas:
+ * primeiro nas trocas de clipe, depois nos outros cortes. Entram depois de
+ * tudo o que a IA pediu (`priority`) e passam por validateComposition, que
+ * aplica as regras (máx. 3, 10 s entre elas, longe das pontas).
+ */
+export function transitionFillers(recipe: Recipe, priority: number): RankedCandidate[] {
+  const segments = recipe.timeline.segments;
+  const cuts = cutPoints(recipe).sort((a, b) => Number(b.clipChange) - Number(a.clipChange) || a.at - b.at);
+  const out: RankedCandidate[] = [];
+  cuts.forEach((cut, i) => {
+    const style = FILLER_TRANSITIONS[i % FILLER_TRANSITIONS.length];
+    const seconds = TRANSITION_PRESETS[style].seconds;
+    const anchor = outputToSource(segments, Math.max(0, cut.at - seconds / 2));
+    if (!anchor) return;
+    const parsed = MotionSchema.safeParse({
+      id: "tmp",
+      kind: "transition",
+      sourceId: anchor.sourceId,
+      sourceTime: round3(anchor.seconds),
+      durationSeconds: seconds,
+      params: { style },
+      origin: "ai",
+      status: "pending",
+    });
+    if (!parsed.success) return;
+    const { id: _i, status: _s, origin: _o, placement: _p, ...cand } = parsed.data;
+    out.push({ ...cand, priority: priority + i });
+  });
+  return out;
+}
+
 // ─── Composition Validator ───────────────────────────────────────────
 
 interface Unit {
@@ -553,6 +709,9 @@ interface Unit {
  * nada de repetir o mesmo tipo em sequência. Considera os motions que já
  * estão na timeline (manuais e revisados); um combo conta como um motion.
  */
+/** Tipos com teto próprio (máx. 3 cada), fora da cota de motions do estilo */
+const OWN_CAP_KINDS: MotionKind[] = ["transition", "illustration"];
+
 /** Telas cheias quebram o vídeo: no máximo uma a cada 15 s */
 const SCREEN_GAP_SECONDS = 15;
 
@@ -595,7 +754,10 @@ export function validateComposition(
     units.set(key, u);
   }
 
+  // transições e ilustrações têm tetos próprios: não gastam a cota do estilo
   const cap = Math.max(2, Math.round(total / preset.secondsPerMotion));
+  // variedade: o mesmo tipo solto no máximo ~1/3 da cota (5 palavras-chave num vídeo de 30 s cansa)
+  const maxPerKind = Math.max(2, Math.ceil(cap * 0.35));
   const placed = [...existing];
   const unitStarts = existing.filter((e) => countsForDensity(e.kind, e.group)).map((e) => e.start);
   const accepted: RankedCandidate[] = [];
@@ -604,11 +766,12 @@ export function validateComposition(
   for (const u of [...units.values()].sort((a, b) => a.priority - b.priority || a.start - b.start)) {
     const label = u.key.startsWith("single:") ? u.pieces[0].c.kind : u.key;
     const fail = (reason: string) => rejected.push({ ref: label, reason });
-    if (acceptedUnits >= cap) {
+    const dense = u.pieces.some((p) => countsForDensity(p.c.kind, p.c.group));
+    const capped = u.pieces.some((p) => !OWN_CAP_KINDS.includes(p.c.kind));
+    if (capped && acceptedUnits >= cap) {
       fail(`limite do estilo ${preset.label} (${cap} motions)`);
       continue;
     }
-    const dense = u.pieces.some((p) => countsForDensity(p.c.kind, p.c.group));
     if (dense && unitStarts.filter((s) => Math.abs(s - u.start) < 5).length >= preset.maxPer10s) {
       fail("muitos motions na mesma janela de 10 s");
       continue;
@@ -676,6 +839,14 @@ export function validateComposition(
         reason = `${p.c.kind} repetido em sequência`;
         break;
       }
+      if (
+        u.key.startsWith("single:") &&
+        countsForDensity(p.c.kind, p.c.group) &&
+        placed.filter((x) => x.kind === p.c.kind).length >= maxPerKind
+      ) {
+        reason = `${p.c.kind} demais no vídeo (máx. ${maxPerKind}; varie o tipo)`;
+        break;
+      }
     }
     if (reason) {
       fail(reason);
@@ -686,7 +857,7 @@ export function validateComposition(
       accepted.push(p.c);
     }
     if (dense) unitStarts.push(u.start);
-    acceptedUnits++;
+    if (capped) acceptedUnits++;
   }
   return { accepted, rejected };
 }
@@ -700,9 +871,16 @@ export function isReplacedSuggestion(m: Motion, onlyKinds?: MotionKind[]): boole
  * A cota de motions por janela de 10 s é contra poluição na tela: câmera
  * (zooms, inclusive os automáticos nos cortes) e transições não poluem e têm
  * regras próprias (camada, repetição, máx. 3 transições espaçadas).
+ * Ilustrações também ficam fora: têm teto e espaçamento próprios (máx. 3,
+ * ≥ 8 s entre elas).
  */
 function countsForDensity(kind: MotionKind, group: string | null): boolean {
-  return group !== PUNCH_IN_GROUP && kind !== "transition" && MOTION_REGISTRY[kind].layer !== "camera";
+  return (
+    group !== PUNCH_IN_GROUP &&
+    kind !== "transition" &&
+    kind !== "illustration" &&
+    MOTION_REGISTRY[kind].layer !== "camera"
+  );
 }
 
 

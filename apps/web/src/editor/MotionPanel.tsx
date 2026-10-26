@@ -14,6 +14,7 @@ import {
   motionSummary,
   removeMotionGroup,
   reviewMotions,
+  SCREEN_LIST_EXAMPLE,
   sourceToOutput,
   type Asset,
   type ComboId,
@@ -936,14 +937,59 @@ const MotionFields: React.FC<{ m: Motion; patch: (p: Record<string, unknown>) =>
           </Prop>
         </>
       );
-    case "screen":
+    case "screen": {
+      const isList = m.params.layout === "list";
       return (
         <>
-          <Prop label="Frase">
+          <Prop label="Modelo" hint={isList ? "Os itens entram um a um; dê 3–4 s ao motion para dar tempo de ler" : undefined}>
+            <Segmented
+              value={m.params.layout}
+              options={[
+                { value: "phrase", label: "Frase", title: "Uma frase grande entrando palavra a palavra" },
+                { value: "list", label: "Lista", title: "Título + 2 a 5 itens entrando um a um" },
+              ]}
+              onChange={(v) =>
+                patch(
+                  v === "list"
+                    ? { layout: "list", items: m.params.items.length >= 2 ? m.params.items : SCREEN_LIST_EXAMPLE, align: "left" }
+                    : { layout: "phrase" }
+                )
+              }
+            />
+          </Prop>
+          <Prop label={isList ? "Título" : "Frase"}>
             <TextInput value={m.params.text} max={90} required onChange={(v) => patch({ text: v })} />
           </Prop>
+          {isList && (
+            <>
+              <Prop label="Itens (1 por linha)" hint="2 a 5 itens curtos">
+                <textarea
+                  key={`${m.id}-items`}
+                  rows={Math.max(3, m.params.items.length)}
+                  defaultValue={m.params.items.join("\n")}
+                  onChange={(e) => {
+                    const items = e.target.value
+                      .split("\n")
+                      .map((i) => i.trim().slice(0, 40))
+                      .filter(Boolean);
+                    if (items.length >= 2 && items.length <= 5) patch({ items });
+                  }}
+                />
+              </Prop>
+              <Prop label="Marcador">
+                <Segmented
+                  value={m.params.marker}
+                  options={[
+                    { value: "number", label: "1 2 3", title: "Passos em ordem" },
+                    { value: "check", label: "✓", title: "Benefícios, inclusos, documentos" },
+                  ]}
+                  onChange={(v) => patch({ marker: v })}
+                />
+              </Prop>
+            </>
+          )}
           <Prop label="Destaque">
-            <TextInput value={m.params.emphasis} max={40} placeholder="palavra(s) da frase" onChange={(v) => patch({ emphasis: v })} />
+            <TextInput value={m.params.emphasis} max={40} placeholder={isList ? "palavra(s) do título" : "palavra(s) da frase"} onChange={(v) => patch({ emphasis: v })} />
           </Prop>
           <Prop label="Linha de cima">
             <TextInput value={m.params.eyebrow} max={30} placeholder="opcional: PASSO 1" onChange={(v) => patch({ eyebrow: v })} />
@@ -987,6 +1033,7 @@ const MotionFields: React.FC<{ m: Motion; patch: (p: Record<string, unknown>) =>
           </Prop>
         </>
       );
+    }
     case "illustration":
       return (
         <>

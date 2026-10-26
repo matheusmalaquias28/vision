@@ -434,17 +434,28 @@ export function useDismiss(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    const outside = (e: Event) => !!ref.current && !ref.current.contains(e.target as Node);
+    // pointerdown na captura: a timeline dá preventDefault no pointerdown (arrastos), o que
+    // cancela o mousedown — com mousedown, clicar na timeline não fechava o menu
+    const onDown = (e: PointerEvent) => {
+      if (outside(e)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    window.addEventListener("mousedown", onDown);
+    // rolar fora (timeline, painel) deixaria o menu solto num lugar errado
+    const onScroll = (e: Event) => {
+      if (outside(e)) onClose();
+    };
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("blur", onClose);
     return () => {
-      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("blur", onClose);
     };
   }, [open, onClose]);
   return ref;

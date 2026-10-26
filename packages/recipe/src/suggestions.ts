@@ -1,5 +1,5 @@
 import type { CutReason, Recipe, SuggestedCut } from "./schema";
-import { applyAcceptedCut, isSourceTimeKept } from "./time";
+import { applyAcceptedCut, isSourceTimeKept, restoreSourceRange } from "./time";
 import type { CutCandidate } from "./transcript";
 
 export const CUT_REASON_LABEL: Record<CutReason, string> = {
@@ -93,6 +93,41 @@ export function mergeSuggestions(
   }));
   const suggestedCuts = [...kept, ...added].sort(byTime);
   return { ...recipe, timeline: { ...recipe.timeline, suggestedCuts } };
+}
+
+/**
+ * Aplica todos os cortes detectados (não há mais aprovação: o operador
+ * desfaz no editor por texto ou arrastando o trecho). Mesmo cuidado do
+ * reviewSuggestions: corte que deixaria o vídeo vazio fica pendente.
+ */
+export function applyCutSuggestions(recipe: Recipe): Recipe {
+  const ids = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending").map((c) => c.id);
+  return ids.length === 0 ? recipe : reviewSuggestions(recipe, ids, true);
+}
+
+/**
+ * Desfaz os cortes aplicados destes motivos (o trecho volta à timeline e o
+ * registro sai), para medir de novo — ex.: trocar o ritmo das pausas.
+ * Só devolve o trecho se a fala vizinha ainda está no vídeo: clipe ou
+ * frase que o operador apagou não volta em pedaços.
+ */
+export function undoAppliedCuts(recipe: Recipe, reasons: CutReason[]): Recipe {
+  let segments = recipe.timeline.segments;
+  const undone = new Set<string>();
+  for (const c of recipe.timeline.suggestedCuts) {
+    if (c.status !== "accepted" || !reasons.includes(c.reason)) continue;
+    const neighborKept =
+      isSourceTimeKept(segments, c.sourceId, c.sourceStart - 0.02) ||
+      isSourceTimeKept(segments, c.sourceId, c.sourceEnd + 0.02);
+    if (!neighborKept) continue;
+    segments = restoreSourceRange(segments, c.sourceId, c.sourceStart, c.sourceEnd);
+    undone.add(c.id);
+  }
+  if (undone.size === 0) return recipe;
+  return {
+    ...recipe,
+    timeline: { segments, suggestedCuts: recipe.timeline.suggestedCuts.filter((c) => !undone.has(c.id)) },
+  };
 }
 
 /**

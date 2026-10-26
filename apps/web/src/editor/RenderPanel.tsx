@@ -92,6 +92,7 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
 
   const duration = outputDuration(recipe.timeline.segments);
   const motionsIn = placeMotions(recipe, false).length;
+  // cortes entram aplicados; pendente só sobra em projeto antigo
   const pendingCuts = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending").length;
   const pendingMotions = recipe.motions.filter((m) => m.status === "pending").length;
   const progress = Math.round((job?.progress ?? 0) * 100);

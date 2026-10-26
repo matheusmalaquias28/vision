@@ -91,7 +91,7 @@ program
 
 program
   .command("silence")
-  .description("Detecta silêncios e gera sugestões de corte")
+  .description("Detecta silêncios e aplica os cortes")
   .argument("<projectId>")
   .option("--noise <db>", "limiar de silêncio em dB", String(defaultSilenceOptions.noiseDb))
   .option("--min <s>", "duração mínima de silêncio", String(defaultSilenceOptions.minSilenceSeconds))
@@ -103,35 +103,37 @@ program
       minSilenceSeconds: Number(opts.min),
     });
     saveRecipe(updated);
-    const cuts = updated.timeline.suggestedCuts;
+    const cuts = updated.timeline.suggestedCuts.filter((c) => c.reason === "silence" && c.status === "accepted");
     if (cuts.length === 0) {
       console.log("Nenhum silêncio relevante encontrado.");
       return;
     }
-    console.log(`${cuts.length} sugestão(ões) de corte:`);
+    console.log(`${cuts.length} corte(s) de silêncio aplicado(s):`);
     for (const c of cuts) {
       console.log(
         `  ${c.id}  ${fmt(c.sourceStart)} → ${fmt(c.sourceEnd)}  (${fmt(c.sourceEnd - c.sourceStart)}, confiança ${c.confidence})`
       );
     }
-    console.log(`Revise com: npm run cli -- cuts ${projectId} --list`);
+    console.log(`Duração final: ${fmt(outputDuration(updated.timeline.segments))}`);
   });
 
 program
   .command("smart-cuts")
-  .description("Sugere cortes pela transcrição: pausas, vícios, repetições e retomadas (IA)")
+  .description("Corta pela transcrição: pausas, vícios, repetições e retomadas (IA), já aplicados")
   .argument("<projectId>")
   .option("--no-ai", "só os detectores determinísticos (sem chamada ao LLM)")
   .option("--pace <ritmo>", `silêncio entre frases: ${CUT_PACES.join(" | ")}`, "normal")
   .action(async (projectId: string, opts: { ai: boolean; pace: string }) => {
     const pace = CUT_PACES.find((p) => p === opts.pace);
     if (!pace) throw new Error(`--pace deve ser ${CUT_PACES.join(", ")}`);
-    const updated = await suggestSmartCuts(loadRecipe(projectId), { ai: opts.ai, pace: pace as CutPace });
+    const before = loadRecipe(projectId);
+    const known = new Set(before.timeline.suggestedCuts.map((c) => c.id));
+    const updated = await suggestSmartCuts(before, { ai: opts.ai, pace: pace as CutPace });
     saveRecipe(updated);
-    const pending = updated.timeline.suggestedCuts.filter((c) => c.status === "pending");
-    console.log(`${pending.length} sugestão(ões) pendente(s):`);
-    for (const c of pending) console.log(fmtCut(c));
-    console.log(`Revise com: npm run cli -- cuts ${projectId} --accept <ids...>`);
+    const applied = updated.timeline.suggestedCuts.filter((c) => c.status === "accepted" && !known.has(c.id));
+    console.log(`${applied.length} corte(s) aplicado(s):`);
+    for (const c of applied) console.log(fmtCut(c));
+    console.log(`Duração final: ${fmt(outputDuration(updated.timeline.segments))}`);
   });
 
 program

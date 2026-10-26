@@ -4,6 +4,7 @@ import { PUNCH_IN_GROUP } from "../src/motions";
 import {
   applyMotionSfxRules,
   attachMotionSfx,
+  ensureTransitionSfx,
   motionSfxClip,
   pickMotionSfx,
   removeMotionSfx,
@@ -145,5 +146,34 @@ describe("som dos motions", () => {
     const swapped = setMotionSfx(tuned, "k", LIB.find((a) => a.name === "plin")!);
     expect(motionSfxClip(swapped, "k")).toMatchObject({ assetId: "sfx_plin", start: 9.8, volume: 0.3 });
     expect(swapped.audioClips).toHaveLength(1);
+  });
+});
+
+describe("toda transição tem som", () => {
+  const tr = (id: string, t: number, status: "accepted" | "pending", style = "flare") => motion(id, "transition", t, { style }, { status, durationSeconds: 0.67 });
+
+  it("aceita sem som ganha som, mesmo com o som automático desligado", () => {
+    const r = { ...recipe([tr("t1", 5, "accepted")]), motionStyle: { accentColor: null, autoSfx: false } };
+    const out = ensureTransitionSfx(r, LIB);
+    expect(motionSfxClip(out, "t1")).toMatchObject({ kind: "sfx", status: "accepted" });
+    expect(ensureTransitionSfx(out, LIB)).toBe(out);
+  });
+
+  it("sugestão ganha som pendente (só preview) e o som vira aceito junto com ela", () => {
+    const pending = ensureTransitionSfx(recipe([tr("t1", 5, "pending")]), LIB);
+    expect(motionSfxClip(pending, "t1")?.status).toBe("pending");
+    const accepted = applyMotionSfxRules(pending, { ...pending, motions: pending.motions.map((m) => ({ ...m, status: "accepted" as const })) }, LIB);
+    expect(motionSfxClip(accepted, "t1")?.status).toBe("accepted");
+  });
+
+  it("modelo sem o som dele na biblioteca usa outro whoosh; recusada fica sem", () => {
+    // "glitch" pede sons que não estão na LIB: cai num whoosh qualquer
+    expect(motionSfxClip(ensureTransitionSfx(recipe([tr("t1", 5, "accepted", "glitch")]), LIB), "t1")?.file).toMatch(/woosh|whoosh/i);
+    expect(ensureTransitionSfx(recipe([{ ...tr("t1", 5, "accepted"), status: "rejected" }]), LIB).audioClips).toHaveLength(0);
+  });
+
+  it("toda mudança do editor garante o som (transição aceita antes, com a biblioteca vazia)", () => {
+    const r = recipe([tr("t1", 5, "accepted")]);
+    expect(applyMotionSfxRules(r, { ...r }, LIB).audioClips).toHaveLength(1);
   });
 });

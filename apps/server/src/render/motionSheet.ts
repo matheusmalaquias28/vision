@@ -85,6 +85,29 @@ export function exampleMotions(illustrationImage: string | null = null): { motio
     { motion: m("screen", 2.6, { text: "Método simples em 3 passos", emphasis: "simples", variant: "grid", tone: "light", align: "left" }), label: "screen · grid claro" },
     { motion: m("screen", 2.6, { text: "Mais tempo para o que importa", emphasis: "tempo", variant: "dots" }), label: "screen · pontos" },
     { motion: m("screen", 2.6, { text: "Você merece se sentir bem", emphasis: "bem", eyebrow: "A solução", variant: "gradient", tone: "dark" }), label: "screen · gradiente" },
+    {
+      motion: m("screen", 4, {
+        layout: "list",
+        text: "Como provar a união estável",
+        emphasis: "união estável",
+        eyebrow: "Passo a passo",
+        items: ["Conta conjunta", "Mesmo endereço", "Filhos em comum", "Testemunhas"],
+        align: "left",
+      }),
+      label: "screen · lista número",
+    },
+    {
+      motion: m("screen", 3.6, {
+        layout: "list",
+        text: "O que você ganha",
+        items: ["Mais tempo livre", "Economia de verdade", "Resultado rápido"],
+        marker: "check",
+        variant: "grid",
+        tone: "dark",
+        align: "left",
+      }),
+      label: "screen · lista check",
+    },
     ...TRANSITION_STYLES.map((style) => ({
       motion: m("transition", TRANSITION_PRESETS[style].seconds, { style }),
       label: `transition · ${style}`,

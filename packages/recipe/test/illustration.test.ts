@@ -79,6 +79,17 @@ describe("densidade de motions", () => {
     const busy = longRecipe([txt("k1", 2), txt("k2", 7.5)]);
     expect(validateComposition(busy, [kw], "balanced").rejected[0].reason).toMatch(/mesma janela/);
   });
+
+  it("ilustração não sofre nem ocupa a cota da janela de 10 s", () => {
+    const txt = (id: string, t: number) =>
+      MotionSchema.parse({ ...base, id, kind: "keyword", sourceTime: t, durationSeconds: 1, status: "accepted", origin: "manual", params: { text: "OI" } });
+    const busy = longRecipe([txt("k1", 1), txt("k2", 9)]);
+    expect(validateComposition(busy, [cand(5, 0)], "balanced").accepted).toHaveLength(1);
+    const ill = MotionSchema.parse({ ...base, id: "il", kind: "illustration", sourceTime: 5, status: "accepted", origin: "manual", params: { subject: "martelo" } });
+    const kw = { ...MotionSchema.parse({ ...base, id: "kw", kind: "keyword", sourceTime: 9, durationSeconds: 1, params: { text: "AGORA" } }), priority: 0 } as RankedCandidate;
+    const emoji = MotionSchema.parse({ ...base, id: "e1", kind: "emoji", sourceTime: 4.5, durationSeconds: 1, status: "accepted", origin: "manual", params: { emoji: "🔥" } });
+    expect(validateComposition(longRecipe([ill, emoji]), [kw], "balanced").rejected).toEqual([]);
+  });
 });
 
 function longRecipe(motions: unknown[] = []) {

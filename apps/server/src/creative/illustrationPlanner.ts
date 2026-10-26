@@ -12,6 +12,7 @@ import {
   sourceToOutput,
   spokenWords,
   validateComposition,
+  withPendingCutsApplied,
   type CreativePlan,
   type Recipe,
   type Rejection,
@@ -21,8 +22,9 @@ import { generateIllustration } from "./illustrate";
 import { formatTranscript, model } from "./planner";
 
 /**
- * Botão "Sugerir imagens": separado do plano automático (Analisar / Sugerir
- * motions) porque cada imagem gasta crédito na Magnific. Uma chamada de IA
+ * Imagens ilustrativas: a análise (Analisar e aplicar / automática) gera 2 uma
+ * vez por projeto; o botão "Sugerir imagens" gera mais. Fora do plano de
+ * motions porque cada imagem gasta crédito na Magnific. Uma chamada de IA
  * escolhe os pontos-chave da fala e descreve o que desenhar; o código ancora,
  * valida (máx. 3, ≥ 8 s, camadas livres) e gera as imagens em paralelo. Tudo
  * entra como sugestão pendente, já com a imagem, para o operador ver no
@@ -85,7 +87,8 @@ ${formatTranscript(words)}`;
 /** Escolhas da IA → sugestões pendentes de ilustração (sem imagem ainda) */
 export function placeIllustrations(
   recipe: Recipe,
-  picks: IllustrationPick[]
+  picks: IllustrationPick[],
+  max: number = MAX_ILLUSTRATIONS
 ): { recipe: Recipe; added: string[]; rejected: Rejection[] } {
   const style = interpretBriefing(recipe.briefing).style ?? "balanced";
   const plan: CreativePlan = {
@@ -107,7 +110,7 @@ export function placeIllustrations(
   const before = new Set(recipe.motions.map((m) => m.id));
   const next = mergeMotionSuggestions(
     recipe,
-    composed.accepted.map(({ priority: _p, ...c }) => c),
+    composed.accepted.slice(0, max).map(({ priority: _p, ...c }) => c),
     { onlyKinds: ["illustration"] }
   );
   const added = next.motions.filter((m) => m.kind === "illustration" && !before.has(m.id)).map((m) => m.id);
@@ -116,13 +119,22 @@ export function placeIllustrations(
 
 export async function suggestIllustrations(
   input: Recipe,
-  opts: { instructions?: string; pick?: (system: string, user: string) => Promise<IllustrationPick[]> } = {}
+  opts: {
+    instructions?: string;
+    /** Quantas imagens no máximo (a análise automática pede 2) */
+    max?: number;
+    pick?: (system: string, user: string) => Promise<IllustrationPick[]>;
+  } = {}
 ): Promise<{ recipe: Recipe; report: IllustrationReport }> {
   const t0 = Date.now();
-  if (spokenWords(input).length === 0) throw new Error("Transcreva o vídeo antes de sugerir imagens");
-  const { system, user } = buildPrompt(input, (opts.instructions ?? "").trim());
+  // como o planner: escolhe no vídeo já sem os cortes pendentes
+  const planning = withPendingCutsApplied(input);
+  if (spokenWords(planning).length === 0) throw new Error("Transcreva o vídeo antes de sugerir imagens");
+  const { system, user } = buildPrompt(planning, (opts.instructions ?? "").trim());
   const picks = await (opts.pick ?? askModel)(system, user);
-  const placed = placeIllustrations(input, picks);
+  const placedOnPlan = placeIllustrations(planning, picks, opts.max);
+  // a timeline volta a ser a do operador (os cortes seguem pendentes)
+  const placed = { ...placedOnPlan, recipe: { ...placedOnPlan.recipe, timeline: input.timeline } };
 
   // gera as imagens das sugestões novas em paralelo; falha numa não derruba as outras
   const errors: string[] = [];

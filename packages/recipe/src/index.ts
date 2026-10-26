@@ -1,5 +1,6 @@
 export * from "./audioClips";
 export * from "./captions";
+export * from "./clipboard";
 export * from "./color";
 export * from "./framing";
 export * from "./library";
@@ -15,6 +16,7 @@ export * from "./selection";
 export * from "./mediaRules";
 export * from "./transitions";
 export * from "./illustration";
+export * from "./lanes";
 export * from "./mediaRefs";
 export * from "./music";
 export * from "./schema";

@@ -31,6 +31,10 @@ interface AudioPanelProps {
   onChange: (recipe: Recipe) => void;
   /** Substitui a receita por uma versão vinda do servidor (limpa o dirty) */
   onServerUpdate: (recipe: Recipe) => void;
+  /** Aplica um resultado do servidor sobre a receita atual (não perde edição feita enquanto rodava) */
+  onServerPatch: (saved: Recipe | null, patch: (r: Recipe) => Recipe) => void;
+  /** Grava as edições antes de uma ação do servidor (ele lê a receita gravada) */
+  saveIfDirty: () => Promise<Recipe | null>;
   /** Clipe de música/SFX selecionado na timeline */
   selectedClipId: string | null;
   onSelectClip: (id: string | null) => void;
@@ -43,6 +47,8 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   playheadSeconds,
   onChange,
   onServerUpdate,
+  onServerPatch,
+  saveIfDirty,
   selectedClipId,
   onSelectClip,
   musicAssets,
@@ -68,7 +74,28 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
     setBusy(label);
     setError(null);
     try {
+      await saveIfDirty();
       onServerUpdate(await fn());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Tratar: o servidor só gera os arquivos; o resto da edição (inclusive o feito enquanto trata) fica */
+  const enhance = async () => {
+    setBusy("enhance");
+    setError(null);
+    try {
+      const saved = await saveIfDirty();
+      const done = await enhanceAudioApi(recipe.projectId);
+      const files = new Map(done.sources.map((s) => [s.id, s.enhancedAudio]));
+      onServerPatch(saved, (cur) => ({
+        ...cur,
+        sources: cur.sources.map((s) => (files.has(s.id) ? { ...s, enhancedAudio: files.get(s.id) ?? s.enhancedAudio } : s)),
+        audio: { ...cur.audio, useEnhanced: done.audio.useEnhanced },
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -123,7 +150,7 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
           <button
             className="sm"
             disabled={busy !== null}
-            onClick={() => runServer("enhance", () => enhanceAudioApi(recipe.projectId))}
+            onClick={enhance}
           >
             <Icon name="wand" size={13} />
             {busy === "enhance" ? "Tratando…" : noEnhanced ? "Tratar" : "Tratar de novo"}

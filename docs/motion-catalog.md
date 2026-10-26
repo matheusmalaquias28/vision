@@ -1,6 +1,6 @@
 # Catálogo de motions e receitas
 
-> Gerado de `packages/recipe/src/motionRegistry.ts` e `motionCombos.ts` (registry v2). Não edite à mão: rode `npm run cli -- motion-catalog --out docs/motion-catalog.md`.
+> Gerado de `packages/recipe/src/motionRegistry.ts` e `motionCombos.ts` (registry v3). Não edite à mão: rode `npm run cli -- motion-catalog --out docs/motion-catalog.md`.
 
 A IA só escolhe tipo, momento e campos desta biblioteca fechada; nunca escreve animação. Textos e números precisam vir da fala ou do briefing do War (o compilador confere).
 
@@ -8,11 +8,11 @@ A IA só escolhe tipo, momento e campos desta biblioteca fechada; nunca escreve 
 
 | Estilo | Para quê | 1 motion a cada | Máx. por 10 s | Flash |
 |---|---|---|---|---|
-| Equilibrado (`balanced`) | padrão: ênfases pontuais, variedade, sem exagero | 5 s | 2 | 1 a cada 20 s |
-| Dinâmico (`dynamic`) | ritmo alto: punches, frases cinéticas, mais motions | 3.5 s | 3 | 1 a cada 12 s |
-| Premium (`premium`) | sóbrio: poucos motions, tipografia elegante, câmera suave, sem flash | 6.5 s | 2 | não |
+| Equilibrado (`balanced`) | ritmo de anúncio: algo a cada poucos segundos, variedade, sem exagero | 4 s | 2 | 1 a cada 20 s |
+| Dinâmico (`dynamic`) | ritmo alto: punches, frases cinéticas, transições, mais motions | 3 s | 3 | 1 a cada 12 s |
+| Premium (`premium`) | sóbrio: tipografia elegante, câmera suave, sem flash | 5.5 s | 2 | não |
 | Minimalista (`minimal`) | o mínimo: só o essencial, sem flash nem emoji | 10 s | 1 | não |
-| Educativo (`educational`) | clareza: listas, números e setas; sem flash | 5 s | 2 | não |
+| Educativo (`educational`) | clareza: listas, números e setas; sem flash | 4.5 s | 2 | não |
 
 ## Receitas (combos)
 
@@ -106,15 +106,15 @@ Chamada sóbria com hierarquia: tese, promessa ou CTA final.
 - **Checagem de fatos:** pelo menos uma palavra da fala/briefing
 - **Estilos em que combina:** Premium, Equilibrado, Minimalista, Educativo
 
-### Tela cheia — `screen` (v1, Tipografia)
+### Tela cheia — `screen` (v2, Tipografia)
 
-Quebra o quadro do vídeo: tela cheia com fundo animado (papel, grid, pontos ou gradiente) e uma frase grande entrando palavra a palavra.
+Quebra o quadro do vídeo: tela cheia com fundo animado (papel, grid, pontos ou gradiente) e uma frase grande entrando palavra a palavra — ou, com itens, um título e uma lista de 2 a 5 itens entrando um a um.
 
-- **Quando usar:** tese, virada ou pergunta que merece parar o vídeo; abrir uma parte: “passo 1”, “o problema”, “a solução” (eyebrow); promessa ou conclusão curta que precisa de destaque total
+- **Quando usar:** tese, virada ou pergunta que merece parar o vídeo; abrir uma parte: “passo 1”, “o problema”, “a solução” (eyebrow); promessa ou conclusão curta que precisa de destaque total; com items: passos, documentos ou direitos ENUMERADOS na fala que merecem a tela inteira
 - **Quando NÃO usar:** mais de uma a cada 15 s; nos primeiros 1,5 s quando o rosto é o gancho; frase longa (> 12 palavras); enquanto a pessoa mostra algo na câmera
-- **Duração:** 1.5–5 s (padrão 2.6 s) · intensidade 3/3 · camada `fullscreen`
+- **Duração:** 1.5–6 s (padrão 2.6 s) · intensidade 3/3 · camada `fullscreen`
 - **Variantes:** `paper` Papel — textura de papel animada: caderno, educativo, próximo; `grid` Grid — grid sutil em movimento: tecnologia, dados, método; `dots` Pontos — malha de pontos: leve, moderno; `gradient` Gradiente — gradiente em movimento: premium, emocional
-- **Campos da IA:** `text` frase da fala, 2–10 palavras; `emphasis` palavra(s) DA FRASE em destaque; `eyebrow` rótulo curto opcional (PASSO 1, O PROBLEMA); `variant` paper|grid|dots|gradient
+- **Campos da IA:** `text` frase da fala, 2–10 palavras (com items: o título da lista); `emphasis` palavra(s) DA FRASE em destaque; `eyebrow` rótulo curto opcional (PASSO 1, O PROBLEMA); `items` opcional: 2–5 itens DITOS separados por | (até 4 palavras cada) — vira lista; dê 3–4 s; `variant` paper|grid|dots|gradient
 - **Checagem de fatos:** ≥ 50% das palavras de conteúdo vêm da fala/briefing
 - **Estilos em que combina:** Equilibrado, Dinâmico, Educativo, Premium
 

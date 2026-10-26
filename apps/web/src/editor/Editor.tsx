@@ -1,6 +1,8 @@
 import { type PlayerRef } from "@remotion/player";
 import {
   applyMotionSfxRules,
+  ensureTransitionSfx,
+  enforceLanes,
   createAudioClip,
   dropTarget,
   insertClipSegment,
@@ -9,6 +11,14 @@ import {
   type Segment,
   type TrackId,
   deleteTimelineItems,
+  copyItems,
+  pasteItems,
+  reviewMotions,
+  selectionFromKeys,
+  selectionHas,
+  selectionKeys,
+  splitItemAt,
+  type ClipboardData,
   selectionCount,
   type TimelineSelection,
   duplicateAudioClip,
@@ -67,7 +77,7 @@ import { PipelineStep } from "./PipelineStep";
 import { PlayerPanel } from "./PlayerPanel";
 import { RenderPanel } from "./RenderPanel";
 import { StylePanel } from "./StylePanel";
-import { Timeline, type TimelineTool } from "./Timeline";
+import { Timeline, type TimelineItemAction, type TimelineTool } from "./Timeline";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { Logo } from "../ui/Logo";
 import { DragLayer } from "./DragLayer";
@@ -183,12 +193,13 @@ export const Editor: React.FC<EditorProps> = ({
    * Troca a receita guardando a anterior para desfazer. coalesce=true junta
    * mudanças em rajada (arrasto de borda gera dezenas por segundo). Toda
    * mudança passa pelo vínculo motion→som (o som acompanha, nasce e sai com o
-   * motion); devolve true se esse vínculo mexeu na receita.
+   * motion) e pela regra das camadas (item novo/movido não cai em cima de
+   * outro da mesma camada, ver enforceLanes); devolve true se isso mexeu.
    */
   const commit = useCallback((raw: Recipe, coalesce: boolean): boolean => {
     const h = history.current;
     const prev = recipeRef.current;
-    const next = applyMotionSfxRules(prev, raw, sfxRef.current);
+    const next = applyMotionSfxRules(prev, enforceLanes(prev, raw), sfxRef.current);
     const now = performance.now();
     if (prev && prev !== next && !(coalesce && now - h.lastPush < HISTORY_COALESCE_MS)) {
       h.past = [...h.past, prev].slice(-HISTORY_LIMIT);
@@ -268,8 +279,11 @@ export const Editor: React.FC<EditorProps> = ({
   );
 
   // o que está selecionado na timeline, lido pelos atalhos sem recriar o listener
-  const selectionRef = useRef({ segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, multi });
-  selectionRef.current = { segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, multi };
+  const selectionRef = useRef({ segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, motion: selectedMotion, multi });
+  selectionRef.current = { segment: selectedSegment, audio: selectedAudioClip, overlay: selectedOverlay, motion: selectedMotion, multi };
+  /** Playhead em segundos do vídeo final (colar com Ctrl+V) */
+  const playheadRef = useRef(0);
+  playheadRef.current = frame / fps;
 
   /** Delete: apaga o item selecionado. false = nada para apagar */
   const deleteSelection = useCallback((): boolean => {
@@ -297,12 +311,92 @@ export const Editor: React.FC<EditorProps> = ({
     } else if (sel.overlay) {
       commit({ ...r, overlays: r.overlays.filter((o) => o.id !== sel.overlay) }, false);
       setSelectedOverlay(null);
+    } else if (sel.motion) {
+      commit({ ...r, motions: r.motions.filter((m) => m.id !== sel.motion) }, false);
+      setSelectedMotion(null);
     } else {
       return false;
     }
     setDirty(true);
     return true;
   }, [commit]);
+
+  // ── Área de transferência da timeline (menu do botão direito, Ctrl+C/X/V) ──
+  const clipboardRef = useRef<ClipboardData | null>(null);
+  const [hasClipboard, setHasClipboard] = useState(false);
+
+  /** O que está selecionado como chaves "tipo:id" (vários ou o item único) */
+  const selectedKeys = useCallback((): string[] => {
+    const sel = selectionRef.current;
+    if (sel.multi && selectionCount(sel.multi) > 0) return selectionKeys(sel.multi);
+    if (sel.audio) return [`audio:${sel.audio}`];
+    if (sel.segment) return [`segment:${sel.segment}`];
+    if (sel.overlay) return [`overlay:${sel.overlay}`];
+    if (sel.motion) return [`motion:${sel.motion}`];
+    return [];
+  }, []);
+
+  /** Seleciona o que acabou de entrar (colado/duplicado) */
+  const selectKeys = useCallback((keys: string[]) => {
+    setSelectedSegment(null);
+    setSelectedAudioClip(null);
+    setSelectedOverlay(null);
+    setSelectedMotion(null);
+    if (keys.length !== 1) {
+      setMulti(keys.length > 1 ? selectionFromKeys(keys) : null);
+      return;
+    }
+    setMulti(null);
+    const [kind, id] = [keys[0].slice(0, keys[0].indexOf(":")), keys[0].slice(keys[0].indexOf(":") + 1)];
+    if (kind === "segment") setSelectedSegment(id);
+    else if (kind === "audio") setSelectedAudioClip(id);
+    else if (kind === "overlay") setSelectedOverlay(id);
+    else if (kind === "motion") setSelectedMotion(id);
+  }, []);
+
+  /** Ações da timeline sobre itens (menu do botão direito e atalhos); `at` = instante no vídeo final */
+  const timelineAction = useCallback(
+    (action: TimelineItemAction, keys: string[], at: number) => {
+      const r = recipeRef.current;
+      if (!r) return;
+      const apply = (next: Recipe) => {
+        if (next === r) return;
+        commit(next, false);
+        setDirty(true);
+      };
+      if (action === "copy" || action === "cut") {
+        const data = copyItems(r, keys);
+        if (data) {
+          clipboardRef.current = data;
+          setHasClipboard(true);
+        }
+        if (action === "cut") {
+          apply(deleteTimelineItems(r, selectionFromKeys(keys)).recipe);
+          selectKeys([]);
+        }
+      } else if (action === "paste") {
+        if (!clipboardRef.current) return;
+        const out = pasteItems(r, clipboardRef.current, at);
+        apply(out.recipe);
+        selectKeys(out.keys);
+      } else if (action === "duplicate") {
+        const data = copyItems(r, keys);
+        if (!data) return;
+        const out = pasteItems(r, data, data.from + data.span);
+        apply(out.recipe);
+        selectKeys(out.keys);
+      } else if (action === "split") {
+        apply(splitItemAt(r, keys[0], at));
+      } else if (action === "delete") {
+        apply(deleteTimelineItems(r, selectionFromKeys(keys)).recipe);
+        selectKeys([]);
+      } else {
+        const ids = keys.filter((k) => k.startsWith("motion:")).map((k) => k.slice("motion:".length));
+        apply(reviewMotions(r, ids, action === "accept"));
+      }
+    },
+    [commit, selectKeys]
+  );
 
   /** Ctrl+D: cópia do item selecionado logo depois dele (e a cópia fica selecionada) */
   const duplicateSelection = useCallback(() => {
@@ -328,16 +422,20 @@ export const Editor: React.FC<EditorProps> = ({
       const copy = { ...o, id: `ov_${id}`, start: o.end, end: o.end + (o.end - o.start) };
       commit({ ...r, overlays: [...r.overlays, copy] }, false);
       setSelectedOverlay(copy.id);
+    } else if (sel.motion) {
+      // logo depois do original; a regra das camadas acha o espaço livre
+      timelineAction("duplicate", [`motion:${sel.motion}`], 0);
+      return;
     } else {
       return;
     }
     setDirty(true);
-  }, [commit]);
+  }, [commit, timelineAction]);
 
   // Atalhos globais (fora de campos de texto):
   // espaço play/pause · Ctrl+Z/Shift+Z/Y desfazer/refazer · Ctrl+S salvar
   // ←/→ 1 frame (Shift = 1s) · Home/End início/fim
-  // V seleção · C corte · Esc solta · Delete apaga · Ctrl+D duplica
+  // V seleção · C corte · Esc solta · Delete apaga · Ctrl+D duplica · Ctrl+C/X/V copia/recorta/cola
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -365,6 +463,20 @@ export const Editor: React.FC<EditorProps> = ({
       if (mod && key === "d") {
         e.preventDefault(); // senão o navegador abre "adicionar favorito"
         duplicateSelection();
+        return;
+      }
+      // Ctrl+C/X: itens selecionados na timeline · Ctrl+V: cola no playhead
+      if (mod && (key === "c" || key === "x")) {
+        const keys = selectedKeys();
+        if (keys.length === 0) return; // sem seleção: cópia normal do navegador
+        e.preventDefault();
+        timelineAction(key === "x" ? "cut" : "copy", keys, playheadRef.current);
+        return;
+      }
+      if (mod && key === "v") {
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        timelineAction("paste", [], playheadRef.current);
         return;
       }
       if (!mod && !e.altKey && (key === "c" || key === "v")) {
@@ -407,7 +519,7 @@ export const Editor: React.FC<EditorProps> = ({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, save, seekFrame, fps, totalFrames, deleteSelection, duplicateSelection]);
+  }, [undo, redo, save, seekFrame, fps, totalFrames, deleteSelection, duplicateSelection, selectedKeys, timelineAction]);
 
   useEffect(() => {
     const player = playerRef.current;
@@ -441,6 +553,52 @@ export const Editor: React.FC<EditorProps> = ({
     (next: Recipe) => {
       // o servidor já gravou; só fica "não salvo" se o vínculo de sons mexeu
       setDirty(commit(next, false));
+    },
+    [commit]
+  );
+
+  // projeto aberto com transição sem som (salvo antes da regra, ou aceita com a
+  // biblioteca vazia): o som entra assim que receita e biblioteca carregam
+  const transitionSfxChecked = useRef<string | null>(null);
+  useEffect(() => {
+    const r = recipeRef.current;
+    if (!r || sfxAssets.length === 0 || transitionSfxChecked.current === r.projectId) return;
+    transitionSfxChecked.current = r.projectId;
+    const next = ensureTransitionSfx(r, sfxAssets);
+    if (next !== r) {
+      commit(next, false);
+      setDirty(true);
+    }
+  }, [recipe ? recipe.projectId : null, sfxAssets, commit]);
+
+  /**
+   * Ações do servidor leem a receita GRAVADA: sem gravar antes, a resposta
+   * voltava sem as edições não salvas (tratar o áudio desfazia a edição).
+   * Devolve a receita que foi gravada.
+   */
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const saveIfDirty = useCallback(async (): Promise<Recipe | null> => {
+    const r = recipeRef.current;
+    if (r && dirtyRef.current) {
+      await putRecipe(r);
+      setDirty(false);
+    }
+    return r;
+  }, []);
+
+  /**
+   * Resultado do servidor que só acrescenta campos (ex.: áudio tratado):
+   * aplica sobre a receita ATUAL, então o que foi editado enquanto o servidor
+   * trabalhava também fica. `saved` = o que estava gravado quando a ação começou.
+   */
+  const serverPatch = useCallback(
+    (saved: Recipe | null, patch: (r: Recipe) => Recipe) => {
+      const cur = recipeRef.current;
+      if (!cur) return;
+      const editedMeanwhile = cur !== saved;
+      const touched = commit(patch(cur), false);
+      setDirty(editedMeanwhile || touched);
     },
     [commit]
   );
@@ -484,7 +642,7 @@ export const Editor: React.FC<EditorProps> = ({
   }, [projectId, serverUpdate]);
   /** Seta do fluxo que a análise do servidor está rodando agora */
   const autoStep =
-    busy === "auto" ? ({ Transcrevendo: 1, "Analisando cortes": 2, "Planejando motions": 3 } as Record<string, number>)[serverStage ?? ""] ?? 0 : 0;
+    busy === "auto" ? ({ Transcrevendo: 1, Cortando: 2, "Planejando motions": 3 } as Record<string, number>)[serverStage ?? ""] ?? 0 : 0;
 
   // ── Ilustrações (Magnific): imagem só por botão (gasta crédito), gravada no motion ──
   const [illustrations, setIllustrations] = useState<Record<string, IllustrationJob>>({});
@@ -549,6 +707,7 @@ export const Editor: React.FC<EditorProps> = ({
       setMulti(null);
       setSelectedSegment(null);
       setSelectedAudioClip(null);
+      setSelectedMotion(null);
       setTab("midia");
     }
   };
@@ -569,13 +728,14 @@ export const Editor: React.FC<EditorProps> = ({
         ? `motion:${selectedMotion}`
         : null;
 
-  // trecho de vídeo, clipe de áudio e overlay: um selecionado por vez (Delete/Ctrl+D agem nele)
+  // trecho de vídeo, clipe de áudio, overlay e motion: um selecionado por vez (Delete/Ctrl+D/C/X agem nele)
   const selectSegment = (id: string | null) => {
     setSelectedSegment(id);
     if (id) {
       setMulti(null);
       setSelectedAudioClip(null);
       setSelectedOverlay(null);
+      setSelectedMotion(null);
     }
   };
   const selectAudioClip = (id: string | null) => {
@@ -584,6 +744,7 @@ export const Editor: React.FC<EditorProps> = ({
       setMulti(null);
       setSelectedSegment(null);
       setSelectedOverlay(null);
+      setSelectedMotion(null);
       setTab("audio");
     }
   };
@@ -591,6 +752,9 @@ export const Editor: React.FC<EditorProps> = ({
     setSelectedMotion(id);
     if (id) {
       setMulti(null);
+      setSelectedSegment(null);
+      setSelectedAudioClip(null);
+      setSelectedOverlay(null);
       setTab("motions");
     }
   };
@@ -793,9 +957,9 @@ export const Editor: React.FC<EditorProps> = ({
   const busyLabel: Record<string, string> = {
     transcrevendo: "Transcrevendo",
     silencios: "Detectando silêncios",
-    cortes: "Analisando cortes",
+    cortes: "Cortando",
     motions: "Planejando motions",
-    analise: "Analisando: transcrição, cortes e motions",
+    analise: "Analisando: transcrição, cortes, motions e imagens",
     auto: `IA analisando o vídeo: ${serverStage ?? ""}`,
     imagens: "Gerando imagens",
     template: "Aplicando template",
@@ -897,15 +1061,15 @@ export const Editor: React.FC<EditorProps> = ({
           />
           <PipelineStep
             n={2}
-            label="Sugerir cortes"
-            runningLabel="Analisando cortes"
+            label="Cortar"
+            runningLabel="Cortando"
             done={hasCutSuggestions}
             running={busy === "cortes" || busy === "analise" || autoStep === 2}
             lightDelay={0.25}
             disabled={busy !== null || !hasTranscript}
             title={
               hasTranscript
-                ? "Pausas, vícios, muletas, repetições e retomadas (IA). Nada é aplicado sem você aceitar."
+                ? "Corta pausas, vícios, muletas, repetições e retomadas (IA) e reagrupa a legenda. Os cortes entram aplicados: restaure no texto (palavra riscada + ⌫) ou arrastando o trecho."
                 : "Transcreva o vídeo antes"
             }
             onClick={() => step("cortes", () => suggestSmartCutsApi(projectId, cutPace))}
@@ -915,7 +1079,7 @@ export const Editor: React.FC<EditorProps> = ({
               value={cutPace}
               disabled={busy !== null}
               aria-label="Ritmo dos cortes"
-              title="Quanto silêncio sobra entre as frases. Rode Sugerir cortes de novo para aplicar."
+              title="Quanto silêncio sobra entre as frases. Rode Cortar de novo para aplicar (as pausas são medidas de novo)."
               onChange={(e) => {
                 const pace = e.target.value as CutPace;
                 setCutPace(pace);
@@ -1134,6 +1298,8 @@ export const Editor: React.FC<EditorProps> = ({
                 playheadSeconds={playheadOutput}
                 onChange={update}
                 onServerUpdate={serverUpdate}
+                onServerPatch={serverPatch}
+                saveIfDirty={saveIfDirty}
                 selectedClipId={selectedAudioClip}
                 onSelectClip={selectAudioClip}
                 musicAssets={musicAssets}
@@ -1213,6 +1379,12 @@ export const Editor: React.FC<EditorProps> = ({
         onDeleteMulti={() => {
           if (deleteSelection()) setDirty(true);
         }}
+        onItemAction={(action, key, at) => {
+          // item de uma seleção múltipla: a ação vale para todos os selecionados
+          const keys = key === null ? [] : selectionHas(multi, key) ? selectionKeys(multi) : [key];
+          timelineAction(action, keys, at);
+        }}
+        canPaste={hasClipboard}
         onDropFiles={(files, at, hovered) => void addFiles(files, at, hovered)}
       />
 

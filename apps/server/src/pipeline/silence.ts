@@ -1,12 +1,15 @@
 import {
+  mergeSilenceRanges,
   mergeSuggestions,
+  quietRangesFromLevels,
   refineWordsWithSilences,
   type CutCandidate,
   type Recipe,
   type SilenceRange,
 } from "@vision/recipe";
 import { fromRecipePath } from "../paths";
-import { ffmpegPath, run } from "./ffbin";
+import { applySuggestedCuts } from "./applyCuts";
+import { ffmpegPath, run, runBinaryOut } from "./ffbin";
 
 export interface SilenceOptions {
   /** Nível abaixo do qual é considerado silêncio (dB) */
@@ -54,9 +57,8 @@ export async function detectSilences(
 }
 
 /**
- * Roda a detecção em todas as fontes e grava as sugestões na receita.
- * Só substitui silêncios pendentes — sugestões de outros motivos e as já
- * revisadas pelo operador ficam intactas.
+ * Roda a detecção em todas as fontes e aplica os cortes de silêncio (sem
+ * aprovação, ver applySuggestedCuts). Cortes de outros motivos ficam intactos.
  */
 export async function suggestCuts(
   recipe: Recipe,
@@ -84,7 +86,7 @@ export async function suggestCuts(
       });
     }
   }
-  return mergeSuggestions(recipe, candidates, ["silence"]);
+  return applySuggestedCuts(mergeSuggestions(recipe, candidates, ["silence"]));
 }
 
 /**
@@ -92,6 +94,46 @@ export async function suggestCuts(
  * de 0.2s (as sugestões de corte continuam exigindo pausas maiores).
  */
 const wordTimingSilence: SilenceOptions = { noiseDb: -35, minSilenceSeconds: 0.2, paddingSeconds: 0 };
+
+const LEVEL_RATE = 16000;
+const LEVEL_WINDOW_SECONDS = 0.05;
+
+/** Nível RMS (dB) do áudio em janelas de 50 ms (PCM mono 16 kHz do ffmpeg) */
+export async function measureLevels(videoAbsPath: string): Promise<number[]> {
+  const pcm = await runBinaryOut(ffmpegPath, [
+    "-v", "error",
+    "-i", videoAbsPath,
+    "-vn", "-ac", "1", "-ar", String(LEVEL_RATE),
+    "-f", "s16le", "-",
+  ]);
+  const perWindow = Math.round(LEVEL_RATE * LEVEL_WINDOW_SECONDS);
+  const samples = Math.floor(pcm.length / 2);
+  const levels: number[] = [];
+  for (let i = 0; i + perWindow <= samples; i += perWindow) {
+    let sum = 0;
+    for (let j = i; j < i + perWindow; j++) {
+      const v = pcm.readInt16LE(j * 2) / 32768;
+      sum += v * v;
+    }
+    levels.push(10 * Math.log10(sum / perWindow + 1e-10));
+  }
+  return levels;
+}
+
+/**
+ * Silêncios para corrigir as palavras: o silencedetect de limiar fixo mais o
+ * limiar adaptado ao fundo de cada clipe (sala com ruído, ver
+ * quietRangesFromLevels).
+ */
+async function wordTimingSilences(videoAbsPath: string): Promise<SilenceRange[]> {
+  const fixed = await detectSilences(videoAbsPath, wordTimingSilence);
+  try {
+    const adaptive = quietRangesFromLevels(await measureLevels(videoAbsPath), LEVEL_WINDOW_SECONDS, wordTimingSilence.minSilenceSeconds);
+    return mergeSilenceRanges(fixed, adaptive);
+  } catch {
+    return fixed;
+  }
+}
 
 /**
  * Corrige as palavras do Whisper com os silêncios reais do áudio de cada
@@ -102,7 +144,7 @@ export async function refineTranscriptTimings(recipe: Recipe): Promise<Recipe> {
   const bySource = new Map<string, SilenceRange[]>();
   for (const source of recipe.sources) {
     if (!recipe.captions.blocks.some((b) => b.sourceId === source.id)) continue;
-    bySource.set(source.id, await detectSilences(fromRecipePath(source.file), wordTimingSilence));
+    bySource.set(source.id, await wordTimingSilences(fromRecipePath(source.file)));
   }
   let changed = false;
   const blocks = recipe.captions.blocks.map((b) => {

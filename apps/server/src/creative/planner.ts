@@ -4,14 +4,17 @@ import path from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import {
+  applyMotionSfxRules,
   compilePlan,
   CREATIVE_PRESETS,
+  detectEnumerations,
   CREATIVE_STYLES,
   formatCatalogForPrompt,
   getCandidateCombos,
   getCandidateMotions,
   interpretBriefing,
   mergeMotionSuggestions,
+  MOTION_KINDS,
   MOTION_REGISTRY_VERSION,
   MUSIC_MOODS,
   MUSIC_TEMPOS,
@@ -25,10 +28,14 @@ import {
   spokenWords,
   TRANSITION_PRESETS,
   TRANSITION_STYLES,
+  transitionFillers,
   validateComposition,
+  withPendingCutsApplied,
+  wordsAfterCut,
   type ComboId,
   type CreativePlan,
   type CreativeStyle,
+  type EnumerationCue,
   type MotionKind,
   type Recipe,
   type Rejection,
@@ -46,12 +53,16 @@ import { requireOpenAI } from "../pipeline/transcribe";
  * sugestão pendente: o editor aceita, ajusta ou rejeita.
  */
 
-export const PROMPT_VERSION = 4;
-const DEFAULT_MODEL = "gpt-4o-mini";
+export const PROMPT_VERSION = 6;
+/** O 4o-mini repetia keyword e esquecia transição; o 4.1 segue melhor as regras de variedade */
+const DEFAULT_MODEL = "gpt-4.1";
 const PLANNER_TIMEOUT_MS = 45_000;
 const MAX_OUTPUT_TOKENS = 1200;
 
 export const model = () => process.env.CREATIVE_MODEL ?? process.env.MOTIONS_MODEL ?? DEFAULT_MODEL;
+
+/** Um novo plano substitui as sugestões pendentes de tudo, menos das imagens (geradas, custam crédito) */
+const REPLANNED: MotionKind[] = MOTION_KINDS.filter((k) => k !== "illustration");
 
 export interface CreativeReport {
   jobId: string;
@@ -101,8 +112,12 @@ function outputSchema(ids: string[]) {
 
 // ─── Prompt compacto ─────────────────────────────────────────────────
 
-/** Linhas "(12.3s) [40]palavra [41]outra" — quebra em pausas ou a cada 12 palavras */
-export function formatTranscript(words: SpokenWord[]): string {
+/**
+ * Linhas "(12.3s) [40]palavra [41]outra" — quebra em pausas ou a cada 12
+ * palavras. `cutBefore`: palavras logo depois de um corte ganham "‖" (onde
+ * cabe transição).
+ */
+export function formatTranscript(words: SpokenWord[], cutBefore: Set<number> = new Set()): string {
   const lines: string[] = [];
   let line: string[] = [];
   let lineStart = 0;
@@ -113,7 +128,7 @@ export function formatTranscript(words: SpokenWord[]): string {
       line = [];
     }
     if (line.length === 0) lineStart = w.outputTime;
-    line.push(`[${i}]${w.word.text}`);
+    line.push(`${cutBefore.has(i) ? "‖ " : ""}[${i}]${w.word.text}`);
   });
   if (line.length > 0) lines.push(`(${lineStart.toFixed(1)}s) ${line.join(" ")}`);
   return lines.join("\n");
@@ -127,6 +142,9 @@ function buildPrompt(args: {
   instructions: string;
   catalog: string;
   maxEvents: number;
+  cutBefore: Set<number>;
+  /** Momentos em que a fala vira lista (só quando "screen" está no catálogo) */
+  enumerations: EnumerationCue[];
 }): { system: string; user: string } {
   const total = outputDuration(args.recipe.timeline.segments);
   const styleLine = args.style
@@ -136,9 +154,11 @@ function buildPrompt(args: {
 Regras:
 - "word" = índice da palavra onde o motion COMEÇA (a palavra que o motivou).
 - O BRIEFING É O MÍNIMO, NÃO O LIMITE: briefing curto ou vago não é motivo para editar pouco. Cumpra o que ele pede e respeite o que ele proíbe; o resto você decide como um editor profissional de anúncios faria para o vídeo prender do começo ao fim.
-- Edição completa: gancho forte nos primeiros 2 s; reforço visual em cada ideia-chave (palavra-chave, frase cinética, número, lista, marcação desenhada); câmera (zoom) nos picos de emoção; transição em mudança de assunto quando houver corte; CTA destacado no fim. Nunca deixe mais de ~5 s seguidos sem nada acontecendo na tela.
+- Edição completa: gancho forte nos primeiros 2 s; reforço visual em cada ideia-chave (palavra-chave, frase cinética, número, lista, marcação desenhada); câmera (zoom) nos picos de emoção; CTA destacado no fim. Nunca deixe mais de ~5 s seguidos sem nada acontecendo na tela.
+- Transição ("transition", se estiver no catálogo): só na palavra marcada com ‖ (logo depois de um corte); prefira as viradas de assunto. Use 2 a 3 em vídeo acima de 20 s, variando o modelo (style).
 - Textos e números SÓ do que foi dito ou do briefing. Nunca invente estatística, promessa, nome ou depoimento.
-- Varie: não repita o mesmo tipo em sequência; misture texto, câmera e elementos.
+- VARIEDADE é obrigatória: use pelo menos 5 tipos diferentes do catálogo e pelo menos 1 receita (combo); o mesmo tipo no máximo 2 vezes (zoom até 3). Prefira os tipos mais ricos (statement, kinetic, callout, annotation, list, counter, lowerThird, emoji, arrow, bubble) a repetir keyword. Não repita o mesmo tipo em sequência.
+- MOMENTO DE LISTA (a fala anuncia ou enumera itens: "em casos de", "esses são os pontos", "analisar esses tópicos", "primeiro… segundo…", "3 erros", "os documentos são"): PRIORIDADE MÁXIMA para "screen" com "items" — a tela cheia no modelo lista. "word" = a palavra da pista; "text" = título curto (o assunto da lista, da fala); "items" = 2 a 5 itens DITOS logo depois, até 4 palavras cada, separados por |; seconds 3–4. Coloque esse evento no TOPO de "events" e prefira-o ao "list" comum (cartão pequeno).
 - Dois textos animados nunca ao mesmo tempo. Combo já inclui câmera: não coloque zoom junto.
 - Ordene "events" do MAIS importante para o menos importante. No máximo ${args.maxEvents} eventos.
 - "params" é uma lista {k, v} só com os campos que o tipo usa (v sempre texto).
@@ -149,9 +169,15 @@ ${args.recipe.briefing ? `BRIEFING DO GESTOR (War): ${args.recipe.briefing}` : "
 ${args.avoid.length ? `PROIBIDO PELO BRIEFING: ${args.avoid.join(", ")}` : ""}
 ${args.instructions ? `PEDIDO DO EDITOR: ${args.instructions}` : ""}
 
-TRANSCRIÇÃO (tempo no vídeo final; índice da palavra entre colchetes):
-${formatTranscript(args.words)}
-
+TRANSCRIÇÃO (tempo no vídeo final; índice da palavra entre colchetes; ‖ = corte):
+${formatTranscript(args.words, args.cutBefore)}
+${
+  args.enumerations.length
+    ? `\nMOMENTOS DE LISTA DETECTADOS (use "screen" com items em cada um, se couber 1 a cada 15 s):\n${args.enumerations
+        .map((e) => `- palavra [${e.word}] (${args.words[e.word].outputTime.toFixed(1)}s): "${e.cue}"`)
+        .join("\n")}\n`
+    : ""
+}
 ${args.catalog}`;
   return { system, user };
 }
@@ -254,12 +280,21 @@ export async function planCreative(
 ): Promise<{ recipe: Recipe; report: CreativeReport }> {
   const t0 = Date.now();
   const instructions = (opts.instructions ?? "").trim();
-  const words = spokenWords(recipe);
+  // planeja no vídeo como fica depois dos cortes pendentes (ver withPendingCutsApplied)
+  const planning = withPendingCutsApplied(recipe);
+  const words = spokenWords(planning);
   if (words.length === 0) throw new Error("Projeto sem transcrição no corte — rode Transcrever antes");
-  const total = outputDuration(recipe.timeline.segments);
+  const total = outputDuration(planning.timeline.segments);
 
   // briefing do War + pedido do editor, lidos no código (proibições valem sem depender da IA)
-  const directives = interpretBriefing(`${recipe.briefing}\n${instructions}`);
+  const briefed = interpretBriefing(`${recipe.briefing}\n${instructions}`);
+  // fala que vira lista ("em casos de", "esses são os pontos"...): a tela cheia no modelo
+  // lista tem prioridade — entra no catálogo em qualquer estilo, a não ser que o briefing proíba
+  const enumerations = briefed.avoid.includes("screen") ? [] : detectEnumerations(words);
+  const directives =
+    enumerations.length && !briefed.wants.includes("screen")
+      ? { ...briefed, wants: [...briefed.wants, "screen" as const] }
+      : briefed;
   const presetStyle = directives.style ?? "balanced";
   // transição usa vídeos da biblioteca: sem eles na máquina (VPS sem a cópia), não oferece
   const libraryIds = new Set(loadCatalog().assets.map((a) => a.id));
@@ -271,7 +306,17 @@ export async function planCreative(
   // teto generoso: quem filtra densidade e colisões é validateComposition
   const maxEvents = Math.max(4, Math.min(20, Math.round(total / CREATIVE_PRESETS[presetStyle].secondsPerMotion) + 4));
   const catalog = formatCatalogForPrompt(kinds, combos);
-  const { system, user } = buildPrompt({ recipe, words, style: directives.style, avoid: directives.avoid, instructions, catalog, maxEvents });
+  const { system, user } = buildPrompt({
+    recipe: planning,
+    words,
+    style: directives.style,
+    avoid: directives.avoid,
+    instructions,
+    catalog,
+    maxEvents,
+    cutBefore: wordsAfterCut(planning, words),
+    enumerations: kinds.includes("screen") ? enumerations : [],
+  });
   const key = cacheKey(recipe, words, instructions, [...kinds, ...combos]);
   const t1 = Date.now();
 
@@ -327,12 +372,24 @@ export async function planCreative(
 
   // estilo do briefing manda; sem ele, vale a escolha da IA
   const style: CreativeStyle = directives.style ?? plan.style ?? "balanced";
-  const compiled = compilePlan(recipe, plan, { kinds, combos }, style);
-  const composed = validateComposition(recipe, compiled.candidates, style);
+  const compiled = compilePlan(planning, plan, { kinds, combos }, style);
+  // tela cheia em lista passa na frente: ganha a camada e a vez sobre o que estiver no caminho
+  const ranked = compiled.candidates.map((c) =>
+    c.kind === "screen" && (c.params as { layout?: string }).layout === "list" ? { ...c, priority: -1 } : c
+  );
+  const composed = validateComposition(planning, ranked, style, { onlyKinds: REPLANNED });
+  // a IA esquece as transições ou erra o corte: o código completa nos cortes (trocas de clipe primeiro)
+  const fillers = kinds.includes("transition") && style !== "minimal" ? transitionFillers(planning, 1000) : [];
+  const accepted = fillers.length
+    ? validateComposition(planning, [...composed.accepted, ...fillers], style, { onlyKinds: REPLANNED }).accepted
+    : composed.accepted;
   let next = mergeMotionSuggestions(
     recipe,
-    composed.accepted.map(({ priority: _p, ...c }) => c)
+    accepted.map(({ priority: _p, ...c }) => c),
+    { onlyKinds: REPLANNED }
   );
+  // som das sugestões substituídas sai; transição sugerida já vem com o som (pendente, só no preview)
+  next = applyMotionSfxRules(recipe, next, loadCatalog().assets);
   // trilha: a IA descreveu o que o vídeo pede; a faixa sai do catálogo analisado
   const noMusic = /\bsem (musica|trilha)\b/.test(
     `${recipe.briefing}\n${instructions}`.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
@@ -352,7 +409,7 @@ export async function planCreative(
     if (clip && ranked[0]) musicPick = { name: ranked[0].asset.name, why: ranked[0].why };
   }
   // um combo conta como um evento aplicado
-  const fresh = next.motions.filter((m) => m.status === "pending" && m.origin === "ai");
+  const fresh = next.motions.filter((m) => m.status === "pending" && m.origin === "ai" && m.kind !== "illustration");
   const applied = new Set(fresh.map((m) => m.group ?? m.id)).size;
   const t3 = Date.now();
 

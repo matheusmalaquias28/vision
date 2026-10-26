@@ -1,6 +1,7 @@
 import path from "node:path";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import { recipeMediaFiles, type Recipe } from "@vision/recipe";
+import { ensureTransitionSfx, recipeMediaFiles, type Recipe } from "@vision/recipe";
+import { loadCatalog } from "../library/catalog";
 import { projectDir } from "../paths";
 import { freeTempBytes, getServeUrl, MIN_FREE_BYTES, syncBundleMedia } from "./bundle";
 import { ensureWorkingSources } from "../pipeline/normalize";
@@ -28,6 +29,12 @@ export async function renderRecipe(
   const ensured = await ensureWorkingSources(recipe, (msg) => console.log(`[render ${recipe.projectId}] ${msg}`));
   if (ensured.changed) saveRecipe(ensured.recipe);
   recipe = ensured.recipe;
+  // toda transição vai com som (projeto salvo sem ele, biblioteca vazia na hora de aceitar...)
+  const withSfx = ensureTransitionSfx(recipe, loadCatalog().assets);
+  if (withSfx !== recipe) {
+    saveRecipe(withSfx);
+    recipe = withSfx;
+  }
 
   // um bundle por processo (não copia a mídia de novo a cada render)
   const serveUrl = await getServeUrl();

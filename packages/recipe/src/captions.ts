@@ -1,5 +1,5 @@
-import type { CaptionBlock, Segment, Word } from "./schema";
-import { isSourceTimeKept, segmentDuration } from "./time";
+import type { CaptionBlock, Segment, Timeline, Word } from "./schema";
+import { isSourceTimeKept, segmentDuration, sourceToOutput } from "./time";
 
 /** Pausa entre palavras que força um novo bloco de legenda (s) */
 export const DEFAULT_BLOCK_GAP_SECONDS = 0.8;
@@ -92,14 +92,80 @@ export function spreadCollapsedWords(words: Word[]): Word[] {
 }
 
 /**
+ * Agrupa as palavras de UM clipe olhando o vídeo já cortado: o limite de
+ * palavras conta só as que ficam (vício/retomada cortados não roubam lugar,
+ * nem sobra bloco de uma palavra visível) e a quebra vem de onde a pessoa
+ * parou de verdade — uma pausa cortada ou a pausa que sobrou no corte maior
+ * que `gapSeconds`. Palavras cortadas seguem no bloco (o editor por texto
+ * precisa delas para restaurar) e somem no render.
+ */
+function groupWordsAfterCuts(
+  words: Word[],
+  maxWordsPerBlock: number,
+  gapSeconds: number,
+  sourceId: string,
+  timeline: Pick<Timeline, "segments" | "suggestedCuts">
+): CaptionBlock[] {
+  const { segments } = timeline;
+  const pauseCuts = timeline.suggestedCuts.filter(
+    (c) => c.sourceId === sourceId && c.status === "accepted" && (c.reason === "pause" || c.reason === "silence")
+  );
+  // 1. frases: quebra onde a pessoa parou (pausa cortada ou pausa que sobrou)
+  const phrases: { word: Word; kept: boolean }[][] = [];
+  let phrase: { word: Word; kept: boolean }[] = [];
+  let prevKept: Word | null = null;
+  for (const word of words) {
+    const kept = isSourceTimeKept(segments, sourceId, (word.start + word.end) / 2);
+    if (kept && prevKept) {
+      const pauseCut = pauseCuts.some((c) => c.sourceStart >= prevKept!.end - 0.05 && c.sourceEnd <= word.start + 0.05);
+      const outPrev = sourceToOutput(segments, sourceId, prevKept.end) ?? sourceToOutput(segments, sourceId, (prevKept.start + prevKept.end) / 2);
+      const outNext = sourceToOutput(segments, sourceId, word.start) ?? sourceToOutput(segments, sourceId, (word.start + word.end) / 2);
+      const gap = outPrev !== null && outNext !== null ? outNext - outPrev : 0;
+      if ((pauseCut || gap > gapSeconds) && phrase.length > 0) {
+        phrases.push(phrase);
+        phrase = [];
+      }
+    }
+    phrase.push({ word, kept });
+    if (kept) prevKept = word;
+  }
+  if (phrase.length > 0) phrases.push(phrase);
+
+  // 2. cada frase em blocos equilibrados (5 palavras com limite 4 = 3 + 2, não 4 + 1)
+  const blocks: CaptionBlock[] = [];
+  for (const p of phrases) {
+    const n = p.filter((x) => x.kept).length;
+    const parts = Math.max(1, Math.ceil(n / maxWordsPerBlock));
+    const sizes = Array.from({ length: parts }, (_, i) => Math.floor(n / parts) + (i < n % parts ? 1 : 0));
+    let current: Word[] = [];
+    let keptInBlock = 0;
+    let part = 0;
+    for (const { word, kept } of p) {
+      if (kept && keptInBlock >= sizes[part] && part < parts - 1) {
+        blocks.push({ id: "", sourceId, words: current });
+        current = [];
+        keptInBlock = 0;
+        part++;
+      }
+      current.push(word);
+      if (kept) keptInBlock++;
+    }
+    if (current.length > 0) blocks.push({ id: "", sourceId, words: current });
+  }
+  return blocks.map((b, i) => ({ ...b, id: `cap_${String(i + 1).padStart(2, "0")}` }));
+}
+
+/**
  * Reagrupa os blocos existentes (preserva texto e timing das palavras,
  * só muda a divisão em blocos). Usado quando o usuário muda
- * maxWordsPerBlock no estilo.
+ * maxWordsPerBlock no estilo e depois que os cortes são aplicados (com
+ * `timeline`: agrupa pelo vídeo cortado, ver groupWordsAfterCuts).
  */
 export function regroupBlocks(
   blocks: CaptionBlock[],
   maxWordsPerBlock: number,
-  gapSeconds: number = DEFAULT_BLOCK_GAP_SECONDS
+  gapSeconds: number = DEFAULT_BLOCK_GAP_SECONDS,
+  timeline?: Pick<Timeline, "segments" | "suggestedCuts">
 ): CaptionBlock[] {
   // reagrupa por fonte separadamente (timestamps de fontes diferentes
   // não são comparáveis) e re-numera os ids no final
@@ -115,7 +181,11 @@ export function regroupBlocks(
       .flatMap((b) => b.words)
       .slice()
       .sort((a, b) => a.start - b.start);
-    all.push(...groupWordsIntoBlocks(words, maxWordsPerBlock, gapSeconds, sourceId));
+    all.push(
+      ...(timeline && sourceId !== null
+        ? groupWordsAfterCuts(words, maxWordsPerBlock, gapSeconds, sourceId, timeline)
+        : groupWordsIntoBlocks(words, maxWordsPerBlock, gapSeconds, sourceId))
+    );
   }
   return all.map((b, i) => ({
     ...b,

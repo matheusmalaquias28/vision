@@ -1,22 +1,18 @@
 import {
   applyCutToSegments,
   CUT_REASON_LABEL,
-  CUT_REASONS,
   MOTION_LABEL,
   isWordKept,
   restoreSourceRange,
-  reviewSuggestions,
   sourceToOutput,
   transcriptWords,
   wordMid,
   wordsBySource,
   wordsCutRange,
   wordsRestoreRange,
-  type CutReason,
   type Recipe,
   type Segment,
   type SourceTime,
-  type SuggestedCut,
   type TranscriptWord,
 } from "@vision/recipe";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -43,8 +39,8 @@ interface TranscriptPanelProps {
 
 /**
  * Editor por texto: apagar palavras corta o vídeo, clicar numa palavra
- * riscada e apagar de novo restaura. Sugestões pendentes aparecem inline,
- * com aceitar/rejeitar no próprio texto.
+ * riscada e apagar de novo restaura. Os cortes automáticos (pausa, vício,
+ * retomada) já entram aplicados: aparecem riscados e restauram do mesmo jeito.
  */
 export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   recipe,
@@ -71,28 +67,14 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       return n;
     });
     const kept = words.map((w) => isWordKept(segments, w));
-    const pending = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending");
-    // sugestão que cobre cada palavra + onde o chip de cada sugestão aparece
-    const wordSug: (SuggestedCut | undefined)[] = words.map((w) =>
-      pending.find(
-        (c) =>
-          c.sourceId === w.sourceId &&
-          wordMid(w) >= c.sourceStart &&
-          wordMid(w) <= c.sourceEnd
-      )
+    // motivo do corte automático que tirou cada palavra (dica no texto riscado)
+    const cutReason = words.map((w, i) =>
+      kept[i]
+        ? undefined
+        : recipe.timeline.suggestedCuts.find(
+            (c) => c.status === "accepted" && c.sourceId === w.sourceId && wordMid(w) >= c.sourceStart && wordMid(w) <= c.sourceEnd
+          )?.reason
     );
-    const chipsBefore = new Map<number, SuggestedCut[]>();
-    const chipsAfterSource = new Map<string, SuggestedCut[]>();
-    for (const c of pending) {
-      const i = words.findIndex(
-        (w) => w.sourceId === c.sourceId && wordMid(w) >= c.sourceStart
-      );
-      if (i < 0) {
-        chipsAfterSource.set(c.sourceId, [...(chipsAfterSource.get(c.sourceId) ?? []), c]);
-      } else {
-        chipsBefore.set(i, [...(chipsBefore.get(i) ?? []), c]);
-      }
-    }
     // palavra onde cada motion (não rejeitado) começa: a última que inicia até a âncora
     const motionAt = new Map<number, string>();
     for (const m of recipe.motions) {
@@ -103,10 +85,10 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       });
       if (idx >= 0) motionAt.set(idx, [motionAt.get(idx), MOTION_LABEL[m.kind]].filter(Boolean).join(", "));
     }
-    return { words, lists, posInSource, kept, pending, wordSug, chipsBefore, chipsAfterSource, motionAt };
+    return { words, lists, posInSource, kept, cutReason, motionAt };
   }, [recipe, segments]);
 
-  const { words, lists, posInSource, kept, pending } = model;
+  const { words, lists, posInSource, kept } = model;
 
   const activeIndex = useMemo(() => {
     if (!playheadSource) return -1;
@@ -232,15 +214,6 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     });
   };
 
-  const review = (ids: string[], accept: boolean) => {
-    const next = reviewSuggestions(recipe, ids, accept);
-    const skipped = ids.filter(
-      (id) => next.timeline.suggestedCuts.find((c) => c.id === id)?.status === "pending"
-    );
-    if (skipped.length > 0) setNotice("Um corte foi ignorado: removeria o vídeo inteiro.");
-    onChange(next);
-  };
-
   const wordIndexFromEvent = (e: React.MouseEvent): number | null => {
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-i]");
     return el ? Number(el.dataset.i) : null;
@@ -280,52 +253,22 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     }
   };
 
-  const byReason = CUT_REASONS.map((reason) => ({
-    reason,
-    ids: pending.filter((c) => c.reason === reason).map((c) => c.id),
-  })).filter((g) => g.ids.length > 0);
-
   const keptCount = kept.filter(Boolean).length;
   const multiSource = lists.size > 1;
-
-  const chip = (c: SuggestedCut) => (
-    <span
-      key={c.id}
-      className={`sug-chip reason-${c.reason}`}
-      title={`${CUT_REASON_LABEL[c.reason]} · confiança ${c.confidence}${c.note ? `\n${c.note}` : ""}`}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {CUT_REASON_LABEL[c.reason]}
-      {c.reason === "pause" || c.reason === "silence"
-        ? ` ${(c.sourceEnd - c.sourceStart).toFixed(1)}s`
-        : ""}
-      <button className="ok" title="Aceitar corte" onClick={() => review([c.id], true)}>
-        <Icon name="check" size={11} />
-      </button>
-      <button className="no" title="Rejeitar" onClick={() => review([c.id], false)}>
-        <Icon name="x" size={11} />
-      </button>
-    </span>
-  );
 
   const content: React.ReactNode[] = [];
   words.forEach((w, i) => {
     if (multiSource && (i === 0 || words[i - 1].sourceId !== w.sourceId)) {
-      if (i > 0) {
-        for (const c of model.chipsAfterSource.get(words[i - 1].sourceId) ?? []) content.push(chip(c));
-      }
       content.push(
         <div key={`src-${w.sourceId}`} className="transcript-source">
           {w.sourceId}
         </div>
       );
     }
-    for (const c of model.chipsBefore.get(i) ?? []) content.push(chip(c));
-    const sug = model.wordSug[i];
+    const reason = model.cutReason[i];
     const cls = [
       "tw",
       kept[i] ? "" : "cut",
-      sug ? `in-sug reason-${sug.reason}` : "",
       range && i >= range[0] && i <= range[1] ? "selected" : "",
       i === activeIndex ? "active" : "",
       model.motionAt.has(i) ? "motion-anchor" : "",
@@ -356,7 +299,13 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         key={w.key}
         data-i={i}
         className={cls}
-        title={model.motionAt.has(i) ? `Motion: ${model.motionAt.get(i)}` : undefined}
+        title={
+          reason
+            ? `Cortado automaticamente (${CUT_REASON_LABEL[reason]}) · selecione e ⌫ para restaurar`
+            : model.motionAt.has(i)
+              ? `Motion: ${model.motionAt.get(i)}`
+              : undefined
+        }
         onDoubleClick={() => setEditing(i)}
       >
         {w.text}
@@ -364,10 +313,6 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       " "
     );
   });
-  const lastSource = words[words.length - 1]?.sourceId;
-  if (lastSource) {
-    for (const c of model.chipsAfterSource.get(lastSource) ?? []) content.push(chip(c));
-  }
 
   return (
     <section className="dock transcript-dock">
@@ -378,41 +323,6 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       )}
 
       <div className="dock-body">
-        {pending.length > 0 && (
-          <div className="sug-approve">
-            <span className="sug-approve-text">
-              <strong>{pending.length}</strong> {pending.length === 1 ? "corte sugerido" : "cortes sugeridos"}
-              <span className="note">
-                {" "}· −{pending.reduce((acc, c) => acc + (c.sourceEnd - c.sourceStart), 0).toFixed(1)}s
-              </span>
-            </span>
-            <button className="sm ghost" onClick={() => review(pending.map((c) => c.id), false)}>
-              Rejeitar todos
-            </button>
-            <button className="sm primary" onClick={() => review(pending.map((c) => c.id), true)}>
-              <Icon name="check" size={13} />
-              Aprovar todos os cortes
-            </button>
-          </div>
-        )}
-        {byReason.length > 0 && (
-          <div className="sug-summary">
-            {byReason.map(({ reason, ids }) => (
-              <span key={reason} className={`sug-group reason-${reason}`}>
-                <span className="sug-dot" />
-                {CUT_REASON_LABEL[reason as CutReason]}
-                <strong>{ids.length}</strong>
-                <button className="accept" title={`Aceitar todas (${ids.length})`} onClick={() => review(ids, true)}>
-                  <Icon name="check" size={13} />
-                </button>
-                <button className="reject" title={`Rejeitar todas (${ids.length})`} onClick={() => review(ids, false)}>
-                  <Icon name="x" size={13} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
         {words.length === 0 ? (
           <p className="empty-hint">
             Sem transcrição ainda. Use <strong>Transcrever</strong> na barra de cima: a fala vira

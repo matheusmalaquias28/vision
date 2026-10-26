@@ -391,6 +391,67 @@ export interface SilenceRange {
   end: number;
 }
 
+/** Fala precisa estar pelo menos isso acima do fundo para dar para separar */
+const MIN_LEVEL_CONTRAST_DB = 12;
+/** Limiar entre o fundo e a fala (fração do caminho) */
+const QUIET_THRESHOLD_FRACTION = 0.4;
+/** Pico de ruído curto (porta, estalo) entre dois trechos quietos não quebra o silêncio */
+const QUIET_BLIP_SECONDS = 0.1;
+
+/**
+ * Silêncio pelo nível RMS em janelas curtas (dB por janela), com limiar do
+ * PRÓPRIO clipe: entre o fundo (p10) e a fala (p90). O silencedetect com
+ * limiar fixo (-35 dB) falha em sala com ruído: o fundo passa do limiar em
+ * picos e nada vira silêncio (o Whisper então estica a palavra sobre 1,5 s de
+ * nada). Sem contraste entre fala e fundo (música, ruído alto) devolve [].
+ */
+export function quietRangesFromLevels(levelsDb: number[], windowSeconds: number, minSeconds = 0.2): SilenceRange[] {
+  if (levelsDb.length === 0) return [];
+  const sorted = [...levelsDb].sort((a, b) => a - b);
+  const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  const floor = pct(0.1);
+  const speech = pct(0.9);
+  if (speech - floor < MIN_LEVEL_CONTRAST_DB) return [];
+  const threshold = floor + (speech - floor) * QUIET_THRESHOLD_FRACTION;
+
+  // trechos quietos crus, em índices de janela [a, b)
+  const runs: [number, number][] = [];
+  let runStart = -1;
+  levelsDb.forEach((db, i) => {
+    if (db <= threshold) {
+      if (runStart < 0) runStart = i;
+    } else if (runStart >= 0) {
+      runs.push([runStart, i]);
+      runStart = -1;
+    }
+  });
+  if (runStart >= 0) runs.push([runStart, levelsDb.length]);
+
+  // junta trechos separados por um pico curto
+  const blip = Math.round(QUIET_BLIP_SECONDS / windowSeconds);
+  const merged: [number, number][] = [];
+  for (const r of runs) {
+    const prev = merged[merged.length - 1];
+    if (prev && r[0] - prev[1] <= blip) prev[1] = r[1];
+    else merged.push([r[0], r[1]]);
+  }
+  return merged
+    .map(([a, b]) => ({ start: round3(a * windowSeconds), end: round3(b * windowSeconds) }))
+    .filter((r) => r.end - r.start >= minSeconds);
+}
+
+/** União de intervalos (ordenada, sem sobreposição) */
+export function mergeSilenceRanges(...lists: SilenceRange[][]): SilenceRange[] {
+  const all = lists.flat().sort((a, b) => a.start - b.start);
+  const out: SilenceRange[] = [];
+  for (const r of all) {
+    const prev = out[out.length - 1];
+    if (prev && r.start <= prev.end) prev.end = Math.max(prev.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
+
 /** Silêncio menor que isso dentro de uma palavra é pausa natural da fala */
 const MIN_SILENCE_IN_WORD = 0.2;
 /** Silêncio que começa até aqui é o "ar" antes da primeira fala */
@@ -406,7 +467,7 @@ const HEAD_SILENCE_EPS = 0.05;
  * Idempotente: palavras já aparadas não mudam.
  */
 export function refineWordsWithSilences(words: Word[], silences: SilenceRange[]): Word[] {
-  return words.map((w) => {
+  const out = words.map((w) => {
     let start = w.start;
     let end = w.end;
     for (const s of silences) {
@@ -428,6 +489,16 @@ export function refineWordsWithSilences(words: Word[], silences: SilenceRange[])
     if (start === w.start && end === w.end) return w;
     return { ...w, start: round3(start), end: round3(end) };
   });
+  // palavra levada para a borda do silêncio não passa da seguinte (o Whisper
+  // pôs "E" sobre 1,7 s de nada e "quais" começando antes do fim do silêncio:
+  // sem isso a legenda dizia "quais E consequências")
+  for (let i = out.length - 2; i >= 0; i--) {
+    if (out[i] !== words[i] && out[i].start > out[i + 1].start) {
+      const at = out[i + 1].start;
+      out[i] = { ...out[i], start: at, end: at };
+    }
+  }
+  return out;
 }
 
 /** Agrupa as palavras por fonte, preservando a ordem */

@@ -445,9 +445,16 @@ export const MotionSchema = z.discriminatedUnion("kind", [
   z.object({
     ...motionBase,
     kind: z.literal("screen"),
-    params: z.object({
-      /** Frase grande da tela (2–12 palavras) */
+    params: z
+      .object({
+      /** Frase grande da tela (2–12 palavras); no modelo lista é o título */
       text: z.string().trim().min(1).max(90),
+      /** Modelo do texto: frase grande (padrão) ou lista com itens entrando um a um */
+      layout: z.enum(["phrase", "list"]).default("phrase"),
+      /** Itens do modelo lista (2–5, curtos) */
+      items: z.array(z.string().trim().min(1).max(40)).max(5).default([]),
+      /** Marcador dos itens da lista: número (passos) ou check (benefícios) */
+      marker: z.enum(["number", "check"]).default("number"),
       /** Linha pequena acima ("PASSO 1", "O PROBLEMA") */
       eyebrow: z.string().max(30).default(""),
       /** Palavra(s) da frase na cor de destaque */
@@ -461,7 +468,11 @@ export const MotionSchema = z.discriminatedUnion("kind", [
       align: z.enum(["center", "left"]).default("center"),
       /** A legenda some enquanto a tela está cheia (o texto já está nela) */
       hideCaptions: z.boolean().default(true),
-    }),
+      })
+      .refine((p) => p.layout !== "list" || p.items.length >= 2, {
+        message: "a lista precisa de 2 a 5 itens",
+        path: ["items"],
+      }),
   }),
   z.object({
     ...motionBase,

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
 /**
- * Passo do fluxo do topo (Transcrever → Sugerir cortes → Sugerir motions) em
+ * Passo do fluxo do topo (Transcrever → Cortar → Sugerir motions) em
  * forma de seta encaixada na próxima. Enquanto roda, uma luz corre por dentro
  * da seta; ao terminar com sucesso, uma faixa verde varre a seta e o ✓ entra.
  */

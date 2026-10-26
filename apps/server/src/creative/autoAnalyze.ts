@@ -7,9 +7,9 @@ import { analyzeAndApply } from "./fastPath";
 /**
  * Análise automática ao subir os brutos (projeto de demanda ou avulso):
  * transcrição → cortes (inclusive a chamada de IA das retomadas, já que não
- * há pressa) → plano de motions com o briefing. Roda no servidor, então
- * continua se a aba fechar. Tudo entra como sugestão pendente. Ilustrações
- * ficam de fora (botão próprio). Um projeto por vez, em fila.
+ * há pressa) → plano de motions com o briefing → 2 imagens geradas da fala.
+ * Roda no servidor, então continua se a aba fechar. Tudo entra como sugestão
+ * pendente. Um projeto por vez, em fila.
  *
  * O andamento fica em `analysis.json` do projeto (sobrevive a reinício; um
  * "running" antigo vira erro de interrompida).
