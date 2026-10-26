@@ -1,4 +1,5 @@
 import { PUNCH_IN_GROUP, punchInMotions } from "./motions";
+import { TRANSITION_PRESETS } from "./transitions";
 
 /**
  * Repara ids de segmento repetidos. Versões antigas de applyCutToSegments
@@ -32,7 +33,36 @@ function dedupeSegmentIds(raw: unknown): unknown {
  * gravados por versões com bug. Aplicada em todo load.
  */
 export function migrateRecipeData(raw: unknown): unknown {
-  return migratePunchIn(migrateAudioClips(dedupeSegmentIds(migrateV1(raw))));
+  return migrateRemovedTransitions(migratePunchIn(migrateAudioClips(dedupeSegmentIds(migrateV1(raw)))));
+}
+
+/** Duração do vídeo "swipe" (varrida de luz) que saiu da lista */
+const SWIPE_SECONDS = 1;
+
+/**
+ * A transição "swipe" (varrida de luz) saiu dos modelos: vira "flare" (luz),
+ * o efeito mais parecido, com a duração do vídeo da luz e o mesmo centro
+ * (continua centralizada no corte). O som que ela já tinha fica.
+ */
+function migrateRemovedTransitions(raw: unknown): unknown {
+  const r = raw as Record<string, any>;
+  if (!r || !Array.isArray(r.motions) || !r.motions.some((m: any) => m?.kind === "transition" && m.params?.style === "swipe")) {
+    return raw;
+  }
+  const seconds = TRANSITION_PRESETS.flare.seconds;
+  return {
+    ...r,
+    motions: r.motions.map((m: any) =>
+      m?.kind === "transition" && m.params?.style === "swipe"
+        ? {
+            ...m,
+            sourceTime: Math.round(((m.sourceTime ?? 0) + (SWIPE_SECONDS - seconds) / 2) * 1000) / 1000,
+            durationSeconds: seconds,
+            params: { ...m.params, style: "flare" },
+          }
+        : m
+    ),
+  };
 }
 
 /**

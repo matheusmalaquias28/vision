@@ -255,8 +255,8 @@ Transição rápida (até 1,3 s) com vídeo da biblioteca e som, num corte: luz,
 - **Quando usar:** virada de assunto ou começo de outra parte do roteiro (cai no corte mais perto); antes do CTA ou de uma revelação; entre clipes diferentes
 - **Quando NÃO usar:** mais de 3 no vídeo ou menos de 10 s de outra transição; nos primeiros ou últimos 1,5 s; no meio de uma frase sem corte por perto; vídeo calmo ou minimalista
 - **Duração:** 0.5–1.3 s (padrão 1 s) · intensidade 2/3 · camada `fullscreen`
-- **Variantes:** `flare` Luz — luz quente rápida: leve e positiva, combina com quase tudo; `burn` Queima de filme — analógico, nostálgico: virada na história; `glitch` Glitch — digital: tecnologia ou quebra de expectativa (“mas espera…”); `swipe` Varrida de luz — energia: passar para a próxima parte ou para o CTA; `paper` Papel — didático, caderno: combina com a tela cheia de papel
-- **Campos da IA:** `variant` flare|burn|glitch|swipe|paper
+- **Variantes:** `flare` Luz — luz quente rápida: leve e positiva, combina com quase tudo; `burn` Queima de filme — analógico, nostálgico: virada na história; `glitch` Glitch — digital: tecnologia ou quebra de expectativa (“mas espera…”); `paper` Papel — didático, caderno: combina com a tela cheia de papel
+- **Campos da IA:** `variant` flare|burn|glitch|paper
 - **Checagem de fatos:** —
 - **Estilos em que combina:** Dinâmico, Equilibrado, Educativo, Premium
 

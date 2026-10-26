@@ -74,7 +74,14 @@ export async function analyzeAndApply(
     try {
       const ill = await suggestIllustrations(recipe, { instructions: opts.instructions, max: wantImages });
       recipe = ill.recipe;
-      images = { added: ill.report.added, generated: ill.report.images, errors: ill.report.errors };
+      const rejected = ill.report.rejected.map((r) => r.reason);
+      images = { added: ill.report.added, generated: ill.report.images, errors: [...ill.report.errors, ...(ill.report.added === 0 ? rejected : [])] };
+      // sem isso, imagem recusada passava em silêncio
+      console.log(
+        `Imagens ${recipe.projectId}: ${ill.report.added}/${ill.report.proposed} entraram, ${ill.report.images} geradas` +
+          `${ill.report.displaced ? `, ${ill.report.displaced} sugestão(ões) de motion saíram para elas` : ""}` +
+          `${rejected.length ? ` · recusadas: ${rejected.join("; ")}` : ""}${ill.report.errors.length ? ` · erros: ${ill.report.errors.join("; ")}` : ""}`
+      );
     } catch (err) {
       // imagem nunca derruba a análise: o operador ainda tem o botão "Sugerir imagens"
       const error = err instanceof Error ? err.message : String(err);
@@ -106,6 +113,7 @@ export async function analyzeAndApply(
         stages: report.stages,
         totalMs: report.totalMs,
         withinTarget: report.withinTarget,
+        images: report.images,
       }) + "\n",
       "utf8"
     );

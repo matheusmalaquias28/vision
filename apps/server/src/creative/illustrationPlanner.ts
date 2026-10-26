@@ -9,11 +9,13 @@ import {
   MOTION_LABEL,
   MOTION_REGISTRY,
   outputDuration,
+  placeMotions,
   sourceToOutput,
   spokenWords,
   validateComposition,
   withPendingCutsApplied,
   type CreativePlan,
+  type Motion,
   type Recipe,
   type Rejection,
 } from "@vision/recipe";
@@ -52,6 +54,8 @@ export interface IllustrationReport {
   images: number;
   errors: string[];
   rejected: Rejection[];
+  /** Sugestões de motion da IA que saíram para a imagem entrar */
+  displaced: number;
   seconds: number;
 }
 
@@ -84,12 +88,22 @@ ${formatTranscript(words)}`;
   return { system, user };
 }
 
-/** Escolhas da IA → sugestões pendentes de ilustração (sem imagem ainda) */
+/** Sugestão de motion da IA ainda não revisada (não é a ilustração) */
+const yieldsToImage = (m: Motion) => m.status === "pending" && m.origin === "ai" && m.kind !== "illustration";
+
+/**
+ * Escolhas da IA → sugestões pendentes de ilustração (sem imagem ainda).
+ * A imagem tem prioridade sobre os motions que ainda são SUGESTÃO da IA: as
+ * duas IAs escolhem as mesmas ideias-chave, e a imagem (mesma camada do
+ * texto) caía sempre em cima de um texto sugerido e era recusada. A sugestão
+ * que ficaria por baixo sai (com o resto do combo dela); motion aceito ou
+ * posto à mão nunca sai.
+ */
 export function placeIllustrations(
   recipe: Recipe,
   picks: IllustrationPick[],
   max: number = MAX_ILLUSTRATIONS
-): { recipe: Recipe; added: string[]; rejected: Rejection[] } {
+): { recipe: Recipe; added: string[]; rejected: Rejection[]; displaced: number } {
   const style = interpretBriefing(recipe.briefing).style ?? "balanced";
   const plan: CreativePlan = {
     style,
@@ -105,16 +119,43 @@ export function placeIllustrations(
       ],
     })),
   };
-  const compiled = compilePlan(recipe, plan, { kinds: ["illustration"], combos: [] }, style);
-  const composed = validateComposition(recipe, compiled.candidates, style, { onlyKinds: ["illustration"] });
-  const before = new Set(recipe.motions.map((m) => m.id));
+  // valida como se as sugestões da IA não estivessem lá: a imagem escolhe primeiro
+  const settled: Recipe = { ...recipe, motions: recipe.motions.filter((m) => !yieldsToImage(m)) };
+  const compiled = compilePlan(settled, plan, { kinds: ["illustration"], combos: [] }, style);
+  const composed = validateComposition(settled, compiled.candidates, style, { onlyKinds: ["illustration"] });
+  const chosen = composed.accepted.slice(0, max);
+
+  // sugestões que ficariam embaixo da imagem (mesma camada ou tela cheia) saem, com o combo inteiro
+  const segments = recipe.timeline.segments;
+  const spans = chosen
+    .map((c) => ({ start: sourceToOutput(segments, c.sourceId, c.sourceTime), dur: c.durationSeconds }))
+    .filter((s): s is { start: number; dur: number } => s.start !== null);
+  const layer = MOTION_REGISTRY.illustration.layer;
+  const hit = new Set<string>();
+  for (const p of placeMotions(recipe, true)) {
+    const m = p.motion;
+    if (!yieldsToImage(m)) continue;
+    if (MOTION_REGISTRY[m.kind].layer !== layer && m.kind !== "screen") continue;
+    if (spans.some((s) => p.outputStart < s.start + s.dur && s.start < p.outputEnd)) hit.add(m.group ?? m.id);
+  }
+  const cleared: Recipe = hit.size
+    ? { ...recipe, motions: recipe.motions.filter((m) => !(yieldsToImage(m) && hit.has(m.group ?? m.id))) }
+    : recipe;
+
+  // ids depois de tirar as sugestões: a imagem nova pode herdar o id de uma que saiu
+  const before = new Set(cleared.motions.map((m) => m.id));
   const next = mergeMotionSuggestions(
-    recipe,
-    composed.accepted.slice(0, max).map(({ priority: _p, ...c }) => c),
+    cleared,
+    chosen.map(({ priority: _p, ...c }) => c),
     { onlyKinds: ["illustration"] }
   );
   const added = next.motions.filter((m) => m.kind === "illustration" && !before.has(m.id)).map((m) => m.id);
-  return { recipe: next, added, rejected: [...compiled.rejected, ...composed.rejected] };
+  return {
+    recipe: next,
+    added,
+    rejected: [...compiled.rejected, ...composed.rejected],
+    displaced: recipe.motions.length - cleared.motions.length,
+  };
 }
 
 export async function suggestIllustrations(
@@ -164,6 +205,7 @@ export async function suggestIllustrations(
       images: images.size,
       errors,
       rejected: placed.rejected,
+      displaced: placed.displaced,
       seconds: Math.round((Date.now() - t0) / 100) / 10,
     },
   };

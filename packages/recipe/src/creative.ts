@@ -660,7 +660,7 @@ export function compilePlan(
 }
 
 /** Modelos que o código usa quando completa as transições (combinam com quase tudo) */
-const FILLER_TRANSITIONS: TransitionStyle[] = ["swipe", "flare", "burn"];
+const FILLER_TRANSITIONS: TransitionStyle[] = ["flare", "burn"];
 
 /**
  * Transições que o código oferece nos cortes, para quando a IA põe poucas:

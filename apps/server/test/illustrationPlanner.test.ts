@@ -56,3 +56,34 @@ describe("botão Sugerir imagens", () => {
     await expect(suggestIllustrations(recipe(false), { pick: async () => [] })).rejects.toThrow(/Transcreva/);
   });
 });
+
+describe("imagem tem prioridade sobre sugestão de motion da IA", () => {
+  const withMotions = (status: "pending" | "accepted", origin: "ai" | "manual") =>
+    parseRecipe({
+      ...recipe(),
+      motions: [
+        // texto sugerido exatamente onde a imagem vai cair (palavra 10 = 5 s)
+        // id "mo_01": a imagem nova herda esse id ao entrar (tem que contar como nova)
+        { id: "mo_01", kind: "keyword", sourceId: "src_01", sourceTime: 5, durationSeconds: 2, status, origin, params: { text: "PALAVRA" } },
+        // combo sugerido: o zoom do mesmo grupo sai junto com o texto
+        { id: "z", kind: "zoom", sourceId: "src_01", sourceTime: 5, durationSeconds: 1, status, origin, group: "impact-hook:1", params: {} },
+        { id: "k2", kind: "kinetic", sourceId: "src_01", sourceTime: 5.2, durationSeconds: 2, status, origin, group: "impact-hook:1", params: { text: "Frase" } },
+        // longe da imagem: fica
+        { id: "far", kind: "keyword", sourceId: "src_01", sourceTime: 30, durationSeconds: 2, status, origin, params: { text: "LONGE" } },
+      ],
+    });
+
+  it("sugestão da IA no caminho sai (com o combo); a imagem entra", () => {
+    const out = placeIllustrations(withMotions("pending", "ai"), [pick(10, "martelo de juiz")], 2);
+    expect(out.added).toHaveLength(1);
+    expect(out.displaced).toBe(3);
+    expect(out.recipe.motions.map((m) => m.id).filter((id) => id !== out.added[0])).toEqual(["far"]);
+  });
+
+  it("motion aceito ou posto à mão nunca sai: aí a imagem é que é recusada", () => {
+    const out = placeIllustrations(withMotions("accepted", "manual"), [pick(10, "martelo de juiz")], 2);
+    expect(out.added).toHaveLength(0);
+    expect(out.displaced).toBe(0);
+    expect(out.rejected[0].reason).toMatch(/camada text ocupada/);
+  });
+});

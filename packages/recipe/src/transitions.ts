@@ -2,12 +2,13 @@ import type { Segment } from "./schema";
 import { segmentDuration } from "./time";
 
 /**
- * Transições rápidas: 5 modelos escolhidos da biblioteca (pack-viral), todos
+ * Transições rápidas: 4 modelos escolhidos da biblioteca (pack-viral), todos
  * com até 1,3 s. O motion guarda só o modelo; arquivo, mescla e som vêm daqui.
  * Sem a biblioteca na máquina, o render pula a transição (não quebra) e o
  * planner não oferece o tipo.
  */
-export const TRANSITION_STYLES = ["flare", "burn", "glitch", "swipe", "paper"] as const;
+// "swipe" (varrida de luz) saiu: projetos salvos com ele viram "flare" em migrateRecipeData
+export const TRANSITION_STYLES = ["flare", "burn", "glitch", "paper"] as const;
 export type TransitionStyle = (typeof TRANSITION_STYLES)[number];
 
 export interface TransitionPreset {
@@ -57,16 +58,6 @@ export const TRANSITION_PRESETS: Record<TransitionStyle, TransitionPreset> = {
     alpha: false,
     seconds: 1.07,
     sfx: "glitch",
-  },
-  swipe: {
-    label: "Varrida de luz",
-    use: "energia: passar para a próxima parte ou para o CTA",
-    assetId: "transition_10",
-    file: `${DIR}/transition_10.mp4`,
-    blend: "screen",
-    alpha: false,
-    seconds: 1,
-    sfx: "whooshFast",
   },
   paper: {
     label: "Papel",

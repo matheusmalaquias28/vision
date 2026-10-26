@@ -143,8 +143,9 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   som na trilha do vídeo, ou overlay se solto em Overlays; imagem → Overlays).
   Limites `UPLOAD_LIMITS` (vídeo 60 s/300 MB, áudio 5 min/40 MB, imagem 20 MB)
   checados no editor antes de subir e de novo no servidor (`checkClipUpload`).
-- Transições (`transitions.ts`, kind `transition`): 5 modelos fixos da
-  biblioteca (luz, queima, glitch, varrida, papel), cada um ≤ 1,3 s com som
+- Transições (`transitions.ts`, kind `transition`): 4 modelos fixos da
+  biblioteca (luz, queima, glitch, papel; a varrida saiu e vira luz em
+  `migrateRecipeData`), cada um ≤ 1,3 s com som
   próprio. Sempre num corte (`snapToCut`, ±1,5 s da palavra, centralizada),
   máx. 3 por vídeo, ≥ 10 s entre elas, fora dos 1,5 s das pontas
   (`validateComposition`). Planner só oferece se os arquivos existem no
@@ -170,7 +171,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `validateComposition`/`mergeMotionSuggestions` com `onlyKinds:
   ["illustration"]`, que não mexem nas outras sugestões pendentes → imagens
   geradas em paralelo, entram pendentes já com a imagem) ou pelo "Gerar
-  imagem" do painel. Sem `params.image` não entra no MP4 (o Player mostra um
+  imagem" do painel. A imagem tem prioridade sobre motions que ainda são
+  SUGESTÃO da IA (`placeIllustrations`: as duas IAs escolhem as mesmas
+  ideias-chave e a imagem, na camada de texto, era sempre recusada); a
+  sugestão no caminho sai com o combo; aceito/manual nunca sai. Resultado
+  (entraram, saíram, recusas) no log do servidor e em `creative-metrics`. Sem `params.image` não entra no MP4 (o Player mostra um
   cartão "ainda não gerada").
 - Densidade (`validateComposition`): câmera (zooms, inclusive punch-in),
   transições e ilustrações não contam na cota de motions por janela de 10 s
