@@ -16,15 +16,18 @@ export type DropTarget = "video" | "overlays" | "music" | "sfx";
 
 const MB = 1024 * 1024;
 
-/** Limites por arquivo: nada de clipe longo ou pesado demais no editor */
+/**
+ * Limites por arquivo. Vídeo pesado é aceito: o servidor converte para o
+ * formato de trabalho (≤ 1080p) logo na entrada e o Player usa a cópia leve.
+ */
 export const UPLOAD_LIMITS = {
-  video: { maxSeconds: 60, maxBytes: 300 * MB },
+  video: { maxSeconds: 180, maxBytes: 1024 * MB },
   audio: { maxSeconds: 300, maxBytes: 40 * MB },
   image: { maxSeconds: null, maxBytes: 20 * MB },
 } as const satisfies Record<MediaKind, { maxSeconds: number | null; maxBytes: number }>;
 
-/** Vídeo final do Vision (anúncio curto): acima disso o editor avisa */
-export const MAX_VIDEO_SECONDS = 90;
+/** Vídeo final do Vision: acima disso o editor avisa */
+export const MAX_VIDEO_SECONDS = 180;
 
 /** Áudio até aqui é efeito; mais longo é música */
 export const SFX_MAX_SECONDS = 20;
@@ -43,16 +46,19 @@ export function mediaKindOf(name: string, mime = ""): MediaKind | null {
   return null;
 }
 
-const fmtMB = (b: number) => `${Math.round(b / MB)} MB`;
-const fmtSec = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")} min` : `${Math.round(s)} s`);
+/** "300 MB", "1 GB" */
+export const formatBytes = (b: number) =>
+  b >= 1024 * MB ? `${Math.round((b / (1024 * MB)) * 10) / 10} GB` : `${Math.round(b / MB)} MB`;
+/** "45 s", "1:30 min" */
+export const formatSeconds = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")} min` : `${Math.round(s)} s`);
 const LABEL: Record<MediaKind, string> = { video: "Vídeo", audio: "Áudio", image: "Imagem" };
 
 /** Motivo da recusa (null = pode enviar). `seconds` null = duração desconhecida */
 export function uploadProblem(kind: MediaKind, bytes: number, seconds: number | null): string | null {
   const lim = UPLOAD_LIMITS[kind];
-  if (bytes > lim.maxBytes) return `${LABEL[kind]} muito pesado (${fmtMB(bytes)}): o limite é ${fmtMB(lim.maxBytes)}`;
+  if (bytes > lim.maxBytes) return `${LABEL[kind]} muito pesado (${formatBytes(bytes)}): o limite é ${formatBytes(lim.maxBytes)}`;
   if (lim.maxSeconds !== null && seconds !== null && seconds > lim.maxSeconds + 0.5) {
-    return `${LABEL[kind]} muito longo (${fmtSec(seconds)}): o limite é ${fmtSec(lim.maxSeconds)}`;
+    return `${LABEL[kind]} muito longo (${formatSeconds(seconds)}): o limite é ${formatSeconds(lim.maxSeconds)}`;
   }
   return null;
 }

@@ -35,7 +35,7 @@ describe("limites de arquivo no servidor", () => {
 
   it("pesado demais ou tipo errado para a rota também são recusados", async () => {
     const big = await make("pesado.mp4", ["-f", "lavfi", "-i", "testsrc2=size=160x120:rate=24:duration=1", "-pix_fmt", "yuv420p", "-c:v", "libx264"]);
-    const r1 = await checkClipUpload(multerFile(big, "pesado.mp4", "video/mp4", 500 * 1024 * 1024), ["video"]);
+    const r1 = await checkClipUpload(multerFile(big, "pesado.mp4", "video/mp4", 1500 * 1024 * 1024), ["video"]);
     expect("error" in r1 && r1.error).toMatch(/pesado/);
     const audio = await make("efeito.mp3", ["-f", "lavfi", "-i", "sine=duration=1"]);
     // clipe da sequência só aceita vídeo: áudio vai para a trilha de áudio

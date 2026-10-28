@@ -510,9 +510,11 @@ app.use(
 
 // Na Vercel a função importa o app; localmente (e num VPS) sobe a porta
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`VISION server em http://localhost:${PORT}`);
   });
+  // o Node corta pedidos com mais de 5 min: upload de bruto grande (até 1 GB) leva mais que isso
+  server.requestTimeout = 60 * 60 * 1000;
   scheduleRetention();
   // cópias do bundle do Remotion largadas por processos antigos (cada uma leva a pasta media/)
   const { removed, bytes } = cleanupStaleRemotionTemp();

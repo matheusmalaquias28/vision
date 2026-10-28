@@ -7,6 +7,7 @@ import {
   dropTarget,
   insertClipSegment,
   MAX_VIDEO_SECONDS,
+  formatSeconds,
   type Overlay,
   type Segment,
   type TrackId,
@@ -928,7 +929,7 @@ export const Editor: React.FC<EditorProps> = ({
           t += source.durationInSeconds;
           const total = outputDuration(segments);
           if (total > MAX_VIDEO_SECONDS) {
-            setError(`Atenção: o vídeo agora tem ${Math.floor(total / 60)}:${String(Math.round(total % 60)).padStart(2, "0")}; o limite do Vision é 1:30.`);
+            setError(`Atenção: o vídeo agora tem ${Math.floor(total / 60)}:${String(Math.round(total % 60)).padStart(2, "0")}; o limite do Vision é ${formatSeconds(MAX_VIDEO_SECONDS)}.`);
           }
         } else {
           const up = await uploadAsset(recipeRef.current.projectId, file, progress);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { UPLOAD_LIMITS } from "@vision/recipe";
+import { formatBytes, formatSeconds, UPLOAD_LIMITS } from "@vision/recipe";
 import { Icon } from "../editor/Icon";
 import { inspectMediaFile } from "../editor/mediaFiles";
 import { appendClips, ClipDropzone, ClipQueue, type QueuedClip } from "./ClipQueue";
@@ -17,7 +17,7 @@ interface StartVideoPanelProps {
   onStart: (files: File[], briefing: string) => Promise<void>;
 }
 
-const LIMIT_HINT = `até ${UPLOAD_LIMITS.video.maxSeconds} s e ${UPLOAD_LIMITS.video.maxBytes / 1024 / 1024} MB por clipe`;
+const LIMIT_HINT = `até ${formatSeconds(UPLOAD_LIMITS.video.maxSeconds)} e ${formatBytes(UPLOAD_LIMITS.video.maxBytes)} por clipe`;
 
 /**
  * "Começar edição" de um vídeo da demanda: brutos (mesma fila ordenável dos

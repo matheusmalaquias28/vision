@@ -43,11 +43,12 @@ describe("limites de arquivo", () => {
 
   it("recusa longo ou pesado com motivo; duração desconhecida passa pelo tamanho", () => {
     expect(uploadProblem("video", 50 * MB, 30)).toBeNull();
-    expect(uploadProblem("video", 400 * MB, 30)).toMatch(/pesado.*300 MB/);
-    expect(uploadProblem("video", 50 * MB, 95)).toMatch(/longo \(1:35 min\).*1:00 min/);
+    expect(uploadProblem("video", 400 * MB, 30)).toBeNull();
+    expect(uploadProblem("video", 1500 * MB, 30)).toMatch(/pesado \(1\.5 GB\).*1 GB/);
+    expect(uploadProblem("video", 50 * MB, 185)).toMatch(/longo \(3:05 min\).*3:00 min/);
     expect(uploadProblem("audio", 10 * MB, 400)).toMatch(/longo/);
     expect(uploadProblem("audio", 10 * MB, null)).toBeNull();
     expect(uploadProblem("image", 25 * MB, null)).toMatch(/20 MB/);
-    expect(UPLOAD_LIMITS.video.maxSeconds).toBe(60);
+    expect(UPLOAD_LIMITS.video.maxSeconds).toBe(180);
   });
 });

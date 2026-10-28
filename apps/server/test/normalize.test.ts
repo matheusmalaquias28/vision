@@ -17,8 +17,9 @@ describe("formato de trabalho", () => {
     expect(normalizeReason({ ...phone, width: 2160, height: 3840 })).toMatch(/2160/);
     expect(normalizeReason({ ...phone, codec: "hevc" })).toMatch(/hevc/);
     expect(normalizeReason({ ...phone, audioCodec: "pcm_s16le" })).toMatch(/áudio/);
-    // HDR precisa de tone mapping: não mexe
+    // HDR até 1080p não mexe; acima de 1080p vira SDR 1080p
     expect(normalizeReason({ ...phone, codec: "hevc", pixFmt: "yuv420p10le", transfer: "arib-std-b67" })).toBeNull();
+    expect(normalizeReason({ ...phone, codec: "hevc", pixFmt: "yuv420p10le", transfer: "arib-std-b67", width: 2160, height: 3840 })).toMatch(/HDR/);
   });
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vision-normalize-"));
@@ -43,4 +44,23 @@ describe("formato de trabalho", () => {
     // de novo não converte
     expect((await normalizeVideo(r.abs)).converted).toBe(false);
   }, 60_000);
+
+  it("HDR 4K (HLG) vira SDR BT.709 em 1080p com a mesma duração", async () => {
+    const src = path.join(dir, "source-src_hdr.mov");
+    await runOrThrow(ffmpegPath, [
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "testsrc2=size=2160x3840:rate=30:duration=1",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+      "-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-x265-params", "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+      "-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc",
+      "-c:a", "aac",
+      src,
+    ]);
+    expect((await probeFormat(src)).transfer).toBe("arib-std-b67");
+    const r = await normalizeVideo(src);
+    expect(r.converted).toBe(true);
+    const f = await probeFormat(r.abs);
+    expect(f).toMatchObject({ codec: "h264", pixFmt: "yuv420p", range: "tv", matrix: "bt709", transfer: "bt709", width: 1080, height: 1920 });
+    expect(normalizeReason(f)).toBeNull();
+  }, 120_000);
 });

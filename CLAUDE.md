@@ -1,6 +1,6 @@
 # VISION — editor de vídeo com IA (uso pessoal)
 
-Vídeos curtos (máx 1:30). A IA gera uma "receita de edição" em JSON; o Remotion
+Vídeos curtos (máx 3 min, `MAX_VIDEO_SECONDS`). A IA gera uma "receita de edição" em JSON; o Remotion
 renderiza. Cortes entram APLICADOS (sem aprovação; o operador desfaz no
 editor). O resto da IA (motions, transições, música, imagens) entra pendente
 e é planejado DEPOIS dos cortes, sobre o vídeo final.
@@ -141,7 +141,7 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   sai sem som. Arquivo solto do computador vai pela `dropTarget` (áudio →
   Música/Efeitos mesmo se solto em cima do vídeo; vídeo → clipe da sequência,
   som na trilha do vídeo, ou overlay se solto em Overlays; imagem → Overlays).
-  Limites `UPLOAD_LIMITS` (vídeo 60 s/300 MB, áudio 5 min/40 MB, imagem 20 MB)
+  Limites `UPLOAD_LIMITS` (vídeo 3 min/1 GB, áudio 5 min/40 MB, imagem 20 MB)
   checados no editor antes de subir e de novo no servidor (`checkClipUpload`).
 - Transições (`transitions.ts`, kind `transition`): 4 modelos fixos da
   biblioteca (luz, queima, glitch, papel; a varrida saiu e vira luz em

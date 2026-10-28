@@ -49,13 +49,16 @@ export async function probeFormat(abs: string): Promise<VideoFormat> {
   };
 }
 
-/** HDR (iPhone HLG/PQ) precisa de tone mapping: fica como está, o render já trata */
+/**
+ * HDR (iPhone HLG/PQ) até 1080p fica como está (o render já trata). Acima de
+ * 1080p nada passa: vira SDR BT.709 em 1080p com tone mapping (`hdrToSdrFilter`).
+ */
 const HDR_TRANSFERS = ["smpte2084", "arib-std-b67"];
 const BROWSER_AUDIO = ["aac", "mp3", "opus"];
 
 /** Por que o arquivo precisa virar formato de trabalho; null = já serve */
 export function normalizeReason(f: VideoFormat): string | null {
-  if (isHdr(f)) return null;
+  if (isHdr(f)) return Math.max(f.width, f.height) > MAX_SIDE ? `HDR ${f.width}×${f.height}` : null;
   if (f.codec !== "h264") return `codec ${f.codec}`;
   if (f.pixFmt !== "yuv420p") return `pixels ${f.pixFmt}`;
   if (f.range === "pc") return "faixa de cor completa (0–255)";
@@ -83,8 +86,23 @@ export function workingVideoFilter(f: VideoFormat, maxSide: number): string {
 /** Marcação de cor do formato de trabalho */
 export const WORKING_COLOR_TAGS = ["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
 
-/** HDR fica como está (ver HDR_TRANSFERS) */
+/** HLG/PQ (ver HDR_TRANSFERS) */
 export const isHdr = (f: VideoFormat) => HDR_TRANSFERS.includes(f.transfer);
+
+/** HDR → SDR BT.709 16–235 com lado maior ≤ `maxSide` (tone mapping hable, como o render faz no navegador) */
+export function hdrToSdrFilter(f: VideoFormat, maxSide: number): string {
+  // reduz primeiro (barato, ainda em 10 bits), depois lineariza, troca primárias e comprime o brilho
+  const fit = `scale=w='if(gte(iw,ih),min(${maxSide},iw),-2)':h='if(gte(iw,ih),-2,min(${maxSide},ih))':flags=bilinear`;
+  return [
+    fit,
+    `zscale=tin=${f.transfer}:min=bt2020nc:pin=bt2020:rin=tv:t=linear:npl=100`,
+    "format=gbrpf32le",
+    "zscale=p=bt709",
+    "tonemap=tonemap=hable:desat=0",
+    "zscale=t=bt709:m=bt709:r=tv",
+    "format=yuv420p",
+  ].join(",");
+}
 
 /** Converte `abs` para o formato de trabalho em `out` */
 async function transcode(abs: string, out: string, f: VideoFormat): Promise<void> {
@@ -92,7 +110,7 @@ async function transcode(abs: string, out: string, f: VideoFormat): Promise<void
     "-y", "-hide_banner", "-loglevel", "error",
     "-i", abs,
     "-map", "0:v:0", "-map", "0:a:0?",
-    "-vf", workingVideoFilter(f, MAX_SIDE),
+    "-vf", isHdr(f) ? hdrToSdrFilter(f, MAX_SIDE) : workingVideoFilter(f, MAX_SIDE),
     ...WORKING_COLOR_TAGS,
     "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
     // keyframe a cada ~2 s: busca rápida no preview
@@ -131,6 +149,11 @@ export async function normalizeVideo(abs: string): Promise<NormalizeResult> {
     }
   } catch (err) {
     fs.rmSync(tmp, { force: true });
+    // HDR sem tone mapping no ffmpeg (zscale): segue como antes, em vez de recusar o bruto
+    if (isHdr(f)) {
+      console.warn(`HDR ${path.basename(abs)} não convertido: ${(err as Error).message}`);
+      return { abs, converted: false, reason: null };
+    }
     throw err;
   }
   fs.renameSync(abs, path.join(dir, `original-${base}${ext}`));

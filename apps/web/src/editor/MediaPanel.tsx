@@ -1,4 +1,12 @@
-import { insertClipSegment, outputToSource, type Recipe, type Segment } from "@vision/recipe";
+import {
+  formatBytes,
+  formatSeconds,
+  insertClipSegment,
+  outputToSource,
+  UPLOAD_LIMITS,
+  type Recipe,
+  type Segment,
+} from "@vision/recipe";
 import React, { useState } from "react";
 import { addSourceClip } from "../api";
 import { inspectMediaFile } from "./mediaFiles";
@@ -91,7 +99,8 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ recipe, playheadSeconds,
       <p className="note">
         Entra em tela cheia no playhead ({playheadSeconds.toFixed(1)}s) e empurra o resto. Para
         sobrepor ao vídeo, use Overlays abaixo. Também dá para arrastar arquivos direto para a
-        timeline. Até 60 s e 300 MB por clipe.
+        timeline. Até {formatSeconds(UPLOAD_LIMITS.video.maxSeconds)} e{" "}
+        {formatBytes(UPLOAD_LIMITS.video.maxBytes)} por clipe.
       </p>
       <div className="row">
         <label className={`file-btn ${busy ? "disabled" : ""}`}>
