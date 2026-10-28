@@ -158,131 +158,134 @@ export const IllustrationMotion: React.FC<{ m: MotionOf<"illustration">; style: 
 
   return (
     <Place m={m}>
-      <div
-        {...dragProps(`motion:${m.id}`)}
-        style={{
-          position: "relative",
-          width: 800,
-          transform: `translateY(${y}px) rotate(${rot}deg) scale(${scale})`,
-          opacity,
-          filter: "drop-shadow(0 22px 34px rgba(0,0,0,0.42)) drop-shadow(0 4px 8px rgba(0,0,0,0.3))",
-        }}
-      >
+      {/* tamanho: cresce a partir do topo no layout padrão, do centro quando arrastado */}
+      <div style={{ transform: `scale(${m.params.size})`, transformOrigin: m.placement ? "center" : "top center" }}>
         <div
+          {...dragProps(`motion:${m.id}`)}
           style={{
-            clipPath: edge,
-            background: PAPER,
-            backgroundImage: GRAIN,
-            padding: "30px 30px 26px",
+            position: "relative",
+            width: 800,
+            transform: `translateY(${y}px) rotate(${rot}deg) scale(${scale})`,
+            opacity,
+            filter: "drop-shadow(0 22px 34px rgba(0,0,0,0.42)) drop-shadow(0 4px 8px rgba(0,0,0,0.3))",
           }}
         >
           <div
             style={{
-              position: "relative",
-              width: "100%",
-              aspectRatio: "1 / 1",
-              overflow: "hidden",
-              background: "#E4DCCB",
-              outline: image === "failed" ? "4px dashed rgba(31,27,22,0.35)" : undefined,
-              outlineOffset: -18,
+              clipPath: edge,
+              background: PAPER,
+              backgroundImage: GRAIN,
+              padding: "30px 30px 26px",
             }}
           >
-            {src && image !== "failed" && (
-              <img
-                {...imgProps}
-                src={src}
-                alt=""
-                decoding="sync"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                  transform: `scale(${kenBurns})`,
-                  filter: "contrast(1.03) saturate(0.95)",
-                  opacity: image === "ok" ? 1 : 0,
-                }}
-              />
-            )}
-            {/* carregando: fundo liso (do cache leva 1 quadro; sem piscar aviso) */}
-            {image === "failed" && (
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: "1 / 1",
+                overflow: "hidden",
+                background: "#E4DCCB",
+                outline: image === "failed" ? "4px dashed rgba(31,27,22,0.35)" : undefined,
+                outlineOffset: -18,
+              }}
+            >
+              {src && image !== "failed" && (
+                <img
+                  {...imgProps}
+                  src={src}
+                  alt=""
+                  decoding="sync"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: `scale(${kenBurns})`,
+                    filter: "contrast(1.03) saturate(0.95)",
+                    opacity: image === "ok" ? 1 : 0,
+                  }}
+                />
+              )}
+              {/* carregando: fundo liso (do cache leva 1 quadro; sem piscar aviso) */}
+              {image === "failed" && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 18,
+                    padding: 60,
+                    textAlign: "center",
+                    color: "rgba(31,27,22,0.62)",
+                    fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+                  }}
+                >
+                  <div style={{ fontSize: 44, fontWeight: 800 }}>
+                    {m.params.image ? "Imagem não encontrada" : "Imagem ainda não gerada"}
+                  </div>
+                  <div style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.3 }}>{m.params.subject}</div>
+                  <div style={{ fontSize: 24, fontWeight: 600, opacity: 0.8 }}>Não aparece no vídeo final sem a imagem</div>
+                </div>
+              )}
+              {/* vinheta de papel envelhecido por cima da foto */}
               <div
                 style={{
                   position: "absolute",
                   inset: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 18,
-                  padding: 60,
-                  textAlign: "center",
-                  color: "rgba(31,27,22,0.62)",
-                  fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+                  background: "radial-gradient(ellipse at center, transparent 55%, rgba(80,60,30,0.22) 100%)",
+                  mixBlendMode: "multiply",
                 }}
-              >
-                <div style={{ fontSize: 44, fontWeight: 800 }}>
-                  {m.params.image ? "Imagem não encontrada" : "Imagem ainda não gerada"}
-                </div>
-                <div style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.3 }}>{m.params.subject}</div>
-                <div style={{ fontSize: 24, fontWeight: 600, opacity: 0.8 }}>Não aparece no vídeo final sem a imagem</div>
-              </div>
-            )}
-            {/* vinheta de papel envelhecido por cima da foto */}
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "radial-gradient(ellipse at center, transparent 55%, rgba(80,60,30,0.22) 100%)",
-                mixBlendMode: "multiply",
-              }}
-            />
-          </div>
-          {m.params.label ? (
-            <div
-              style={{
-                marginTop: 22,
-                textAlign: "center",
-                fontFamily: fontStack(style),
-                fontWeight: 900,
-                fontSize: 54,
-                lineHeight: 1.1,
-                textTransform: "uppercase",
-                color: INK,
-              }}
-            >
-              <span
-                style={{
-                  padding: "0 14px",
-                  backgroundImage: `linear-gradient(${style.highlightColor}, ${style.highlightColor})`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "0 78%",
-                  backgroundSize: `${marker * 100}% 46%`,
-                  boxDecorationBreak: "clone",
-                  WebkitBoxDecorationBreak: "clone",
-                }}
-              >
-                {m.params.label}
-              </span>
+              />
             </div>
-          ) : null}
+            {m.params.label ? (
+              <div
+                style={{
+                  marginTop: 22,
+                  textAlign: "center",
+                  fontFamily: fontStack(style),
+                  fontWeight: 900,
+                  fontSize: 54,
+                  lineHeight: 1.1,
+                  textTransform: "uppercase",
+                  color: INK,
+                }}
+              >
+                <span
+                  style={{
+                    padding: "0 14px",
+                    backgroundImage: `linear-gradient(${style.highlightColor}, ${style.highlightColor})`,
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "0 78%",
+                    backgroundSize: `${marker * 100}% 46%`,
+                    boxDecorationBreak: "clone",
+                    WebkitBoxDecorationBreak: "clone",
+                  }}
+                >
+                  {m.params.label}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          {/* fita adesiva prendendo o cartão */}
+          <div
+            style={{
+              position: "absolute",
+              top: -26,
+              left: "50%",
+              width: 210,
+              height: 58,
+              marginLeft: -105,
+              transform: `rotate(${-tilt * 0.8 - 3}deg)`,
+              background: "rgba(232,221,194,0.82)",
+              backgroundImage: GRAIN,
+              clipPath:
+                "polygon(0 8%, 4% 0, 8% 10%, 12% 0, 88% 0, 92% 9%, 96% 0, 100% 10%, 100% 90%, 96% 100%, 92% 90%, 88% 100%, 12% 100%, 8% 91%, 4% 100%, 0 92%)",
+              boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)",
+            }}
+          />
         </div>
-        {/* fita adesiva prendendo o cartão */}
-        <div
-          style={{
-            position: "absolute",
-            top: -26,
-            left: "50%",
-            width: 210,
-            height: 58,
-            marginLeft: -105,
-            transform: `rotate(${-tilt * 0.8 - 3}deg)`,
-            background: "rgba(232,221,194,0.82)",
-            backgroundImage: GRAIN,
-            clipPath:
-              "polygon(0 8%, 4% 0, 8% 10%, 12% 0, 88% 0, 92% 9%, 96% 0, 100% 10%, 100% 90%, 96% 100%, 92% 90%, 88% 100%, 12% 100%, 8% 91%, 4% 100%, 0 92%)",
-            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.25)",
-          }}
-        />
       </div>
     </Place>
   );

@@ -304,6 +304,9 @@ export function detectEnumerations(words: SpokenWord[]): EnumerationCue[] {
   return out;
 }
 
+/** Duração da tela cheia em lista quando a IA não pede outra (o padrão da frase é curto para ler os itens) */
+export const LIST_SCREEN_SECONDS = 4.5;
+
 /** Índices das palavras que vêm logo depois de um corte (marcados no prompt) */
 export function wordsAfterCut(recipe: Recipe, words: SpokenWord[]): Set<number> {
   const cuts = cutPoints(recipe).map((c) => c.at);
@@ -617,7 +620,9 @@ export function compilePlan(
     const start = spoken.outputTime;
     const slots = slotsOf(e);
 
-    if (e.type === "motion") {
+    // a IA às vezes manda uma receita como motion: trata como receita em vez de recusar
+    const asCombo = e.type === "combo" || (COMBO_IDS as readonly string[]).includes(e.id);
+    if (!asCombo) {
       const kind = e.id as MotionKind;
       if (!allowed.kinds.includes(kind)) return rejected.push({ ref, reason: "tipo fora do catálogo desta demanda" });
       const man = MOTION_REGISTRY[kind];
@@ -632,9 +637,11 @@ export function compilePlan(
         else candidates.push(r.ok);
         return;
       }
-      const fit = fitTiming(start, total, man.seconds, e.seconds);
-      if (!fit) return rejected.push({ ref, reason: "sem tempo até o fim do vídeo" });
       const params = man.fromSlots(slots);
+      // tela cheia em lista precisa de tempo para ler os itens (o padrão da frase é curto)
+      const asked = e.seconds ?? (kind === "screen" && params.layout === "list" ? LIST_SCREEN_SECONDS : null);
+      const fit = fitTiming(start, total, man.seconds, asked);
+      if (!fit) return rejected.push({ ref, reason: "sem tempo até o fim do vídeo" });
       const r = toCandidate(kind, fit.start, fit.duration, params, priority, null, "");
       if ("error" in r) rejected.push({ ref, reason: r.error });
       else candidates.push(r.ok);

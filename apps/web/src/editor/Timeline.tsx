@@ -1,6 +1,7 @@
 import {
   audioClipEnd,
   captionBlockOutputRange,
+  isVideoEffect,
   keptCaptionWords,
   MIN_AUDIO_CLIP_SECONDS,
   MOTION_LABEL,
@@ -58,7 +59,7 @@ const MAX_WAVE_PX = 8000;
 /** Maior canvas de filmstrip; acima disso os frames ficam esticados */
 const MAX_FILM_PX = 16000;
 
-const ROW = { ruler: 26, video: 64, clipAudio: 40, caption: 30, motion: 30, overlay: 30, music: 40, sfx: 34 };
+const ROW = { ruler: 26, video: 64, effect: 30, clipAudio: 40, caption: 30, motion: 30, overlay: 30, music: 40, sfx: 34 };
 
 /** Distância (px) em que bordas arrastadas grudam no playhead e em outras bordas */
 const SNAP_PX = 6;
@@ -770,6 +771,8 @@ export const Timeline: React.FC<TimelineProps> = ({
   // cortes entram aplicados; pendente só sobra em projeto de antes dessa mudança
   const pendingCuts = recipe.timeline.suggestedCuts.filter((c) => c.status === "pending");
   const placedMotions = placeMotions(recipe, true);
+  const effectMotions = placedMotions.filter((p) => isVideoEffect(p.motion));
+  const drawnMotions = placedMotions.filter((p) => !isVideoEffect(p.motion));
   const spoken = recipe.captions.blocks.length;
 
   const { major, minor } = rulerStep(pxPerSec);
@@ -793,7 +796,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   // motions: uma sub-linha por camada em uso (câmera, texto, elemento, tela
   // cheia) — dentro de cada uma nada se sobrepõe (enforceLanes)
   const motionLayers = MOTION_LAYER_ORDER.filter((l) =>
-    placedMotions.some((p) => MOTION_REGISTRY[p.motion.kind].layer === l)
+    drawnMotions.some((p) => MOTION_REGISTRY[p.motion.kind].layer === l)
   );
   const motionRows = Math.max(1, motionLayers.length);
   const motionRowOf = (m: Motion) => Math.max(0, motionLayers.indexOf(MOTION_REGISTRY[m.kind].layer));
@@ -805,6 +808,26 @@ export const Timeline: React.FC<TimelineProps> = ({
   const laneHeight = (l: VisualLayer) => (l === "motions" ? ROW.motion * motionRows : LAYER_ROW[l]);
   /** Bloco numa sub-linha: posição explícita no lugar do top/bottom fixo do CSS */
   const subRow = (row: number, rowH: number): React.CSSProperties => ({ top: row * rowH + 4, bottom: "auto", height: rowH - 8 });
+
+  /** Bloco de motion; `sub`: na trilha Motions, em sub-linha pela camada (efeitos de vídeo têm trilha própria) */
+  const motionBlock = ({ motion: m, outputStart }: (typeof placedMotions)[number], sub: boolean) => (
+    <div
+      key={m.id}
+      data-sel={`motion:${m.id}`}
+      className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""} ${inMulti(`motion:${m.id}`)}`}
+      style={{
+        left: outputStart * pxPerSec,
+        width: Math.max(m.durationSeconds * pxPerSec, 12),
+        ...(sub && motionRows > 1 ? subRow(motionRowOf(m), ROW.motion) : {}),
+      }}
+      title={`${MOTION_LABEL[m.kind]} · camada ${LAYER_LABEL[MOTION_REGISTRY[m.kind].layer]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
+      onPointerDown={(e) => startMotionDrag(e, m, outputStart, "move")}
+    >
+      <div className="handle handle-l" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "start")} />
+      {motionSummary(m) || MOTION_LABEL[m.kind]}
+      <div className="handle handle-r" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "end")} />
+    </div>
+  );
 
   const renderAudioClip = (c: AudioClip) => {
     const wave = fileWaves[c.file];
@@ -1007,6 +1030,12 @@ export const Timeline: React.FC<TimelineProps> = ({
             );
           })}
         </div>
+        {/* efeitos de vídeo (zoom/punch-in): agem no próprio vídeo, andam junto com a trilha dele */}
+        {head("trk-effect", "Efeitos de vídeo", effectMotions.length || "")}
+        <div className="tl-lane alt" data-track="effects" onPointerDown={laneDown}>
+          {effectMotions.length === 0 && <span className="lane-empty">Sem efeitos</span>}
+          {effectMotions.map((p) => motionBlock(p, false))}
+        </div>
       </>
     ),
     captions: (
@@ -1046,29 +1075,12 @@ export const Timeline: React.FC<TimelineProps> = ({
         {head(
         "trk-motion",
         "Motions",
-        recipe.motions.filter((m) => m.status !== "rejected").length,
+        recipe.motions.filter((m) => m.status !== "rejected" && !isVideoEffect(m)).length,
         "motions"
         )}
         <div className={`tl-lane ${laneDrop("motions")}`} data-track="motions" onPointerDown={laneDown}>
-          {placedMotions.length === 0 && <span className="lane-empty">Sem motions</span>}
-          {placedMotions.map(({ motion: m, outputStart }) => (
-            <div
-              key={m.id}
-              data-sel={`motion:${m.id}`}
-              className={`blk mo-blk kind-${m.kind} status-${m.status} ${selectedMotion === m.id ? "selected" : ""} ${inMulti(`motion:${m.id}`)}`}
-              style={{
-                left: outputStart * pxPerSec,
-                width: Math.max(m.durationSeconds * pxPerSec, 12),
-                ...(motionRows > 1 ? subRow(motionRowOf(m), ROW.motion) : {}),
-              }}
-              title={`${MOTION_LABEL[m.kind]} · camada ${LAYER_LABEL[MOTION_REGISTRY[m.kind].layer]}${m.status === "pending" ? " (sugestão)" : ""} · ${motionSummary(m)}${m.note ? ` · ${m.note}` : ""}`}
-              onPointerDown={(e) => startMotionDrag(e, m, outputStart, "move")}
-            >
-              <div className="handle handle-l" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "start")} />
-              {motionSummary(m) || MOTION_LABEL[m.kind]}
-              <div className="handle handle-r" onPointerDown={(e) => startMotionDrag(e, m, outputStart, "end")} />
-            </div>
-          ))}
+          {drawnMotions.length === 0 && <span className="lane-empty">Sem motions</span>}
+          {drawnMotions.map((p) => motionBlock(p, true))}
         </div>
       </>
     ),
@@ -1241,7 +1253,8 @@ export const Timeline: React.FC<TimelineProps> = ({
             gridTemplateColumns: `${HEAD_W}px ${contentW}px`,
             gridTemplateRows: [
               ROW.ruler,
-              ...recipe.layerOrder.map(laneHeight),
+              // a trilha de efeitos de vídeo vem logo abaixo do vídeo, onde quer que ele esteja
+              ...recipe.layerOrder.flatMap((l) => (l === "video" ? [laneHeight(l), ROW.effect] : [laneHeight(l)])),
               ROW.clipAudio,
               ROW.music,
               ROW.sfx * sfxRows,

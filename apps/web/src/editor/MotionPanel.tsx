@@ -1051,6 +1051,18 @@ const MotionFields: React.FC<{ m: Motion; patch: (p: Record<string, unknown>) =>
           <Prop label="Posição">
             <Segmented value={m.params.position} options={POSITION_OPTIONS} onChange={(v) => patch({ position: v })} />
           </Prop>
+          <Prop label="Tamanho">
+            <Slider
+              value={m.params.size}
+              min={0.4}
+              max={1.25}
+              step={0.01}
+              unit="%"
+              format={(v) => String(Math.round(v * 100))}
+              parse={(s) => Number(s) / 100}
+              onChange={(v) => patch({ size: v })}
+            />
+          </Prop>
         </>
       );
     case "transition":

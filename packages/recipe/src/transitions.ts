@@ -46,7 +46,7 @@ export const TRANSITION_PRESETS: Record<TransitionStyle, TransitionPreset> = {
     file: `${DIR}/transition_burn-transition-01.mp4`,
     blend: "screen",
     alpha: false,
-    seconds: 0.91,
+    seconds: 0.9,
     sfx: "whooshFast",
   },
   glitch: {
@@ -56,7 +56,7 @@ export const TRANSITION_PRESETS: Record<TransitionStyle, TransitionPreset> = {
     file: `${DIR}/transition_glitch-transition-05.mp4`,
     blend: "screen",
     alpha: false,
-    seconds: 1.07,
+    seconds: 1,
     sfx: "glitch",
   },
   paper: {

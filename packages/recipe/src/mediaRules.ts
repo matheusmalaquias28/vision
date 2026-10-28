@@ -9,7 +9,7 @@
 export type MediaKind = "video" | "audio" | "image";
 
 /** Trilhas da timeline (data-track das faixas) */
-export type TrackId = "captions" | "motions" | "overlays" | "video" | "videoAudio" | "music" | "sfx";
+export type TrackId = "captions" | "motions" | "effects" | "overlays" | "video" | "videoAudio" | "music" | "sfx";
 
 /** Onde um arquivo pode ir parar */
 export type DropTarget = "video" | "overlays" | "music" | "sfx";

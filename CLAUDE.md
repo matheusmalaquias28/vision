@@ -229,7 +229,9 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   mais perto (combo anda inteiro); sem espaço, a mudança é desfeita. Item
   que não mudou fica (corte e edição de texto nunca empurram nada). Bordas
   arrastadas param no vizinho (`edgeLimits`). Na timeline, motions ganham
-  uma sub-linha por camada em uso; efeitos sonoros PODEM tocar juntos (o som
+  uma sub-linha por camada em uso; zooms de câmera (`isVideoEffect`, camada
+  camera, inclusive punch-in) ficam na trilha "Efeitos de vídeo", logo abaixo
+  do vídeo; efeitos sonoros PODEM tocar juntos (o som
   acompanha o motion) e só descem para sub-linhas (`packRows`).
 - Menu do botão direito na timeline + Ctrl+C/X/V/D (`clipboard.ts`:
   `copyItems`/`pasteItems`/`splitItemAt`, por chave "tipo:id" do

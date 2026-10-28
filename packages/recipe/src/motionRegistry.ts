@@ -699,7 +699,7 @@ const transition: MotionManifest<"transition"> = {
   label: "Transição",
   category: "element",
   layer: "fullscreen",
-  purpose: "Transição rápida (até 1,3 s) com vídeo da biblioteca e som, num corte: luz, queima de filme, glitch, varrida de luz ou papel.",
+  purpose: "Transição rápida (até 1,3 s) com vídeo da biblioteca e som, num corte: luz, queima de filme, glitch ou papel.",
   useWhen: [
     "virada de assunto ou começo de outra parte do roteiro (cai no corte mais perto)",
     "antes do CTA ou de uma revelação",
@@ -752,7 +752,7 @@ const illustration: MotionManifest<"illustration"> = {
   styles: ["balanced", "educational", "premium", "dynamic"],
   grounding: "none",
   costHint: "high",
-  defaults: () => ({ subject: "balança da justiça e um contrato", label: "", image: null, position: "top" }),
+  defaults: () => ({ subject: "balança da justiça e um contrato", label: "", image: null, position: "top", size: 1 }),
   fromSlots: (s) =>
     clean({
       subject: str(s.text).slice(0, 300),
@@ -843,4 +843,12 @@ export const MOTION_GALLERY_ORDER: MotionKind[] = [
 // garante em tempo de carga que todo kind tem manifesto
 for (const k of MOTION_KINDS) {
   if (!MOTION_REGISTRY[k]) throw new Error(`motion "${k}" sem manifesto no registry`);
+}
+
+/**
+ * Efeito no próprio vídeo (zoom de câmera, inclusive punch-in): fica na
+ * trilha "Efeitos de vídeo" da timeline, separado dos motions desenhados.
+ */
+export function isVideoEffect(m: { kind: MotionKind }): boolean {
+  return MOTION_REGISTRY[m.kind].layer === "camera";
 }

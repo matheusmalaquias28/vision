@@ -7,7 +7,16 @@ import type { MotionKind } from "./schema";
  * motions comuns com offsets fixos e um `group` compartilhado — a IA só
  * escolhe o combo e preenche os slots. Cada peça segue editável sozinha.
  */
-export const COMBO_IDS = ["impact-hook", "statistic-reveal", "benefit-stack", "cta-focus"] as const;
+export const COMBO_IDS = [
+  "impact-hook",
+  "statistic-reveal",
+  "benefit-stack",
+  "cta-focus",
+  "pain-point",
+  "myth-truth",
+  "testimonial-quote",
+  "premium-intro",
+] as const;
 export type ComboId = (typeof COMBO_IDS)[number];
 
 export interface ComboPiece {
@@ -134,11 +143,112 @@ const ctaFocus: ComboManifest = {
   ],
 };
 
+// ── Lote 2: receitas do roadmap montadas com tipos que já existem ──
+
+const painPoint: ComboManifest = {
+  id: "pain-point",
+  version: 1,
+  label: "Dor em destaque",
+  purpose: "A dor/problema dito ganha círculo desenhado na palavra-chave + punch de câmera.",
+  useWhen: ["falante nomeia a dor do público (“você perde clientes”, “cansado de…”)", "problema antes da solução"],
+  avoidWhen: ["mais de uma vez por vídeo", "tom premium/minimalista", "frase longa (> 8 palavras)"],
+  seconds: { min: 1.8, default: 2.6, max: 3.5 },
+  aiParams: { text: "a dor, 2–8 palavras DA FALA", emphasis: "1 palavra DA FRASE que leva o círculo" },
+  styles: ["dynamic", "balanced", "educational"],
+  uses: ["zoom", "annotation"],
+  demoSlots: { text: "Você está perdendo clientes", emphasis: "perdendo" },
+  build: (s, d) => [
+    { kind: "zoom", offset: 0, duration: Math.min(1.2, d), params: { style: "punch", scale: 1.1 } },
+    {
+      kind: "annotation",
+      offset: 0.1,
+      duration: d - 0.1,
+      params: motionManifest("annotation").fromSlots({ text: s.text, emphasis: s.emphasis, variant: "circle", position: "center" }),
+    },
+  ],
+};
+
+const mythTruth: ComboManifest = {
+  id: "myth-truth",
+  version: 1,
+  label: "Mito × verdade",
+  purpose: "Comparação: a ideia errada aparece riscada e logo depois entra a frase certa.",
+  useWhen: ["“muita gente acha que… mas na verdade…”", "antes × depois, errado × certo"],
+  avoidWhen: ["não há contraste na fala", "frases longas"],
+  seconds: { min: 3, default: 4, max: 5.5 },
+  aiParams: { text: "o mito/o antes, 2–8 palavras DA FALA", title: "a verdade/o depois, 2–8 palavras DA FALA" },
+  styles: ["educational", "balanced", "dynamic", "premium"],
+  uses: ["annotation", "kinetic"],
+  demoSlots: { text: "Precisa de muito dinheiro", title: "Precisa de método" },
+  build: (s, d, style = "balanced") => {
+    const half = Math.round(d * 0.48 * 100) / 100;
+    return [
+      {
+        kind: "annotation",
+        offset: 0,
+        duration: half,
+        params: motionManifest("annotation").fromSlots({ text: s.text, variant: "crossed", position: "center" }),
+      },
+      {
+        kind: "kinetic",
+        offset: half,
+        duration: d - half,
+        params: { text: str(s.title), emphasis: "", variant: KINETIC_BY_STYLE[style], position: "center" },
+      },
+    ];
+  },
+};
+
+const testimonialQuote: ComboManifest = {
+  id: "testimonial-quote",
+  version: 1,
+  label: "Depoimento",
+  purpose: "Fala de cliente/paciente vira balão de mensagem com o nome, com aproximação lenta.",
+  useWhen: ["falante cita o que um cliente disse", "prova social contada na fala"],
+  avoidWhen: ["frase não foi dita", "nome inventado (sem nome na fala, deixe vazio)"],
+  seconds: { min: 2.5, default: 3.5, max: 5 },
+  aiParams: { text: "a frase do cliente, DA FALA (até 18 palavras)", sender: "nome dito na fala (opcional)" },
+  styles: ["balanced", "premium", "educational", "dynamic"],
+  uses: ["bubble", "zoom"],
+  demoSlots: { text: "Mudou a forma como eu atendo", sender: "Cliente" },
+  build: (s, d) => [
+    { kind: "zoom", offset: 0, duration: d, params: { style: "smooth", scale: 1.05 } },
+    { kind: "bubble", offset: 0.15, duration: d - 0.15, params: motionManifest("bubble").fromSlots(s) },
+  ],
+};
+
+const premiumIntro: ComboManifest = {
+  id: "premium-intro",
+  version: 1,
+  label: "Apresentação premium",
+  purpose: "Nome e título do falante numa tarja discreta, com aproximação lenta da câmera.",
+  useWhen: ["falante se apresenta (“eu sou…”, nome e profissão no briefing)", "primeiros segundos de vídeo institucional"],
+  avoidWhen: ["sem nome na fala nem no briefing", "mais de uma vez por vídeo"],
+  seconds: { min: 2.5, default: 3.5, max: 5 },
+  aiParams: { title: "nome (até 4 palavras)", subtitle: "cargo/profissão/registro (opcional)" },
+  styles: ["premium", "balanced", "educational", "minimal"],
+  uses: ["lowerThird", "zoom"],
+  demoSlots: { title: "Dra. Ana Souza", subtitle: "Dermatologista" },
+  build: (s, d) => [
+    { kind: "zoom", offset: 0, duration: d, params: { style: "smooth", scale: 1.04 } },
+    {
+      kind: "lowerThird",
+      offset: 0.2,
+      duration: d - 0.2,
+      params: motionManifest("lowerThird").fromSlots({ ...s, variant: "minimal" }),
+    },
+  ],
+};
+
 export const MOTION_COMBOS: Record<ComboId, ComboManifest> = {
   "impact-hook": impactHook,
   "statistic-reveal": statisticReveal,
   "benefit-stack": benefitStack,
   "cta-focus": ctaFocus,
+  "pain-point": painPoint,
+  "myth-truth": mythTruth,
+  "testimonial-quote": testimonialQuote,
+  "premium-intro": premiumIntro,
 };
 
 /** Rótulo do combo a partir do `group` gravado no motion ("cta-focus:2") */

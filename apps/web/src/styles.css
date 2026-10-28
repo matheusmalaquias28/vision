@@ -44,6 +44,7 @@
   --trk-video: oklch(0.6 0.08 250);
   --trk-caption: oklch(0.66 0.13 300);
   --trk-motion: oklch(0.83 0.13 192);
+  --trk-effect: oklch(0.72 0.12 225);
   --trk-overlay: oklch(0.75 0.13 70);
   --trk-audio: oklch(0.72 0.13 155);
   --trk-sfx: oklch(0.8 0.13 80);
@@ -2207,6 +2208,7 @@ kbd {
 .trk-sfx { --trk: var(--trk-sfx); }
 .trk-caption { --trk: var(--trk-caption); }
 .trk-motion { --trk: var(--trk-motion); }
+.trk-effect { --trk: var(--trk-effect); }
 .trk-overlay { --trk: var(--trk-overlay); }
 .trk-audio { --trk: var(--trk-audio); }
 

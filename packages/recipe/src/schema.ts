@@ -495,6 +495,8 @@ export const MotionSchema = z.discriminatedUnion("kind", [
       /** Imagem gerada (assets do projeto); null = ainda não gerada (não aparece no MP4) */
       image: z.string().nullable().default(null),
       position: z.enum(["top", "center"]).default("top"),
+      /** Tamanho do cartão (1 = 800 px de largura, o padrão antigo) */
+      size: z.number().min(0.4).max(1.25).default(1),
     }),
   }),
 ]);

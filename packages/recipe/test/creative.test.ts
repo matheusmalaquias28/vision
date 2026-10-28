@@ -3,6 +3,7 @@ import {
   buildFacts,
   checkGrounding,
   compilePlan,
+  LIST_SCREEN_SECONDS,
   formatCatalogForPrompt,
   getCandidateCombos,
   getCandidateMotions,
@@ -140,7 +141,9 @@ describe("retrieval", () => {
   it("combo sai se um tipo dele foi proibido", () => {
     const directives = interpretBriefing("sem zoom");
     const kinds = getCandidateMotions({ style: "balanced", directives, durationSeconds: 60 });
-    expect(getCandidateCombos({ style: "balanced", directives, durationSeconds: 60 }, kinds)).toEqual(["cta-focus"]);
+    const combos = getCandidateCombos({ style: "balanced", directives, durationSeconds: 60 }, kinds);
+    expect(combos).toEqual(expect.arrayContaining(["cta-focus", "myth-truth"]));
+    expect(combos.every((id) => !MOTION_COMBOS[id].uses.includes("zoom"))).toBe(true);
   });
 
   it("catálogo compacto não leva código nem schema", () => {
@@ -481,6 +484,31 @@ describe("tela cheia (screen)", () => {
     expect(checkGrounding(screen("Você está perdendo clientes"), facts)).toBeNull();
     expect(checkGrounding(screen("Garantia vitalícia total"), facts)).toMatch(/não vem da fala/);
   });
+
+  it("lista: itens contam na checagem da fala", () => {
+    const facts = buildFacts(recipe(FALA), spokenWords(recipe(FALA)));
+    const list = (items: string[]) => ({
+      kind: "screen" as const,
+      params: { ...MOTION_REGISTRY.screen.defaults(), text: "Você está perdendo clientes", emphasis: "", layout: "list" as const, items },
+    });
+    expect(checkGrounding(list(["perdendo clientes", "você está"]), facts)).toBeNull();
+    expect(checkGrounding(list(["garantia vitalícia", "frete grátis sempre", "brinde exclusivo"]), facts)).toMatch(/não vem da fala/);
+  });
+});
+
+describe("receita mandada como motion", () => {
+  it("o compilador trata como receita em vez de recusar", () => {
+    const r = recipe(FALA);
+    const words = spokenWords(r);
+    const { candidates, rejected } = compilePlan(
+      r,
+      { style: "dynamic", events: [{ type: "motion", id: "benefit-stack", word: 2, seconds: null, params: [{ k: "items", v: "ganha tempo|economiza dinheiro" }] }] } as unknown as CreativePlan,
+      { kinds: [...MOTION_KINDS], combos: ["benefit-stack"] }
+    );
+    expect(words.length).toBeGreaterThan(2);
+    expect(rejected).toEqual([]);
+    expect(candidates.map((c) => c.kind).sort()).toEqual(["list", "zoom"]);
+  });
 });
 
 describe("transições na sugestão da IA", () => {
@@ -521,5 +549,28 @@ describe("transições na sugestão da IA", () => {
     expect(getCandidateMotions({ style: "minimal", directives: min, durationSeconds: 60 })).not.toContain("transition");
     expect(interpretBriefing("sem transições").avoid).toContain("transition");
     expect(interpretBriefing("pode usar transições rápidas").wants).toContain("transition");
+  });
+});
+
+describe("tela cheia em lista", () => {
+  it("ganha 4,5 s quando a IA não pede duração", () => {
+    const r = recipe("hoje eu vou te mostrar três erros que travam vendas preço sem valor atendimento lento sem prova social");
+    const plan = {
+      style: "balanced",
+      events: [
+        {
+          type: "motion",
+          id: "screen",
+          word: 5,
+          seconds: null,
+          params: [
+            { k: "text", v: "três erros que travam vendas" },
+            { k: "items", v: "preço sem valor|atendimento lento|sem prova social" },
+          ],
+        },
+      ],
+    } as unknown as CreativePlan;
+    const { candidates } = compilePlan(r, plan, { kinds: [...MOTION_KINDS], combos: [] });
+    expect(candidates.find((c) => c.kind === "screen")!.durationSeconds).toBe(LIST_SCREEN_SECONDS);
   });
 });

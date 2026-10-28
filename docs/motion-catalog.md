@@ -56,6 +56,46 @@ Chamada para ação elegante no fim: chamada com botão + seta para baixo.
 - **Duração:** 2.2–4.5 s (padrão 3.2 s)
 - **Campos da IA:** `text` a ação (até 6 palavras); `eyebrow` até 3 palavras (opcional)
 
+### Dor em destaque — `pain-point` (v1)
+
+A dor/problema dito ganha círculo desenhado na palavra-chave + punch de câmera.
+
+- **Quando usar:** falante nomeia a dor do público (“você perde clientes”, “cansado de…”); problema antes da solução
+- **Quando NÃO usar:** mais de uma vez por vídeo; tom premium/minimalista; frase longa (> 8 palavras)
+- **Peças:** Zoom de câmera + Marcação desenhada (cada peça segue editável; "Remover receita inteira" tira o grupo)
+- **Duração:** 1.8–3.5 s (padrão 2.6 s)
+- **Campos da IA:** `text` a dor, 2–8 palavras DA FALA; `emphasis` 1 palavra DA FRASE que leva o círculo
+
+### Mito × verdade — `myth-truth` (v1)
+
+Comparação: a ideia errada aparece riscada e logo depois entra a frase certa.
+
+- **Quando usar:** “muita gente acha que… mas na verdade…”; antes × depois, errado × certo
+- **Quando NÃO usar:** não há contraste na fala; frases longas
+- **Peças:** Marcação desenhada + Frase cinética (cada peça segue editável; "Remover receita inteira" tira o grupo)
+- **Duração:** 3–5.5 s (padrão 4 s)
+- **Campos da IA:** `text` o mito/o antes, 2–8 palavras DA FALA; `title` a verdade/o depois, 2–8 palavras DA FALA
+
+### Depoimento — `testimonial-quote` (v1)
+
+Fala de cliente/paciente vira balão de mensagem com o nome, com aproximação lenta.
+
+- **Quando usar:** falante cita o que um cliente disse; prova social contada na fala
+- **Quando NÃO usar:** frase não foi dita; nome inventado (sem nome na fala, deixe vazio)
+- **Peças:** Mensagem + Zoom de câmera (cada peça segue editável; "Remover receita inteira" tira o grupo)
+- **Duração:** 2.5–5 s (padrão 3.5 s)
+- **Campos da IA:** `text` a frase do cliente, DA FALA (até 18 palavras); `sender` nome dito na fala (opcional)
+
+### Apresentação premium — `premium-intro` (v1)
+
+Nome e título do falante numa tarja discreta, com aproximação lenta da câmera.
+
+- **Quando usar:** falante se apresenta (“eu sou…”, nome e profissão no briefing); primeiros segundos de vídeo institucional
+- **Quando NÃO usar:** sem nome na fala nem no briefing; mais de uma vez por vídeo
+- **Peças:** Nome/cargo + Zoom de câmera (cada peça segue editável; "Remover receita inteira" tira o grupo)
+- **Duração:** 2.5–5 s (padrão 3.5 s)
+- **Campos da IA:** `title` nome (até 4 palavras); `subtitle` cargo/profissão/registro (opcional)
+
 ## Motions
 
 ### Palavra-chave — `keyword` (v2, Tipografia)
@@ -250,7 +290,7 @@ Linhas radiais de energia por um instante: impacto, surpresa, virada (Remotion E
 
 ### Transição — `transition` (v1, Elementos)
 
-Transição rápida (até 1,3 s) com vídeo da biblioteca e som, num corte: luz, queima de filme, glitch, varrida de luz ou papel.
+Transição rápida (até 1,3 s) com vídeo da biblioteca e som, num corte: luz, queima de filme, glitch ou papel.
 
 - **Quando usar:** virada de assunto ou começo de outra parte do roteiro (cai no corte mais perto); antes do CTA ou de uma revelação; entre clipes diferentes
 - **Quando NÃO usar:** mais de 3 no vídeo ou menos de 10 s de outra transição; nos primeiros ou últimos 1,5 s; no meio de uma frase sem corte por perto; vídeo calmo ou minimalista

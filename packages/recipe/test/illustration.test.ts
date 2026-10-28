@@ -18,7 +18,10 @@ describe("ilustração gerada", () => {
 
   it("schema: imagem começa vazia e posição no topo; assunto é obrigatório", () => {
     const m = MotionSchema.parse({ ...base, id: "il1", kind: "illustration", sourceTime: 4, params: { subject: "balança da justiça" } });
-    expect(m.kind === "illustration" && m.params).toEqual({ subject: "balança da justiça", label: "", image: null, position: "top" });
+    expect(m.kind === "illustration" && m.params).toEqual({ subject: "balança da justiça", label: "", image: null, position: "top", size: 1 });
+    const big = MotionSchema.parse({ ...base, id: "il4", kind: "illustration", sourceTime: 4, params: { subject: "martelo", size: 1.2 } });
+    expect(big.kind === "illustration" && big.params.size).toBe(1.2);
+    expect(() => MotionSchema.parse({ ...base, id: "il5", kind: "illustration", sourceTime: 4, params: { subject: "martelo", size: 3 } })).toThrow();
     expect(() => MotionSchema.parse({ ...base, id: "il2", kind: "illustration", sourceTime: 4, params: { subject: " " } })).toThrow();
   });
 
