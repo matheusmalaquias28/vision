@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Icon } from "../editor/Icon";
 
 /** Clipe escolhido para a demanda, ainda no navegador (antes do upload) */
@@ -187,5 +187,65 @@ export const ClipQueue: React.FC<ClipQueueProps> = ({ clips, onChange, disabled 
         ))}
       </ol>
     </div>
+  );
+};
+
+interface ClipDropzoneProps {
+  /** clipes já na fila: muda o texto para "adicionar mais" */
+  count: number;
+  onFiles: (files: File[]) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}
+
+/** Área de soltar/escolher os brutos; os arquivos entram no fim da fila */
+export const ClipDropzone: React.FC<ClipDropzoneProps> = ({ count, onFiles, disabled, compact }) => {
+  const [over, setOver] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <label
+      className={`dropzone ${compact ? "compact" : ""} ${over ? "over" : ""} ${disabled ? "disabled" : ""}`}
+      onDragOver={(e) => {
+        // só arquivos: reordenar a fila de clipes não acende a área
+        if (disabled || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        if (!disabled) onFiles(Array.from(e.dataTransfer.files));
+      }}
+    >
+      <span className="dz-icon">
+        <Icon name="upload" size={20} />
+      </span>
+      {count > 0 ? (
+        <>
+          <strong>Adicionar mais clipes</strong>
+          <span>arraste aqui ou clique · entram no fim da fila</span>
+        </>
+      ) : (
+        <>
+          <strong>Arraste os vídeos aqui</strong>
+          <span>ou clique para escolher · vários clipes viram uma sequência</span>
+        </>
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="video/*"
+        multiple
+        disabled={disabled}
+        onChange={(e) => {
+          // copia já: o FileList do input é esvaziado logo depois
+          const files = Array.from(e.target.files ?? []);
+          // permite escolher o mesmo arquivo de novo depois de tirá-lo
+          e.target.value = "";
+          onFiles(files);
+        }}
+      />
+    </label>
   );
 };

@@ -439,9 +439,11 @@ export const setDemandStatus = (id: string, status: string) =>
 export const resyncDemand = (id: string) =>
   postJson(`/api/demands/${encodeURIComponent(id)}/resync`).then((r) => json<Demand>(r));
 
-export const uploadDemandVideo = (id: string, index: number, files: File[]) => {
+/** Brutos na ordem da timeline; `briefing` = o do War editado (só vale no Vision) */
+export const uploadDemandVideo = (id: string, index: number, files: File[], briefing?: string) => {
   const fd = new FormData();
   for (const f of files) fd.append("videos", f);
+  if (briefing !== undefined) fd.append("briefing", briefing);
   return fetch(`/api/demands/${encodeURIComponent(id)}/videos/${index}/project`, {
     method: "POST",
     body: fd,

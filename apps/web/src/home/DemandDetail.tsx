@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   getDemand,
   markNotificationsRead,
@@ -12,6 +12,7 @@ import {
 import { Icon } from "../editor/Icon";
 import { Select } from "../ui/controls";
 import { DemandNotes } from "./DemandNotes";
+import { StartVideoPanel } from "./StartVideoPanel";
 import { fmtDateTime, fmtDay, instagramLink, priorityTone, safeUrl } from "./demandUtil";
 
 interface DemandDetailProps {
@@ -23,7 +24,8 @@ interface DemandDetailProps {
   onChanged: () => void;
   onOpenClient: (id: string) => void;
   onOpenProject: (projectId: string) => void;
-  onStartVideo: (demand: Demand, index: number, files: File[]) => void;
+  /** cria o projeto do vídeo com os brutos (na ordem) e o briefing editado; erro volta ao painel */
+  onStartVideo: (demand: Demand, index: number, files: File[], briefing: string) => Promise<void>;
 }
 
 const ExtLink: React.FC<{ href: string | null; children: React.ReactNode; className?: string }> = ({
@@ -44,10 +46,12 @@ const ExtLink: React.FC<{ href: string | null; children: React.ReactNode; classN
 const VideoRow: React.FC<{
   video: DemandVideo;
   disabled: boolean;
+  /** painel de começar aberto logo abaixo */
+  starting: boolean;
   onOpen: () => void;
-  onFiles: (files: File[]) => void;
-}> = ({ video, disabled, onOpen, onFiles }) => {
-  const input = useRef<HTMLInputElement>(null);
+  /** abre o painel de começar (com os brutos soltos na linha, se houver) */
+  onStart: (files: File[]) => void;
+}> = ({ video, disabled, starting, onOpen, onStart }) => {
   const [over, setOver] = useState(false);
   const a = video.analysis;
   const analyzing = a?.status === "queued" || a?.status === "running";
@@ -58,19 +62,22 @@ const VideoRow: React.FC<{
       : video.projectId
         ? "Em edição"
         : "Não iniciado";
+  // com o painel aberto, os brutos vão para a área dele
+  const takesFiles = !video.projectId && !starting && !disabled;
   return (
     <li
-      className={`dd-video ${over ? "over" : ""}`}
+      className={`dd-video ${over ? "over" : ""} ${starting ? "starting" : ""}`}
       onDragOver={(e) => {
-        if (video.projectId || !e.dataTransfer.types.includes("Files")) return;
+        if (!takesFiles || !e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         setOver(true);
       }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
+        if (!takesFiles) return;
         e.preventDefault();
         setOver(false);
-        if (!video.projectId && !disabled) onFiles(Array.from(e.dataTransfer.files));
+        onStart(Array.from(e.dataTransfer.files));
       }}
     >
       <span className="dd-video-num">{String(video.index).padStart(2, "0")}</span>
@@ -87,7 +94,12 @@ const VideoRow: React.FC<{
         ) : a?.status === "done" && !video.deliveredAt ? (
           <span className="dd-hint">sugestões da IA prontas para revisar</span>
         ) : (
-          !video.projectId && <span className="dd-hint">arraste os brutos aqui ou clique em começar</span>
+          !video.projectId &&
+          (starting ? (
+            <span className="dd-hint">escolha os brutos e confira o briefing abaixo</span>
+          ) : (
+            <span className="dd-hint">arraste os brutos aqui ou clique em começar</span>
+          ))
         )}
       </span>
       {video.projectId ? (
@@ -96,23 +108,13 @@ const VideoRow: React.FC<{
           Abrir edição
         </button>
       ) : (
-        <button className="sm primary" disabled={disabled} onClick={() => input.current?.click()}>
-          <Icon name="upload" size={13} />
-          Começar edição
-        </button>
+        !starting && (
+          <button className="sm primary" disabled={disabled} onClick={() => onStart([])}>
+            <Icon name="upload" size={13} />
+            Começar edição
+          </button>
+        )
       )}
-      <input
-        ref={input}
-        type="file"
-        accept="video/*"
-        multiple
-        hidden
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          e.target.value = "";
-          if (files.length > 0) onFiles(files);
-        }}
-      />
     </li>
   );
 };
@@ -138,6 +140,8 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
   const [data, setData] = useState<{ demand: Demand; client: Client | null; events: DemandEvent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** vídeo com o painel de começar aberto (só um por vez) */
+  const [starting, setStarting] = useState<{ index: number; files: File[] } | null>(null);
 
   const load = () =>
     getDemand(demandId)
@@ -155,10 +159,16 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
   }, [demandId]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Esc fecha primeiro o painel de começar (enviando, nada fecha)
+      if (starting) {
+        if (busy === null) setStarting(null);
+      } else onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, starting, busy]);
 
   const changeStatus = async (status: string, resync = false) => {
     setSaving(true);
@@ -247,15 +257,30 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
                   Vídeos <span className="dd-sub">{d.delivered}/{d.videoCount} entregues</span>
                 </h3>
                 <ul className="dd-videos">
-                  {d.videos.map((v) => (
-                    <VideoRow
-                      key={v.index}
-                      video={v}
-                      disabled={busy !== null}
-                      onOpen={() => v.projectId && onOpenProject(v.projectId)}
-                      onFiles={(files) => onStartVideo(d, v.index, files)}
-                    />
-                  ))}
+                  {d.videos.map((v) => {
+                    const open = starting?.index === v.index && !v.projectId;
+                    return (
+                      <React.Fragment key={v.index}>
+                        <VideoRow
+                          video={v}
+                          disabled={busy !== null}
+                          starting={open}
+                          onOpen={() => v.projectId && onOpenProject(v.projectId)}
+                          onStart={(files) => setStarting({ index: v.index, files })}
+                        />
+                        {open && starting && (
+                          <StartVideoPanel
+                            index={v.index}
+                            warBriefing={d.briefing || d.briefingText || ""}
+                            initialFiles={starting.files}
+                            busy={busy}
+                            onCancel={() => setStarting(null)}
+                            onStart={(files, briefing) => onStartVideo(d, v.index, files, briefing)}
+                          />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </ul>
                 {busy && <p className="dd-busy">{busy}…</p>}
               </section>

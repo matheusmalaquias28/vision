@@ -3,7 +3,7 @@ import path from "node:path";
 import express from "express";
 import { projectDir } from "../paths";
 import { slugify } from "../project";
-import { createProjectFromUploads, upload } from "../uploads";
+import { checkClipUpload, clipUpload, createProjectFromUploads, uploadName } from "../uploads";
 import { readAnalysis, startAutoAnalysis } from "../creative/autoAnalyze";
 import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from "./drive";
 import { getStore } from "./store";
@@ -183,32 +183,49 @@ demandsRouter.post(
   })
 );
 
-/** Cria o projeto de edição do vídeo N da demanda com os brutos enviados */
+/**
+ * Cria o projeto de edição do vídeo N da demanda com os brutos enviados, na
+ * ordem do formulário. `briefing` = o do War editado no Vision: vale só para
+ * este projeto (vai para recipe.briefing) e nunca volta ao War. Sem o campo,
+ * usa o do War.
+ */
 demandsRouter.post(
   "/api/demands/:id/videos/:index/project",
-  upload.array("videos", 20),
+  clipUpload.array("videos", 20),
   wrap(async (req, res) => {
     const store = getStore();
     const files = (req.files as Express.Multer.File[]) ?? [];
+    const discard = () => {
+      for (const f of files) fs.rmSync(f.path, { force: true });
+    };
     const demand = await store.getDemand(String(req.params.id));
     const index = Number(req.params.index);
     const video = (await store.listVideos(demand?.id)).find((v) => v.index === index);
     if (!demand || !video) {
-      for (const f of files) fs.rmSync(f.path, { force: true });
+      discard();
       res.status(404).json({ error: "vídeo da demanda não encontrado" });
       return;
     }
     if (video.projectId && fs.existsSync(projectDir(video.projectId))) {
-      for (const f of files) fs.rmSync(f.path, { force: true });
+      discard();
       res.status(409).json({ error: "esse vídeo já tem um projeto", projectId: video.projectId });
       return;
     }
+    // mesmos limites dos clipes inseridos no editor (UPLOAD_LIMITS)
+    for (const f of files) {
+      const checked = await checkClipUpload(f, ["video"]);
+      if ("error" in checked) {
+        discard();
+        res.status(400).json({ error: `${uploadName(f.originalname)}: ${checked.error}` });
+        return;
+      }
+    }
+    const briefing =
+      typeof req.body?.briefing === "string"
+        ? req.body.briefing.trim()
+        : demand.briefing || demand.briefingText || "";
     const base = slugify(demand.title || demand.clientName).slice(0, 36);
-    const recipe = await createProjectFromUploads(
-      files,
-      `${base}-${pad2(index)}`,
-      demand.briefing || demand.briefingText || ""
-    );
+    const recipe = await createProjectFromUploads(files, `${base}-${pad2(index)}`, briefing);
     await store.upsertVideo({ ...video, projectId: recipe.projectId, updatedAt: new Date().toISOString() });
     // transcrição, cortes e motions com o briefing já começam no servidor (tudo entra como sugestão)
     startAutoAnalysis(recipe.projectId);

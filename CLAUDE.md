@@ -260,6 +260,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   id aparece. Demanda = `id` do War. Nota = `criadoEm` (identidade nos dois lados).
 - Uma `DemandVideo` por unidade de `quantidadeVideos`, ligada a um projeto;
   entrega no Drive como "Título NN.mp4" (re-render substitui o arquivo).
+- "Começar edição" abre `StartVideoPanel` logo abaixo da linha do vídeo:
+  brutos (`ClipDropzone` + `ClipQueue`, os mesmos dos Projetos; limites de
+  `UPLOAD_LIMITS` no navegador e `checkClipUpload` na rota) e o briefing do
+  War editável. O editado vai só para `recipe.briefing` desse projeto; a
+  demanda e o War não mudam.
 - BANCO COMPARTILHADO com outro sistema: o Vision só existe no schema `vision`
   (`db/vision.sql`, aplicado à mão; nunca `supabase db push`) e conecta como
   `vision_app` (`VISION_DATABASE_URL`), que só lê/grava dados nesse schema.

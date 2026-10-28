@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { Recipe } from "@vision/recipe";
 import {
   disconnectDrive,
@@ -18,7 +18,7 @@ import { Editor } from "./editor/Editor";
 import { Icon } from "./editor/Icon";
 import { MotionLabPage } from "./lab/MotionLabPage";
 import { Logo } from "./ui/Logo";
-import { appendClips, ClipQueue, type QueuedClip } from "./home/ClipQueue";
+import { appendClips, ClipDropzone, ClipQueue, type QueuedClip } from "./home/ClipQueue";
 import { ClientsPage } from "./home/ClientsPage";
 import { DemandDetail } from "./home/DemandDetail";
 import { DemandsBoard } from "./home/DemandsBoard";
@@ -119,8 +119,6 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
   // muda a cada demanda concluída para forçar o editor a recarregar
   const [reloadKey, setReloadKey] = useState(0);
   const [board, setBoard] = useState<{ statuses: string[]; demands: Demand[] } | null>(null);
@@ -168,7 +166,7 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   }, [route.view, selected]);
 
   /** Sobe os brutos e abre o editor; a análise (transcrição, cortes, motions) já roda no servidor */
-  const launch = async (create: () => Promise<Recipe>) => {
+  const openCreated = async (create: () => Promise<Recipe>) => {
     setError(null);
     setStatus("Enviando clipes");
     try {
@@ -176,10 +174,17 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       refresh();
       refreshBoard();
       setSelected(recipe.projectId);
+    } finally {
       setStatus(null);
+    }
+  };
+
+  /** Igual, com o erro no aviso do topo */
+  const launch = async (create: () => Promise<Recipe>) => {
+    try {
+      await openCreated(create);
       return true;
     } catch (e) {
-      setStatus(null);
       setError(e instanceof Error ? e.message : String(e));
       return false;
     }
@@ -192,7 +197,6 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     if (ok) {
       setClips([]);
       setBriefing("");
-      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
@@ -231,12 +235,6 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       />
     );
   }
-
-  const pickFiles = (list: FileList | null) => {
-    // copia já: o FileList do input é esvaziado logo depois
-    const files = Array.from(list ?? []);
-    setClips((queue) => appendClips(queue, files));
-  };
 
   const drive = integrations?.drive;
 
@@ -343,7 +341,9 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               onChanged={refreshBoard}
               onOpenClient={(id) => go(`#/clientes/${encodeURIComponent(id)}`)}
               onOpenProject={(id) => setSelected(id)}
-              onStartVideo={(demand, index, files) => launch(() => uploadDemandVideo(demand.id, index, files))}
+              onStartVideo={(demand, index, files, briefing) =>
+                openCreated(() => uploadDemandVideo(demand.id, index, files, briefing))
+              }
             />
           )}
         </>
@@ -373,47 +373,11 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             Fora do fluxo do War. Suba os clipes brutos: a IA já transcreve e sugere cortes e motions (com o briefing, se houver).
           </p>
           <div className="demand-form">
-            <label
-              className={`dropzone ${dragOver ? "over" : ""}`}
-              onDragOver={(e) => {
-                // só arquivos: reordenar a fila de clipes não acende a área
-                if (!e.dataTransfer.types.includes("Files")) return;
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                pickFiles(e.dataTransfer.files);
-              }}
-            >
-              <span className="dz-icon">
-                <Icon name="upload" size={20} />
-              </span>
-              {clips.length > 0 ? (
-                <>
-                  <strong>Adicionar mais clipes</strong>
-                  <span>arraste aqui ou clique · entram no fim da fila</span>
-                </>
-              ) : (
-                <>
-                  <strong>Arraste os vídeos aqui</strong>
-                  <span>ou clique para escolher · vários clipes viram uma sequência</span>
-                </>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="video/*"
-                multiple
-                onChange={(e) => {
-                  pickFiles(e.target.files);
-                  // permite escolher o mesmo arquivo de novo depois de tirá-lo
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            <ClipDropzone
+              count={clips.length}
+              disabled={status !== null}
+              onFiles={(files) => setClips((queue) => appendClips(queue, files))}
+            />
             {clips.length > 0 && (
               <ClipQueue clips={clips} onChange={setClips} disabled={status !== null} />
             )}
