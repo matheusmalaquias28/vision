@@ -33,7 +33,9 @@ const SegmentVideo: React.FC<{
   segment: Segment;
   originalVolume: number;
   useEnhanced: boolean;
-}> = ({ source, segment, originalVolume, useEnhanced }) => {
+  /** cópia leve do bruto (só no editor) */
+  proxyFile?: string;
+}> = ({ source, segment, originalVolume, useEnhanced, proxyFile }) => {
   const { fps } = useVideoConfig();
   const enhanced = useEnhanced && source.enhancedAudio !== null;
   const trim = Math.round(segment.sourceStart * fps);
@@ -43,7 +45,7 @@ const SegmentVideo: React.FC<{
       {/* isolado: a camada de temperatura só mistura com o vídeo, nunca com legenda/motions */}
       <AbsoluteFill style={{ isolation: "isolate", overflow: "hidden" }}>
         <OffthreadVideo
-          src={mediaSrc(source.file)}
+          src={mediaSrc(proxyFile ?? source.file)}
           trimBefore={trim}
           volume={enhanced ? 0 : originalVolume}
           muted={enhanced}
@@ -77,11 +79,17 @@ export type VisionCompositionProps = {
   recipe: Recipe;
   /** Editor: mostra motions sugeridos (pendentes) como prévia. Render: false. */
   previewPending?: boolean;
+  /**
+   * Editor: bruto → cópia leve (720p) para o Player não travar baixando o
+   * bruto pesado. Render: nunca (lê sempre `source.file`).
+   */
+  mediaProxies?: Record<string, string>;
 };
 
 export const VisionComposition: React.FC<VisionCompositionProps> = ({
   recipe,
   previewPending = false,
+  mediaProxies,
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -117,6 +125,7 @@ export const VisionComposition: React.FC<VisionCompositionProps> = ({
           segment={seg}
           originalVolume={recipe.audio.originalVolume}
           useEnhanced={recipe.audio.useEnhanced}
+          proxyFile={mediaProxies?.[source.file]}
         />
       </Sequence>
     );

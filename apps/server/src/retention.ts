@@ -3,6 +3,7 @@ import path from "node:path";
 import { getStore } from "./demands/store";
 import { fromRecipePath, projectDir, projectsDir, recipePath } from "./paths";
 import { originalsOf } from "./pipeline/normalize";
+import { previewProxyDir } from "./pipeline/previewProxy";
 import { cleanupStaleRemotionTemp } from "./render/bundle";
 import { loadRecipe } from "./project";
 
@@ -91,6 +92,9 @@ export async function runRetention({ dryRun = false, only }: { dryRun?: boolean;
       .filter((f) => fs.existsSync(f))
       // original de câmera guardado ao lado do formato de trabalho
       .flatMap((f) => [f, ...originalsOf(f)]);
+    // cópias leves do preview: sem o bruto não servem para nada
+    const proxyDir = previewProxyDir(id);
+    if (fs.existsSync(proxyDir)) raws.push(...fs.readdirSync(proxyDir).map((n) => path.join(proxyDir, n)));
     if (raws.length === 0) continue;
 
     const video = await store.findVideoByProject(id);

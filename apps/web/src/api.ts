@@ -301,6 +301,17 @@ export type ProjectFilmstrips = Record<string, FilmstripData>;
 export const getFilmstrip = (id: string) =>
   fetch(`/api/projects/${id}/filmstrip`).then((r) => json<ProjectFilmstrips>(r));
 
+/** Cópia leve dos brutos para o Player (720p); o render usa sempre o bruto */
+export interface PreviewProxies {
+  /** caminho do bruto na receita → caminho da cópia leve */
+  proxies: Record<string, string>;
+  /** cópias ainda sendo geradas no servidor */
+  pending: number;
+}
+
+export const getPreviewProxies = (id: string) =>
+  fetch(`/api/projects/${id}/preview-proxies`).then((r) => json<PreviewProxies>(r));
+
 export const listMusic = () =>
   fetch("/api/music").then((r) => json<MusicTrack[]>(r));
 

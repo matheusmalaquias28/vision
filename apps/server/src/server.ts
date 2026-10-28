@@ -29,6 +29,7 @@ import { suggestIllustrations } from "./creative/illustrationPlanner";
 import { suggestSmartCuts } from "./pipeline/smartCuts";
 import { transcribeProject } from "./pipeline/transcribe";
 import { getFilmstrips } from "./pipeline/filmstrip";
+import { getPreviewProxies, queuePreviewProxy } from "./pipeline/previewProxy";
 import { getThumbnail } from "./pipeline/thumbnail";
 import { getFileWaveform, getWaveforms } from "./pipeline/waveform";
 import { enqueueRender, getJob } from "./render/queue";
@@ -47,8 +48,22 @@ app.use(requireAuth);
 app.use(authRouter);
 app.use(usersRouter);
 app.use(demandsRouter);
-// Serve media/ na raiz (mesma convenção do staticFile() do Remotion)
-app.use(express.static(mediaDir));
+// Serve media/ na raiz (mesma convenção do staticFile() do Remotion). Cache:
+// cópia leve do preview tem carimbo no nome (nunca muda) e a biblioteca é
+// importada uma vez; o resto (brutos, áudio tratado) revalida a cada uso.
+const MEDIA_CACHE: [RegExp, string][] = [
+  [/^\/projects\/[^/]+\/proxy\//, "private, max-age=31536000, immutable"],
+  [/^\/library\//, "private, max-age=86400"],
+];
+app.use(
+  express.static(mediaDir, {
+    setHeaders: (res, abs) => {
+      const rel = "/" + path.relative(mediaDir, abs).split(path.sep).join("/");
+      const rule = MEDIA_CACHE.find(([re]) => re.test(rel));
+      if (rule) res.setHeader("Cache-Control", rule[1]);
+    },
+  })
+);
 
 function listAudioFiles(dir: string, prefix: string) {
   const exts = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"];
@@ -328,6 +343,14 @@ app.get("/api/projects/:id/filmstrip", async (req, res, next) => {
   }
 });
 
+app.get("/api/projects/:id/preview-proxies", (req, res, next) => {
+  try {
+    res.json(getPreviewProxies(loadRecipe(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get("/api/projects/:id/thumbnail", async (req, res, next) => {
   try {
     const file = await getThumbnail(loadRecipe(req.params.id));
@@ -414,6 +437,8 @@ app.post(
       fs.rmSync(req.file.path, { force: true });
       const { abs: destAbs } = await normalizeVideo(copied);
       const probe = await probeVideo(destAbs);
+      // cópia leve do preview já começa (o Player pega quando ficar pronta)
+      queuePreviewProxy(id, destAbs);
       res.json({
         source: {
           id: srcId,

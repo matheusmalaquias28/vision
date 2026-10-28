@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import express from "express";
-import { checkPasswordStrength, hashPassword, toPublic } from "./auth";
+import { checkPasswordStrength, forgetSessions, hashPassword, toPublic } from "./auth";
 import { getStore } from "./demands/store";
 import type { User, UserRole } from "./demands/types";
 
@@ -92,6 +92,7 @@ usersRouter.post(
       updatedAt: now,
     };
     await store.upsertUser(user);
+    forgetSessions();
     res.json({ user: toPublic(user), generatedPassword: generated ? password : null });
   })
 );
@@ -123,6 +124,7 @@ usersRouter.patch(
       throw new HttpError(400, "precisa sobrar pelo menos um super admin ativo");
     }
     await store.upsertUser(next);
+    forgetSessions();
     res.json(toPublic(next));
   })
 );
@@ -139,6 +141,7 @@ usersRouter.post(
     if (target.id === req.user?.id) throw new HttpError(400, "para a sua senha, use Trocar senha no menu com o seu nome");
     const { password, generated } = passwordOrGenerated(req.body?.password);
     await store.upsertUser({ ...target, passwordHash: hashPassword(password), updatedAt: new Date().toISOString() });
+    forgetSessions();
     res.json({ generatedPassword: generated ? password : null });
   })
 );

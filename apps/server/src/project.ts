@@ -8,6 +8,7 @@ import {
 } from "@vision/recipe";
 import { projectDir, projectsDir, recipePath, toRecipePath } from "./paths";
 import { normalizeVideo } from "./pipeline/normalize";
+import { queuePreviewProxy } from "./pipeline/previewProxy";
 import { probeVideo } from "./pipeline/probe";
 
 export function slugify(name: string): string {
@@ -60,6 +61,8 @@ export async function createProject(
     // arquivo de câmera (10 bits, faixa 0–255…) vira formato de trabalho: preview = render
     const { abs: destAbs } = await normalizeVideo(copied);
     const probe = await probeVideo(destAbs);
+    // cópia leve do preview em segundo plano (o editor pega quando ficar pronta)
+    queuePreviewProxy(id, destAbs);
     sources.push({
       id: srcId,
       file: toRecipePath(destAbs),

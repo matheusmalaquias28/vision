@@ -118,14 +118,34 @@ function setCookie(req: express.Request, res: express.Response, value: string, m
 /** Rotas que não pedem login: o webhook do War tem segredo próprio */
 const OPEN = new Set(["/api/auth/login", "/api/auth/logout", "/api/webhooks/war"]);
 
+/**
+ * Usuário lido do banco vale 30 s: o preview pede dezenas de pedaços de vídeo
+ * e áudio por reprodução, e cada um esperava uma ida ao banco. Mudança de
+ * usuário feita aqui limpa na hora (`forgetSessions`); pela CLI (outro
+ * processo) leva até 30 s.
+ */
+const USER_TTL_MS = 30_000;
+const userCache = new Map<string, { user: User | null; at: number }>();
+
+export function forgetSessions() {
+  userCache.clear();
+}
+
+async function sessionUser(uid: string): Promise<User | null> {
+  const hit = userCache.get(uid);
+  if (hit && Date.now() - hit.at < USER_TTL_MS) return hit.user;
+  const user = await getStore().getUser(uid);
+  userCache.set(uid, { user, at: Date.now() });
+  return user;
+}
+
 /** Exige sessão válida em tudo (API e arquivos de media/), exceto OPEN */
 export const requireAuth: express.RequestHandler = (req, res, next) => {
   if (OPEN.has(req.path)) return next();
   const token = readToken(cookieFrom(req));
   const fail = () => res.status(401).json({ error: "faça login para continuar" });
   if (!token) return fail();
-  getStore()
-    .getUser(token.uid)
+  sessionUser(token.uid)
     .then((u) => {
       if (!u || !u.active || passwordVersion(u.passwordHash) !== token.pv) return fail();
       req.user = toPublic(u);
@@ -203,6 +223,7 @@ authRouter.post("/api/auth/password", async (req, res, next) => {
     }
     const updated = { ...user, passwordHash: hashPassword(next_), updatedAt: new Date().toISOString() };
     await store.upsertUser(updated);
+    forgetSessions();
     // outras sessões caem; esta continua com um cookie novo
     setCookie(req, res, createToken(updated), SESSION_DAYS * 86_400);
     res.json({ ok: true });

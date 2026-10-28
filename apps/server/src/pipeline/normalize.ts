@@ -55,7 +55,7 @@ const BROWSER_AUDIO = ["aac", "mp3", "opus"];
 
 /** Por que o arquivo precisa virar formato de trabalho; null = já serve */
 export function normalizeReason(f: VideoFormat): string | null {
-  if (HDR_TRANSFERS.includes(f.transfer)) return null;
+  if (isHdr(f)) return null;
   if (f.codec !== "h264") return `codec ${f.codec}`;
   if (f.pixFmt !== "yuv420p") return `pixels ${f.pixFmt}`;
   if (f.range === "pc") return "faixa de cor completa (0–255)";
@@ -72,17 +72,28 @@ function inMatrix(f: VideoFormat): string {
   return Math.min(f.width, f.height) >= 720 ? "bt709" : "bt601";
 }
 
+/** Filtro do formato de trabalho com lado maior ≤ `maxSide` (também usado pela cópia leve do preview) */
+export function workingVideoFilter(f: VideoFormat, maxSide: number): string {
+  // 1º reduz (barato, no formato original), depois converte faixa e matriz
+  const fit = `scale=w='if(gte(iw,ih),min(${maxSide},iw),-2)':h='if(gte(iw,ih),-2,min(${maxSide},ih))':flags=bilinear`;
+  const color = `scale=in_range=${f.range === "pc" ? "pc" : "tv"}:in_color_matrix=${inMatrix(f)}:out_range=tv:out_color_matrix=bt709,format=yuv420p`;
+  return `${fit},${color}`;
+}
+
+/** Marcação de cor do formato de trabalho */
+export const WORKING_COLOR_TAGS = ["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
+
+/** HDR fica como está (ver HDR_TRANSFERS) */
+export const isHdr = (f: VideoFormat) => HDR_TRANSFERS.includes(f.transfer);
+
 /** Converte `abs` para o formato de trabalho em `out` */
 async function transcode(abs: string, out: string, f: VideoFormat): Promise<void> {
-  // 1º reduz (barato, no formato original), depois converte faixa e matriz em 1080p
-  const fit = `scale=w='if(gte(iw,ih),min(${MAX_SIDE},iw),-2)':h='if(gte(iw,ih),-2,min(${MAX_SIDE},ih))':flags=bilinear`;
-  const color = `scale=in_range=${f.range === "pc" ? "pc" : "tv"}:in_color_matrix=${inMatrix(f)}:out_range=tv:out_color_matrix=bt709,format=yuv420p`;
   await runOrThrow(ffmpegPath, [
     "-y", "-hide_banner", "-loglevel", "error",
     "-i", abs,
     "-map", "0:v:0", "-map", "0:a:0?",
-    "-vf", `${fit},${color}`,
-    "-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+    "-vf", workingVideoFilter(f, MAX_SIDE),
+    ...WORKING_COLOR_TAGS,
     "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
     // keyframe a cada ~2 s: busca rápida no preview
     "-g", "48",

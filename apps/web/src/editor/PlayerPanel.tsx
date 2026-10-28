@@ -12,6 +12,8 @@ interface PlayerPanelProps {
   playerRef: React.RefObject<PlayerRef | null>;
   /** Mostra motions sugeridos (pendentes) no preview */
   previewPending: boolean;
+  /** Bruto → cópia leve (720p) só para o preview; o render usa sempre o bruto */
+  mediaProxies?: Record<string, string>;
 }
 
 /** Maior retângulo com a proporção do vídeo que cabe no palco */
@@ -42,9 +44,12 @@ function useFitBox(aspect: number) {
  * inputProps também precisa de identidade estável entre renders.
  */
 export const PlayerPanel: React.FC<PlayerPanelProps> = React.memo(
-  ({ recipe, playerRef, previewPending }) => {
+  ({ recipe, playerRef, previewPending, mediaProxies }) => {
     const meta = recipeMetadata(recipe);
-    const inputProps = useMemo(() => ({ recipe, previewPending }), [recipe, previewPending]);
+    const inputProps = useMemo(
+      () => ({ recipe, previewPending, mediaProxies }),
+      [recipe, previewPending, mediaProxies]
+    );
     const { ref, box } = useFitBox(meta.width / meta.height);
     return (
       <>

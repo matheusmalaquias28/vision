@@ -41,6 +41,7 @@ import {
   getLibrary,
   getRecipe,
   getFilmstrip,
+  getPreviewProxies,
   getProjectDemand,
   getWaveform,
   listTemplates,
@@ -90,6 +91,7 @@ const HISTORY_COALESCE_MS = 400;
 
 const TL_HEIGHT_KEY = "vision.timelineHeight";
 const CUT_PACE_KEY = "vision.cutPace";
+const LIGHT_PREVIEW_KEY = "vision.lightPreview";
 
 /** Ritmo preferido do operador (vale para todos os projetos neste navegador) */
 function readCutPace(): CutPace {
@@ -101,6 +103,15 @@ function readCutPace(): CutPace {
   }
 }
 const TL_MIN = 170;
+
+/** Preview leve (cópia 720p dos brutos) ligado por padrão neste navegador */
+function readLightPreview(): boolean {
+  try {
+    return window.localStorage.getItem(LIGHT_PREVIEW_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 
 type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "cor" | "exportar";
 
@@ -154,6 +165,8 @@ export const Editor: React.FC<EditorProps> = ({
   const [previewPending, setPreviewPending] = useState(true);
   const [waveforms, setWaveforms] = useState<ProjectWaveforms | null>(null);
   const [filmstrips, setFilmstrips] = useState<ProjectFilmstrips | null>(null);
+  const [proxies, setProxies] = useState<Record<string, string> | undefined>(undefined);
+  const [lightPreview, setLightPreview] = useState(readLightPreview);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [tab, setTab] = useState<InspectorTab>("motions");
   const [leftTab, setLeftTab] = useState<"texto" | "biblioteca">("texto");
@@ -250,6 +263,30 @@ export const Editor: React.FC<EditorProps> = ({
       .catch(() => setFilmstrips(null));
     listTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, [projectId]);
+
+  // cópias leves do preview: o servidor gera as que faltam; pergunta de novo até ficarem prontas
+  const sourceFiles = recipe?.sources.map((s) => s.file).join("|") ?? "";
+  useEffect(() => {
+    if (!sourceFiles) return;
+    let alive = true;
+    let timer: number | undefined;
+    const poll = () =>
+      getPreviewProxies(projectId)
+        .then((r) => {
+          if (!alive) return;
+          // mesma identidade quando nada mudou: não recarrega os vídeos do Player
+          setProxies((prev) =>
+            prev && JSON.stringify(prev) === JSON.stringify(r.proxies) ? prev : r.proxies
+          );
+          if (r.pending > 0) timer = window.setTimeout(poll, 5000);
+        })
+        .catch(() => undefined);
+    void poll();
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [projectId, sourceFiles]);
 
   const save = useCallback(async () => {
     const r = recipeRef.current;
@@ -1399,11 +1436,30 @@ export const Editor: React.FC<EditorProps> = ({
             Prévia das sugestões
             <Toggle checked={previewPending} onChange={setPreviewPending} label="Prévia das sugestões" />
           </label>
+          <label
+            className="viewer-toggle"
+            title="Toca uma cópia mais leve (720p) dos vídeos: o preview não trava. O vídeo exportado sai sempre na qualidade original."
+          >
+            Preview leve
+            <Toggle
+              checked={lightPreview}
+              onChange={(on) => {
+                setLightPreview(on);
+                try {
+                  window.localStorage.setItem(LIGHT_PREVIEW_KEY, on ? "on" : "off");
+                } catch {
+                  // sem localStorage: vale só nesta aba
+                }
+              }}
+              label="Preview leve"
+            />
+          </label>
         </header>
         <PlayerPanel
           recipe={showOriginalColor ? withoutColor(recipe) : recipe}
           playerRef={playerRef}
           previewPending={previewPending}
+          mediaProxies={lightPreview ? proxies : undefined}
         />
         <DragLayer
           recipe={recipe}

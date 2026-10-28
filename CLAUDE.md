@@ -208,6 +208,16 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `numberOfSharedAudioTags` 32 (`PlayerPanel.tsx`): cada trecho tem seu
   `<Audio>` montado 3 s antes; com muitos cortes curtos + música + sons o
   padrão (5) estoura e o Player quebra (⚠️).
+- Preview leve (`pipeline/previewProxy.ts`): cópia 720p ~1 Mbps (keyframe
+  1 s, faststart, mesmos tempos de quadro, mesmo filtro de cor do formato de
+  trabalho) de cada bruto em `proxy/<nome>-<carimbo>.mp4`, SÓ para o Player
+  (`mediaProxies` em `VisionComposition`; o render nunca passa e lê
+  `source.file`). Gerada na fila (1 por vez) no upload e ao abrir o editor
+  (`GET /api/projects/:id/preview-proxies`, o editor pergunta até ficar
+  pronta); HDR e bruto já leve não ganham cópia. Chave "Preview leve" no
+  Viewer (localStorage). Cópia com carimbo = cache `immutable`; biblioteca
+  1 dia; brutos revalidam. `requireAuth` guarda o usuário 30 s
+  (`forgetSessions` em toda mudança de usuário): cada pedaço de vídeo ia ao banco.
 - Formato de trabalho: na entrada (`createProject`, clipe inserido) e antes do
   render, vídeo de câmera (10 bits, 4:2:2, faixa 0–255, HEVC, >1920 px, áudio
   PCM) vira H.264 8 bits 4:2:0 BT.709 16–235 ≤1920 px + AAC
