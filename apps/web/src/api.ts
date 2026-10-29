@@ -551,3 +551,59 @@ export const updateUser = (id: string, patch: { name?: string; role?: UserRole; 
 
 export const resetUserPassword = (id: string) =>
   postJson(`/api/users/${id}/password`, {}).then((r) => json<{ generatedPassword: string | null }>(r));
+
+// ─── Painel do dia (só superadmin) ───────────────────────────────────
+
+export type AttentionKind =
+  | "overdue"
+  | "due-today"
+  | "due-soon-not-started"
+  | "no-date"
+  | "stale"
+  | "sync-error"
+  | "analysis-error"
+  | "unanswered";
+
+export interface DayItem {
+  demandId: string | null;
+  title: string;
+  clientName: string;
+  index: number | null;
+  at: string;
+}
+
+/** Espelho de `DayReport` (apps/server/src/demands/dashboard.ts) */
+export interface DayReport {
+  day: string;
+  isToday: boolean;
+  generatedAt: string;
+  kpis: {
+    openDemands: number;
+    newDemands: number;
+    editsStarted: number;
+    editsStartedLoose: number;
+    videosDelivered: number;
+    demandsDelivered: number;
+    demandsCompleted: number;
+    overdue: number;
+    avgLeadDays: number | null;
+    avgEditHours: number | null;
+    onTimeRate: number | null;
+    averageSample: number;
+  };
+  statusBoard: { status: string; open: number; enteredToday: number }[];
+  attention: {
+    kind: AttentionKind;
+    severity: "high" | "mid";
+    demandId: string;
+    title: string;
+    clientName: string;
+    detail: string;
+  }[];
+  started: DayItem[];
+  delivered: DayItem[];
+  activity: { name: string; statusMoves: number; comments: number }[];
+}
+
+export const getDayReport = (date?: string) =>
+  fetch(`/api/dashboard/day${date ? `?date=${date}` : ""}`).then((r) => json<DayReport>(r));

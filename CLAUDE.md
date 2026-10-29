@@ -310,6 +310,16 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `UPLOAD_LIMITS` no navegador e `checkClipUpload` na rota) e o briefing do
   War editável. O editado vai só para `recipe.briefing` desse projeto; a
   demanda e o War não mudam.
+- Painel do dia (`#/painel`, SÓ superadmin: link no menu e
+  `GET /api/dashboard/day?date=` com 403 para os outros): `buildDayReport`
+  em `demands/dashboard.ts`, função pura sem tabela nova. Dia no fuso
+  `VISION_TZ` (padrão America/Sao_Paulo; a VPS roda em UTC). O dia escolhido
+  vale para o que aconteceu nele (novas, edições iniciadas = `createdAt` do
+  projeto, vídeos entregues = `deliveredAt`, concluídas = evento para o
+  status final, entradas por status, quem mudou status/comentou pelo
+  Vision); abertas, atrasadas e pontos de atenção são sempre "agora" (o
+  banco só guarda o estado atual). Médias (prazo criação→último vídeo
+  entregue, tempo de edição, % no prazo) nos 30 dias até o dia.
 - BANCO COMPARTILHADO com outro sistema: o Vision só existe no schema `vision`
   (`db/vision.sql`, aplicado à mão; nunca `supabase db push`) e conecta como
   `vision_app` (`VISION_DATABASE_URL`), que só lê/grava dados nesse schema.

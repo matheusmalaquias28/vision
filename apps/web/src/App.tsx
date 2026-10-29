@@ -20,6 +20,7 @@ import { MotionLabPage } from "./lab/MotionLabPage";
 import { Logo } from "./ui/Logo";
 import { appendClips, ClipDropzone, ClipQueue, type QueuedClip } from "./home/ClipQueue";
 import { ClientsPage } from "./home/ClientsPage";
+import { DashboardPage } from "./home/DashboardPage";
 import { DemandDetail } from "./home/DemandDetail";
 import { DemandsBoard } from "./home/DemandsBoard";
 import { LoginPage } from "./home/LoginPage";
@@ -90,6 +91,7 @@ type Route =
   | { view: "clientes"; id: string | null }
   | { view: "projetos" }
   | { view: "usuarios" }
+  | { view: "painel" }
   | { view: "lab" };
 
 /** #/demandas[/id] · #/clientes[/id] · #/projetos · #lab */
@@ -100,6 +102,7 @@ function parseHash(hash: string): Route {
   if (view === "clientes") return { view: "clientes", id: decoded };
   if (view === "projetos") return { view: "projetos" };
   if (view === "usuarios") return { view: "usuarios" };
+  if (view === "painel") return { view: "painel" };
   return { view: "demandas", id: decoded };
 }
 
@@ -246,6 +249,12 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         </span>
         <span className="topbar-sep" />
         <nav className="home-nav">
+          {me?.role === "superadmin" && (
+            <a className={route.view === "painel" ? "on" : ""} href="#/painel">
+              <Icon name="chart" size={14} />
+              Painel
+            </a>
+          )}
           <a className={route.view === "demandas" ? "on" : ""} href="#/demandas">
             <Icon name="board" size={14} />
             Demandas
@@ -347,6 +356,16 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             />
           )}
         </>
+      )}
+
+      {route.view === "painel" && (
+        <div className="home-scroll">
+          {me?.role === "superadmin" ? (
+            <DashboardPage onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)} />
+          ) : (
+            <p className="page-pad">Só o superadmin vê o painel.</p>
+          )}
+        </div>
       )}
 
       {route.view === "usuarios" && (

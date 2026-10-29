@@ -22,6 +22,8 @@ export interface DemandStore {
   findVideoByProject(projectId: string): Promise<DemandVideo | null>;
   upsertVideo(v: DemandVideo): Promise<void>;
   listEvents(demandId: string): Promise<DemandEvent[]>;
+  /** Eventos de todas as demandas a partir de um instante (resumo do dia) */
+  listEventsSince(sinceIso: string): Promise<DemandEvent[]>;
   addEvent(e: Omit<DemandEvent, "id" | "createdAt">): Promise<DemandEvent>;
   listNotifications(limit: number): Promise<Notification[]>;
   addNotification(n: Omit<Notification, "id" | "createdAt" | "readAt">): Promise<void>;
@@ -115,6 +117,9 @@ class LocalStore implements DemandStore {
   }
   async listEvents(demandId: string) {
     return this.data.events.filter((e) => e.demandId === demandId);
+  }
+  async listEventsSince(sinceIso: string) {
+    return this.data.events.filter((e) => e.createdAt >= sinceIso);
   }
   async addEvent(e: Omit<DemandEvent, "id" | "createdAt">) {
     const event: DemandEvent = {
@@ -262,6 +267,9 @@ class PgStore implements DemandStore {
   }
   listEvents(demandId: string) {
     return this.rows<DemandEvent>("select * from vision.demand_events where demand_id = $1 order by id", [demandId]);
+  }
+  listEventsSince(sinceIso: string) {
+    return this.rows<DemandEvent>("select * from vision.demand_events where created_at >= $1 order by id", [sinceIso]);
   }
   addEvent(e: Omit<DemandEvent, "id" | "createdAt">) {
     return this.insert<DemandEvent>("demand_events", e);

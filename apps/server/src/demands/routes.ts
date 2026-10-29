@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import express from "express";
-import { projectDir } from "../paths";
+import { projectDir, projectsDir, recipePath } from "../paths";
 import { slugify } from "../project";
 import { checkClipUpload, clipUpload, createProjectFromUploads, uploadName } from "../uploads";
 import { readAnalysis, startAutoAnalysis } from "../creative/autoAnalyze";
 import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from "./drive";
+import { AVERAGE_WINDOW_DAYS, buildDayReport, dayOf, shiftDay, type ProjectInfo } from "./dashboard";
 import { getStore } from "./store";
 import type { Demand, DemandVideo } from "./types";
 import {
@@ -95,6 +96,49 @@ demandsRouter.get(
     const columns = [...statuses];
     for (const d of demands) if (!columns.includes(d.status)) columns.push(d.status);
     res.json({ statuses: columns, demands: demands.map((d) => withProgress(d, videos)) });
+  })
+);
+
+// ─── Painel do dia (só superadmin) ───────────────────────────────────
+
+/** Projetos do disco: quando a edição começou e se a análise da IA falhou */
+function projectInfos(): ProjectInfo[] {
+  if (!fs.existsSync(projectsDir)) return [];
+  const out: ProjectInfo[] = [];
+  for (const id of fs.readdirSync(projectsDir)) {
+    try {
+      // só o createdAt: ler a receita inteira (zod + migração) de cada projeto é caro
+      const { createdAt } = JSON.parse(fs.readFileSync(recipePath(id), "utf8")) as { createdAt?: string };
+      if (!createdAt) continue;
+      const a = readAnalysis(id);
+      out.push({ id, createdAt, analysisError: a?.status === "error" ? (a.error ?? "erro") : null });
+    } catch {
+      // pasta sem receita (ou receita quebrada) não é projeto
+    }
+  }
+  return out;
+}
+
+demandsRouter.get(
+  "/api/dashboard/day",
+  wrap(async (req, res) => {
+    if (req.user?.role !== "superadmin") {
+      res.status(403).json({ error: "só o superadmin vê o painel" });
+      return;
+    }
+    const now = new Date();
+    const asked = String(req.query.date ?? "");
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : dayOf(now);
+    const store = getStore();
+    // eventos da janela das médias (+1 dia de folga para o fuso)
+    const since = `${shiftDay(day, -AVERAGE_WINDOW_DAYS - 1)}T00:00:00Z`;
+    const [demands, videos, events, statuses] = await Promise.all([
+      store.listDemands(),
+      store.listVideos(),
+      store.listEventsSince(since),
+      warStatuses(),
+    ]);
+    res.json(buildDayReport({ day, now, statuses, demands, videos, events, projects: projectInfos() }));
   })
 );
 
