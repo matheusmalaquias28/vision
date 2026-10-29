@@ -9,9 +9,10 @@ import { mediaDir, repoRoot } from "../paths";
  * Bundle do Remotion, um por processo. O bundle leva a pasta pública junto
  * (media/: biblioteca + projetos, vários GB); antes cada render fazia um
  * bundle novo e nunca apagava a cópia em %TEMP% — o disco enchia (76 GB em um
- * dia de testes). Agora: no Linux (VPS) a mídia entra como link, sem cópia;
- * o bundle é reaproveitado por todos os renders do processo e apagado quando
- * ele termina; cópias esquecidas por processos mortos são limpas na subida.
+ * dia de testes). Agora a mídia entra como link, sem cópia (Linux: symlink do
+ * Remotion; Windows: junção nossa); o bundle é reaproveitado por todos os
+ * renders do processo e apagado quando ele termina; bundles esquecidos por
+ * processos mortos são limpos na subida.
  */
 
 const ENTRY_POINT = path.join(repoRoot, "packages", "video", "src", "index.ts");
@@ -19,6 +20,8 @@ const ENTRY_POINT = path.join(repoRoot, "packages", "video", "src", "index.ts");
 const STALE_MS = 2 * 60 * 60 * 1000;
 /** Marca do processo dono dentro do bundle: órfão (dono morto) é apagado na hora */
 const OWNER_FILE = ".vision-owner";
+/** Windows: pasta pública vazia para o bundler (a de verdade entra como junção depois) */
+const EMPTY_PUBLIC_DIR = path.join(os.tmpdir(), "vision-empty-public");
 
 function processAlive(pid: number): boolean {
   try {
@@ -57,9 +60,6 @@ export async function releaseBundle(): Promise<void> {
  * no render.
  */
 export function warmBundle(): void {
-  // Windows em dev: o Remotion copia media/ (GBs) e o tsx watch reinicia a cada
-  // edição; lá o bundle fica para o primeiro render. VPS (Linux/produção): na subida.
-  if (process.env.NODE_ENV !== "production" && process.platform === "win32") return;
   const t0 = Date.now();
   getServeUrl()
     .then(() => console.log(`Remotion: bundle pronto em ${((Date.now() - t0) / 1000).toFixed(1)}s`))
@@ -83,17 +83,40 @@ function hookExit(): void {
   }
 }
 
+/**
+ * Windows: o Remotion ignora `symlinkPublicDir` e copiaria media/ inteira
+ * (12 GB levavam 50–75 s a cada subida do servidor). Junção não precisa de
+ * admin; `fs.rmSync` apaga só a junção, nunca o que está em media/. Se a
+ * junção falhar (ex.: disco de rede), volta à cópia antiga.
+ */
+function linkPublicDir(dir: string): void {
+  const pub = path.join(dir, "public");
+  fs.rmSync(pub, { recursive: true, force: true }); // cópia da pasta vazia
+  try {
+    fs.symlinkSync(mediaDir, pub, "junction");
+  } catch (err) {
+    console.warn(
+      "Remotion: junção para media/ falhou, copiando (lento):",
+      err instanceof Error ? err.message : err
+    );
+    fs.cpSync(mediaDir, pub, { recursive: true });
+  }
+}
+
 export function getServeUrl(): Promise<string> {
   if (!current) {
     hookExit();
+    const junction = process.platform === "win32";
+    if (junction) fs.mkdirSync(EMPTY_PUBLIC_DIR, { recursive: true });
     current = bundle({
       entryPoint: ENTRY_POINT,
-      publicDir: mediaDir,
-      // Linux: link para media/ em vez de copiar GBs (no Windows o Remotion sempre copia)
+      publicDir: junction ? EMPTY_PUBLIC_DIR : mediaDir,
+      // Linux: link para media/ em vez de copiar GBs
       symlinkPublicDir: true,
     })
       .then((dir) => {
         currentDir = dir;
+        if (junction) linkPublicDir(dir);
         try {
           fs.writeFileSync(path.join(dir, OWNER_FILE), String(process.pid));
         } catch {
@@ -110,11 +133,11 @@ export function getServeUrl(): Promise<string> {
 }
 
 /**
- * Windows: o Remotion COPIA media/ para o bundle quando ele nasce, então um
- * arquivo criado depois (imagem gerada, clipe enviado, áudio tratado) não
- * existe na cópia e o render trava esperando por ele. Antes de cada render,
- * copia para o bundle os arquivos da receita que faltam ou mudaram. No Linux
- * a pasta pública é um link para media/ e nada é preciso. Devolve quantos copiou.
+ * Só quando a pasta pública do bundle é uma CÓPIA de media/ (Windows com a
+ * junção falhando): um arquivo criado depois (imagem gerada, clipe enviado,
+ * áudio tratado) não existe na cópia e o render trava esperando por ele.
+ * Antes de cada render, copia para o bundle os arquivos da receita que faltam
+ * ou mudaram. Com link/junção para media/ nada é preciso. Devolve quantos copiou.
  */
 export function syncBundleMedia(serveUrl: string, files: string[]): number {
   const pub = path.join(serveUrl, "public");
@@ -220,7 +243,7 @@ export function cleanupStaleRemotionTemp(
   return { removed, bytes };
 }
 
-/** Folga mínima de disco para começar um render (bundle no Windows copia media/ inteira) */
+/** Folga mínima de disco para começar um render (quadros, áudio e o MP4 em %TEMP%) */
 export const MIN_FREE_BYTES = 3 * 1024 ** 3;
 
 /** Espaço livre no disco da pasta temporária (onde o Remotion trabalha); null se não der para medir */

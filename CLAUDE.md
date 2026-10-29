@@ -195,14 +195,24 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   fim. Substitui o antigo Diretor IA (que aplicava cortes de silêncio,
   música, narração e título sem revisão).
 - Render e temporários (`render/bundle.ts`): UM bundle do Remotion por
-  processo (`getServeUrl`, aquecido na subida em produção/Linux; no Windows
-  em dev fica para o 1º render), mídia por link no Linux, CLI apaga no
+  processo (`getServeUrl`, aquecido na subida), mídia por link (Linux:
+  symlink do Remotion; Windows: junção nossa — o Remotion copiaria media/
+  inteira, 12 GB ≈ 1 min; `fs.rmSync` apaga só a junção), CLI apaga no
   `finally` (`releaseBundle`), órfãos (`.vision-owner` com PID morto, ou
   `remotion-*` > 2 h) apagados na subida e no `retention`. Fila = 1 render por
-  vez; render recusa com < 3 GB livres. Nunca chamar `bundle()` direto. No
-  Windows o bundle é uma CÓPIA de media/ da hora em que nasceu: antes de cada
-  render `syncBundleMedia` copia o que a receita usa e é novo
-  (`recipeMediaFiles`). Imagem no render: nunca `<Img onError>` do Remotion
+  vez; render recusa com < 3 GB livres. Nunca chamar `bundle()` direto. Se a
+  junção falhar, o bundle é uma CÓPIA de media/ da hora em que nasceu: antes
+  de cada render `syncBundleMedia` copia o que a receita usa e é novo
+  (`recipeMediaFiles`). Velocidade (`renderJob.ts`, medida NA VPS, 4 vCPU
+  de 2 GHz): x264 `veryfast` (`renderX264Preset`: o medium comia ~1 núcleo
+  do Chrome; mesma imagem, arquivo menor) + abas = núcleos até 8
+  (`renderConcurrency`) = −27%. Um Chrome tira a foto de um quadro por vez
+  (teto ~13 fps até com quadro vazio), então lá o limite é CPU por núcleo;
+  2 Chromes em pedaços, `gl` (swangle/swiftshader/egl), `jpegQuality`,
+  threads de extração, `toneMapped` e o `<Video>` do `@remotion/media` não
+  ganharam. Windows: Chrome na GPU (`renderGl` = angle, −20–27%). Testar
+  render na VPS sem mexer no serviço: `renderToFile` (saída fora do
+  projeto). Imagem no render: nunca `<Img onError>` do Remotion
   (não libera o delayRender no erro e trava até o timeout); ver
   `useImageGate` em `IllustrationMotion.tsx`. Player do editor com
   `numberOfSharedAudioTags` 32 (`PlayerPanel.tsx`): cada trecho tem seu

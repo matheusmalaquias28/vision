@@ -288,8 +288,14 @@ pasta `media/`). Para o disco não encher:
 - **Um bundle por processo**, feito na subida do servidor e reaproveitado por
   todos os renders (antes era um por render, e cada um levava `media/`
   inteira — encheu 76 GB num dia de testes no Windows).
-- **No Linux a mídia entra como link** (`symlinkPublicDir`), sem cópia: o
-  bundle fica com poucos MB.
+- **A mídia entra como link** (Linux: `symlinkPublicDir`; Windows: junção),
+  sem cópia: o bundle fica com poucos MB.
+- **Velocidade (medida na VPS de 4 vCPU de 2 GHz, 8 GB):** ~4–5 quadros/s, ou
+  seja, um vídeo de 30 s a 30 fps leva ~3 min e um de 3 min ~18–20 min. O
+  limite é a velocidade de CADA núcleo (cada um aqui é ~2× mais lento que um
+  Ryzen de desktop) e o Chrome tirar a foto de um quadro por vez: CPU mais
+  rápida ajuda direto, só mais vCPU ajuda pouco. Com 4 GB de RAM, se o render
+  cair por memória, use `Environment=RENDER_CONCURRENCY=2` no `vision.service`.
 - **Comandos pontuais** (`npm run cli -- render`, `motion-sheet`) apagam o
   bundle ao terminar; cada bundle guarda o PID do dono, e a **subida do
   servidor e a limpeza (`retention`) apagam os órfãos** (dono morto, ou
