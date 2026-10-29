@@ -2,11 +2,14 @@ import {
   acceptAudioClip,
   createAudioClip,
   defaultMusicWant,
+  EASING_LABEL,
+  EASINGS,
   outputDuration,
   rankMusic,
   swapMusicClip,
   type Asset,
   type AudioClip,
+  type Easing,
   type Recipe,
 } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
@@ -211,6 +214,32 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
               onChange={(v) => setClip({ fadeOutSeconds: v })}
             />
           </Prop>
+          {(selected.fadeInSeconds > 0 || selected.fadeOutSeconds > 0) && (
+            <Prop label="Curva in / out" hint="Ease in: começa devagar · Ease out: termina devagar · Linear: constante">
+              <Select
+                value={selected.fadeInCurve}
+                disabled={selected.fadeInSeconds <= 0}
+                onChange={(e) => setClip({ fadeInCurve: e.target.value as Easing })}
+              >
+                {EASINGS.map((c) => (
+                  <option key={c} value={c}>
+                    {EASING_LABEL[c]}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={selected.fadeOutCurve}
+                disabled={selected.fadeOutSeconds <= 0}
+                onChange={(e) => setClip({ fadeOutCurve: e.target.value as Easing })}
+              >
+                {EASINGS.map((c) => (
+                  <option key={c} value={c}>
+                    {EASING_LABEL[c]}
+                  </option>
+                ))}
+              </Select>
+            </Prop>
+          )}
           <Prop label="Começar o arquivo em" hint="Pula o início do arquivo (o mesmo que aparar a borda esquerda)">
             <ScrubNumber
               value={selected.offset}

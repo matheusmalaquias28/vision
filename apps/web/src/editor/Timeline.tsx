@@ -27,6 +27,7 @@ import {
   type TrackId,
   sourceToOutput,
   splitAudioClip,
+  splitItemAt,
   splitSegmentAt,
   type Asset,
   type AudioClip,
@@ -92,6 +93,14 @@ const LAYER_LABEL: Record<MotionLayer, string> = {
   element: "elemento",
   fullscreen: "tela cheia",
 };
+
+/** Rampa de entrada/saída ou de fade no começo/fim do bloco: o que a edição aplica fica à vista */
+const Ramps: React.FC<{ inSec: number; outSec: number; pxPerSec: number }> = ({ inSec, outSec, pxPerSec }) => (
+  <>
+    {inSec > 0 && <span className="ramp ramp-in" style={{ width: inSec * pxPerSec }} />}
+    {outSec > 0 && <span className="ramp ramp-out" style={{ width: outSec * pxPerSec }} />}
+  </>
+);
 
 function fileName(file: string): string {
   return file.split("/").pop() ?? file;
@@ -540,6 +549,7 @@ export const Timeline: React.FC<TimelineProps> = ({
    */
   const startOverlayDrag = (e: React.PointerEvent, id: string, mode: "move" | "start" | "end") => {
     if (e.button !== 0) return; // botão direito abre o menu
+    if (tool === "blade") return bladeItem(e, `overlay:${id}`);
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
@@ -607,6 +617,13 @@ export const Timeline: React.FC<TimelineProps> = ({
     const parts = splitAudioClip(clip, bladeTime(e.clientX), `aud_${Date.now().toString(36)}`);
     if (!parts) return;
     setAudioClips(recipe.audioClips.flatMap((c) => (c.id === clip.id ? parts : [c])));
+  };
+
+  /** Lâmina em qualquer outro item (overlay, texto, motion, legenda): divide no instante */
+  const bladeItem = (e: React.PointerEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onChange(splitItemAt(recipe, key, bladeTime(e.clientX)));
   };
 
   /** Clique num trecho de vídeo (ou no áudio dele): corta ou seleciona */
@@ -718,6 +735,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     mode: "move" | "start" | "end"
   ) => {
     if (e.button !== 0) return;
+    if (tool === "blade") return bladeItem(e, `motion:${m.id}`);
     e.preventDefault();
     e.stopPropagation();
     onSelectMotion(m.id);
@@ -877,6 +895,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             {fileName(c.file)}
           </span>
         )}
+        <Ramps inSec={c.fadeInSeconds} outSec={c.fadeOutSeconds} pxPerSec={pxPerSec} />
         <div className="handle handle-l" onPointerDown={drag("start")} />
         <div className="handle handle-r" onPointerDown={drag("end")} />
       </div>
@@ -921,7 +940,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       </button>
     );
     const editable = kind === "segment" || kind === "audio" || kind === "overlay" || kind === "motion";
-    const splittable = kind === "segment" || kind === "audio" || kind === "overlay";
+    const splittable = editable || kind === "caption";
     return (
       <div ref={ctxMenuRef} className="popover ctx-menu" style={{ left: m.x, top: m.y }} onContextMenu={(e) => e.preventDefault()}>
         {motion?.status === "pending" && (
@@ -1026,6 +1045,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     {(seg.sourceEnd - seg.sourceStart).toFixed(1)}s
                   </span>
                 )}
+                <Ramps inSec={seg.enter?.duration ?? 0} outSec={seg.exit?.duration ?? 0} pxPerSec={pxPerSec} />
                 <div className="handle handle-l" onPointerDown={(e) => startEdgeDrag(e, i, "start")} />
                 {multiClip && (
                   <span className="clip-move" onPointerDown={(e) => e.stopPropagation()}>
@@ -1070,8 +1090,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                 data-sel={`caption:${block.id}`}
                 className={`blk cap-blk ${selectedCaption === block.id ? "selected" : ""} ${block.sourceId === null ? "narration" : ""} ${inMulti(`caption:${block.id}`)}`}
                 style={{ left: start * pxPerSec, width: Math.max((end - start) * pxPerSec, 10) }}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => onSelectCaption(block.id === selectedCaption ? null : block.id)}
+                onPointerDown={(e) =>
+                  tool === "blade" && e.button === 0 ? bladeItem(e, `caption:${block.id}`) : e.stopPropagation()
+                }
+                onClick={() => tool !== "blade" && onSelectCaption(block.id === selectedCaption ? null : block.id)}
                 title={text}
               >
                 {text}
@@ -1117,6 +1139,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
                 title={o.text}
               >
+                <Ramps inSec={o.enter?.duration ?? 0} outSec={o.exit?.duration ?? 0} pxPerSec={pxPerSec} />
                 <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
                 {o.text.replace(/\s+/g, " ")}
                 <div className="handle handle-r" onPointerDown={(e) => startOverlayDrag(e, o.id, "end")} />
@@ -1140,6 +1163,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
                 title={o.file ?? ""}
               >
+                <Ramps inSec={o.enter?.duration ?? 0} outSec={o.exit?.duration ?? 0} pxPerSec={pxPerSec} />
                 <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
                 {o.text || o.file?.split("/").pop()}
                 <div className="handle handle-r" onPointerDown={(e) => startOverlayDrag(e, o.id, "end")} />
@@ -1199,7 +1223,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             className={`sm icon ghost ${tool === "blade" ? "active" : ""}`}
             role="radio"
             aria-checked={tool === "blade"}
-            title="Corte (C): clique num trecho de vídeo ou áudio para dividir"
+            title="Corte (C): clique em qualquer item da timeline (vídeo, áudio, texto, overlay, motion, legenda) para dividir"
             onClick={() => onToolChange("blade")}
           >
             <Icon name="scissors" size={15} />

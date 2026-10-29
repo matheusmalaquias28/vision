@@ -1,6 +1,6 @@
 import React from "react";
-import { Audio, interpolate, Sequence, useVideoConfig } from "remotion";
-import type { AudioClip } from "@vision/recipe";
+import { Audio, Sequence, useVideoConfig } from "remotion";
+import { fadeInGain, fadeOutGain, type AudioClip } from "@vision/recipe";
 import { mediaSrc } from "./media";
 
 const ClipAudio: React.FC<{ clip: AudioClip; frames: number }> = ({ clip, frames }) => {
@@ -8,20 +8,11 @@ const ClipAudio: React.FC<{ clip: AudioClip; frames: number }> = ({ clip, frames
   const fadeIn = Math.round(clip.fadeInSeconds * fps);
   const fadeOut = Math.round(clip.fadeOutSeconds * fps);
   // frame relativo à Sequence do clipe: fades valem para o clipe, não para o vídeo
+  // curva de cada fade (linear = o fade de sempre; ease-in/out mudam o formato)
   const volume = (frame: number) => {
     let v = clip.volume;
-    if (fadeIn > 0) {
-      v *= interpolate(frame, [0, fadeIn], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      });
-    }
-    if (fadeOut > 0) {
-      v *= interpolate(frame, [frames - fadeOut, frames], [1, 0], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      });
-    }
+    if (fadeIn > 0) v *= fadeInGain(clip.fadeInCurve, frame, fadeIn);
+    if (fadeOut > 0) v *= fadeOutGain(clip.fadeOutCurve, frames - frame, fadeOut);
     return v;
   };
   return (

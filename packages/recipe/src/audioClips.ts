@@ -87,6 +87,8 @@ export function createAudioClip(opts: {
     volume: isMusic ? 0.12 : 0.8,
     fadeInSeconds: isMusic ? round3(Math.min(1, duration / 4)) : 0,
     fadeOutSeconds: isMusic ? round3(Math.min(2, duration / 4)) : 0,
+    fadeInCurve: "linear",
+    fadeOutCurve: "linear",
     loop: isMusic && media === null,
     mediaDurationSeconds: media,
     assetId: opts.assetId ?? null,

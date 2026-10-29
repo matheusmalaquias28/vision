@@ -1,3 +1,4 @@
+export * from "./animations";
 export * from "./audioClips";
 export * from "./captions";
 export * from "./clipboard";

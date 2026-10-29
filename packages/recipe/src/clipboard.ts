@@ -142,7 +142,11 @@ export function pasteItems(recipe: Recipe, data: ClipboardData, at: number): { r
   };
 }
 
-/** Dividir no instante `at`: trecho de vídeo, clipe de áudio ou overlay. Fora dele, nada muda */
+/**
+ * Dividir no instante `at` (lâmina e "dividir aqui"): trecho de vídeo, clipe
+ * de áudio, overlay/texto, motion ou bloco de legenda. Fora do item, nada
+ * muda. Entrada fica no primeiro pedaço e saída no segundo.
+ */
 export function splitItemAt(recipe: Recipe, key: string, at: number): Recipe {
   const id = idOf(key);
   const segments = recipe.timeline.segments;
@@ -163,10 +167,56 @@ export function splitItemAt(recipe: Recipe, key: string, at: number): Recipe {
     const end = o ? (o.end ?? outputDuration(segments)) : 0;
     if (!o || at - o.start < 0.1 || end - at < 0.1) return recipe;
     const taken = new Set(recipe.overlays.map((x) => x.id));
-    const second: Overlay = { ...o, id: freshId(`${o.id}_`, taken), start: r2(at) };
+    const second: Overlay = { ...o, id: freshId(`${o.id}_`, taken), start: r2(at), enter: null };
     return {
       ...recipe,
-      overlays: recipe.overlays.flatMap((x) => (x.id === id ? [{ ...x, end: r2(at) }, second] : [x])),
+      overlays: recipe.overlays.flatMap((x) => (x.id === id ? [{ ...x, end: r2(at), exit: null }, second] : [x])),
+    };
+  }
+  if (key.startsWith("motion:")) {
+    const m = recipe.motions.find((x) => x.id === id);
+    const start = m ? sourceToOutput(segments, m.sourceId, m.sourceTime) : null;
+    if (!m || start === null) return recipe;
+    const end = start + m.durationSeconds;
+    // os dois pedaços precisam do mínimo do schema (0,1 s)
+    if (at - start < 0.1 || end - at < 0.1) return recipe;
+    const anchor = outputToSource(segments, at);
+    if (!anchor) return recipe;
+    const taken = new Set(recipe.motions.map((x) => x.id));
+    const second: Motion = {
+      ...m,
+      id: freshId(`${m.id}_`, taken),
+      sourceId: anchor.sourceId,
+      sourceTime: r3(anchor.seconds),
+      durationSeconds: r2(end - at),
+    };
+    return {
+      ...recipe,
+      motions: recipe.motions.flatMap((x) => (x.id === id ? [{ ...x, durationSeconds: r2(at - start) }, second] : [x])),
+    };
+  }
+  if (key.startsWith("caption:")) {
+    const blocks = recipe.captions.blocks;
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return recipe;
+    // palavra fica do lado em que está o meio dela (legenda de narração já está no tempo final)
+    let cut = at;
+    if (b.sourceId !== null) {
+      const src = outputToSource(segments, at);
+      if (!src || src.sourceId !== b.sourceId) return recipe;
+      cut = src.seconds;
+    }
+    const first = b.words.filter((w) => (w.start + w.end) / 2 < cut);
+    const rest = b.words.filter((w) => (w.start + w.end) / 2 >= cut);
+    if (first.length === 0 || rest.length === 0) return recipe;
+    const taken = new Set(blocks.map((x) => x.id));
+    const second = { ...b, id: freshId(`${b.id}_`, taken), words: rest };
+    return {
+      ...recipe,
+      captions: {
+        ...recipe.captions,
+        blocks: blocks.flatMap((x) => (x.id === id ? [{ ...x, words: first }, second] : [x])),
+      },
     };
   }
   return recipe;

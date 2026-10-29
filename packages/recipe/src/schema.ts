@@ -66,12 +66,50 @@ export const CaptionStyleSchema = z.object({
   placement: PointSchema.nullable().default(null),
 });
 
+/**
+ * Efeitos padronizados de entrada e saída de um elemento da timeline (trecho
+ * de vídeo, overlay, texto). Biblioteca fechada: a curva sai de `animations.ts`.
+ * fade · slide-*: desliza na direção do nome · zoom-in: cresce · zoom-out:
+ * encolhe · blur: foca/desfoca · pop: com quique · wipe: revela/esconde da
+ * esquerda para a direita.
+ */
+export const ANIM_EFFECTS = [
+  "fade",
+  "slide-up",
+  "slide-down",
+  "slide-left",
+  "slide-right",
+  "zoom-in",
+  "zoom-out",
+  "blur",
+  "pop",
+  "wipe",
+] as const;
+export type AnimEffect = (typeof ANIM_EFFECTS)[number];
+
+/** Curvas de tempo (entradas/saídas e fades de áudio) */
+export const EASINGS = ["linear", "ease-in", "ease-out", "ease-in-out"] as const;
+export type Easing = (typeof EASINGS)[number];
+
+export const ElementAnimSchema = z.object({
+  effect: z.enum(ANIM_EFFECTS),
+  duration: z.number().min(0.1).max(3).default(0.5),
+  easing: z.enum(EASINGS).default("ease-out"),
+});
+export type ElementAnim = z.infer<typeof ElementAnimSchema>;
+
 export const SegmentSchema = z
   .object({
     id: z.string().min(1),
     sourceId: z.string().min(1),
     sourceStart: seconds,
     sourceEnd: seconds,
+    /**
+     * Entrada/saída do trecho (ausente/null = corte seco). Dividir o trecho
+     * deixa a entrada só no primeiro pedaço e a saída só no último.
+     */
+    enter: ElementAnimSchema.nullish(),
+    exit: ElementAnimSchema.nullish(),
   })
   .refine((s) => s.sourceEnd > s.sourceStart, {
     message: "segment: duração deve ser positiva",
@@ -128,6 +166,9 @@ export const AudioClipSchema = z.object({
   /** Fades relativos ao próprio clipe */
   fadeInSeconds: seconds.default(0),
   fadeOutSeconds: seconds.default(0),
+  /** Curva de cada fade (linear = como sempre foi) */
+  fadeInCurve: z.enum(EASINGS).default("linear"),
+  fadeOutCurve: z.enum(EASINGS).default("linear"),
   /** Repete o arquivo se o clipe for mais longo que ele (trilha de fundo) */
   loop: z.boolean().default(false),
   mediaDurationSeconds: z.number().positive().nullable().default(null),
@@ -183,7 +224,9 @@ export const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "cor deve se
 export const TitleStyleSchema = z.object({
   /** px num quadro de 1080 de largura */
   fontSize: z.number().min(16).max(240).default(58),
-  fontWeight: z.number().int().min(300).max(900).default(900),
+  /** Fonte do Google Fonts (null = a mesma da legenda, como o título antigo) */
+  fontFamily: z.string().trim().min(1).nullable().default(null),
+  fontWeight: z.number().int().min(100).max(900).default(900),
   uppercase: z.boolean().default(true),
   align: z.enum(["left", "center", "right"]).default("center"),
   color: HexColorSchema.default("#FFFFFF"),
@@ -231,6 +274,9 @@ export const OverlaySchema = z
     framing: FramingSchema.nullable().default(null),
     /** Só no kind "title" */
     titleStyle: TitleStyleSchema.default({}),
+    /** Entrada/saída (null = a padrão do layout: pop do sticker, entrada do texto, corte seco no resto) */
+    enter: ElementAnimSchema.nullable().default(null),
+    exit: ElementAnimSchema.nullable().default(null),
   })
   .refine((o) => (o.kind === "title" ? o.text.length > 0 : o.file !== null), {
     message: "overlay: title exige text; image/video exigem file",

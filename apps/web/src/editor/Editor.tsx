@@ -76,6 +76,7 @@ import { MediaPanel } from "./MediaPanel";
 import { MotionGallery } from "./MotionGallery";
 import { insertCombo, insertMotion, MotionPanel } from "./MotionPanel";
 import { OverlayPanel } from "./OverlayPanel";
+import { SegmentPanel } from "./SegmentPanel";
 import { TextPanel } from "./TextPanel";
 import { PipelineStep } from "./PipelineStep";
 import { PlayerPanel } from "./PlayerPanel";
@@ -777,6 +778,8 @@ export const Editor: React.FC<EditorProps> = ({
       setSelectedAudioClip(null);
       setSelectedOverlay(null);
       setSelectedMotion(null);
+      // entrada e saída do trecho ficam na aba Mídia
+      setTab("midia");
     }
   };
   const selectAudioClip = (id: string | null) => {
@@ -959,6 +962,8 @@ export const Editor: React.FC<EditorProps> = ({
               text: "",
               file: up.file,
               titleStyle: DEFAULT_TITLE_STYLE,
+              enter: null,
+              exit: null,
               start,
               end: Math.round(Math.min(start + length, total) * 100) / 100,
               // vídeo por cima entra sem som (Overlays é trilha visual)
@@ -1350,6 +1355,7 @@ export const Editor: React.FC<EditorProps> = ({
             )}
             {tab === "midia" && (
               <>
+                {selectedSegment && <SegmentPanel recipe={recipe} segmentId={selectedSegment} onChange={update} />}
                 <MediaPanel recipe={recipe} playheadSeconds={playheadOutput} onChange={update} />
                 <OverlayPanel
                   recipe={recipe}

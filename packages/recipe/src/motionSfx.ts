@@ -135,6 +135,8 @@ function clipFor(m: Motion, motionStart: number, asset: Asset, start?: number, v
     volume: volume ?? style.volume,
     fadeInSeconds: 0,
     fadeOutSeconds: media > duration ? r2(Math.min(0.3, duration / 3)) : 0,
+    fadeInCurve: "linear",
+    fadeOutCurve: "linear",
     loop: false,
     mediaDurationSeconds: asset.durationSeconds,
     assetId: asset.id,

@@ -2030,6 +2030,26 @@ kbd {
   border-color: var(--trk-audio);
 }
 
+/* rampa de entrada/saída (vídeo, overlay, texto) e de fade (áudio): metade escura em diagonal */
+.ramp {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  max-width: 50%;
+  pointer-events: none;
+}
+
+.ramp-in {
+  left: 0;
+  background: linear-gradient(to top right, transparent calc(50% - 0.5px), oklch(1 0 0 / 0.7) 50%, oklch(0.1 0.01 265 / 0.5) calc(50% + 0.5px));
+}
+
+.ramp-out {
+  right: 0;
+  background: linear-gradient(to top left, transparent calc(50% - 0.5px), oklch(1 0 0 / 0.7) 50%, oklch(0.1 0.01 265 / 0.5) calc(50% + 0.5px));
+}
+
 .handle {
   position: absolute;
   top: 0;

@@ -130,7 +130,7 @@ describe("enforceLanes", () => {
     expect(out.overlays.find((o) => o.id === "h")).toMatchObject({ start: 0, end: null });
     expect(out.overlays.find((o) => o.id === "h2")).toMatchObject({ start: 3, end: 5 });
     expect(laneSpansFor(out, "overlay:h")).toEqual([]);
-    expect(headline.titleStyle).toMatchObject({ fontSize: 58, uppercase: true, strokeWidth: 10 });
+    expect(headline.titleStyle).toMatchObject({ fontSize: 58, fontFamily: null, uppercase: true, strokeWidth: 10 });
   });
 });
 

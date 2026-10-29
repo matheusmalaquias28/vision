@@ -71,4 +71,64 @@ describe("clipboard", () => {
       [2, 3],
     ]);
   });
+
+  it("lâmina em motion: dois pedaços, o segundo ancorado no corte", () => {
+    const r = recipe();
+    const out = splitItemAt(r, "motion:m1", 3);
+    const parts = placeMotions(out, true).filter((p) => p.motion.kind === "keyword");
+    expect(parts.map((p) => [p.outputStart, p.motion.durationSeconds])).toEqual([
+      [2, 1],
+      [3, 1],
+    ]);
+    expect(parts[1].motion).toMatchObject({ group: "impact-hook:1", params: { text: "OI" } });
+    // pedaço menor que o mínimo: não divide
+    expect(splitItemAt(r, "motion:m1", 2.05)).toBe(r);
+  });
+
+  it("lâmina na legenda: palavras vão para o lado do meio delas", () => {
+    const base = recipe();
+    const r = parseRecipe({
+      ...base,
+      captions: {
+        blocks: [
+          {
+            id: "b1",
+            sourceId: "src_01",
+            words: [
+              { text: "um", start: 13, end: 13.4 },
+              { text: "dois", start: 13.5, end: 14 },
+              { text: "três", start: 14.2, end: 14.8 },
+            ],
+          },
+        ],
+      },
+    });
+    // 13.9 s da fonte = 11.9 s do vídeo final (o 1º trecho tem 10 s, o 2º começa em 12)
+    const blocks = splitItemAt(r, "caption:b1", 11.9).captions.blocks;
+    expect(blocks.map((b) => b.words.map((w) => w.text))).toEqual([["um", "dois"], ["três"]]);
+    expect(splitItemAt(r, "caption:b1", 10.5)).toBe(r);
+  });
+
+  it("dividir mantém a entrada no 1º pedaço e a saída no 2º", () => {
+    const base = recipe();
+    const fade = { effect: "fade" as const, duration: 0.5, easing: "ease-out" as const };
+    const r = {
+      ...base,
+      overlays: base.overlays.map((o) => ({ ...o, enter: fade, exit: fade })),
+      timeline: {
+        ...base.timeline,
+        segments: base.timeline.segments.map((s) => ({ ...s, enter: fade, exit: fade })),
+      },
+    };
+    const ov = splitItemAt(r, "overlay:o1", 2).overlays;
+    expect(ov.map((o) => [o.enter?.effect ?? null, o.exit?.effect ?? null])).toEqual([
+      ["fade", null],
+      [null, "fade"],
+    ]);
+    const segs = splitItemAt(r, "segment:seg_02", 15).timeline.segments.slice(1);
+    expect(segs.map((s) => [s.enter?.effect ?? null, s.exit?.effect ?? null])).toEqual([
+      ["fade", null],
+      [null, "fade"],
+    ]);
+  });
 });

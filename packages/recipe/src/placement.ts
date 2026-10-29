@@ -99,6 +99,8 @@ export function overlayFromAsset(
     text: asset.name,
     file: asset.file,
     titleStyle: DEFAULT_TITLE_STYLE,
+    enter: null,
+    exit: null,
     start: round2(start),
     end,
     position,

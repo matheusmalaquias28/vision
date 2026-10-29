@@ -59,6 +59,8 @@ function sfxAtCuts(recipe: Recipe): AudioClip[] {
         volume: 0.5,
         fadeInSeconds: 0,
         fadeOutSeconds: 0,
+        fadeInCurve: "linear",
+        fadeOutCurve: "linear",
         loop: false,
         mediaDurationSeconds: null,
         assetId: null,

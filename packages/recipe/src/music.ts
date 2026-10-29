@@ -190,6 +190,8 @@ export function suggestMusicClip<R extends {
     volume: SUGGESTED_MUSIC_VOLUME,
     fadeInSeconds: Math.min(1, duration / 4),
     fadeOutSeconds: Math.min(2, duration / 4),
+    fadeInCurve: "linear",
+    fadeOutCurve: "linear",
     loop: media !== null && media < duration,
     mediaDurationSeconds: media,
     assetId: pick.asset.id,

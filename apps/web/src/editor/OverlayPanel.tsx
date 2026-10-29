@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { listAssets, uploadAsset, type MusicTrack } from "../api";
 import { inspectMediaFile } from "./mediaFiles";
 import { Prop, ScrubNumber, Section, Segmented, Select, Slider, Toggle } from "../ui/controls";
+import { AnimFields } from "./AnimFields";
 import { FramingFields } from "./FramingFields";
 import { Icon } from "./Icon";
 
@@ -16,6 +17,8 @@ const DEFAULTS = {
   placement: null,
   framing: null,
   titleStyle: DEFAULT_TITLE_STYLE,
+  enter: null,
+  exit: null,
 };
 
 function newId(overlays: Overlay[]): string {
@@ -290,6 +293,16 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
               <Icon name="trash" size={13} /> Remover overlay
             </button>
           </div>
+        </Section>
+      )}
+      {overlay && (
+        <Section key={`${overlay.id}-anim`} title="Overlay · entrada e saída">
+          <AnimFields
+            enter={overlay.enter}
+            exit={overlay.exit}
+            noneLabel={overlay.layout === "sticker" ? "Padrão (pop / fade)" : "Nenhum (corte seco)"}
+            onChange={patch}
+          />
         </Section>
       )}
     </>

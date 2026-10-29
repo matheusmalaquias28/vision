@@ -246,8 +246,9 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `zoom` no elemento `data-vision-drag` do motion (`Motions.tsx`): cresce sem
   sair do lugar do layout e sem mexer na animação. Padrão 1 = render antigo.
 - Texto livre (headline, aviso): overlay `kind: "title"` com `titleStyle`
-  (tamanho, peso, caixa alta, alinhamento, cor, contorno, faixa atrás por
-  linha, largura máx.; padrões = título antigo). À parte da legenda: aba
+  (fonte — null = a da legenda —, tamanho, peso, caixa alta, alinhamento,
+  cor, contorno, faixa atrás por linha, largura máx.; padrões = título
+  antigo). Fonte e peso: `FontFields.tsx`, o mesmo seletor da legenda. À parte da legenda: aba
   "Texto" (`TextPanel.tsx`), trilha própria "Textos" logo acima de Overlays,
   fora da regra de camada (`lanes.ts`: convive com outros textos e com as
   mídias, sobrepostos descem de sub-linha). O painel de Overlays só tem mídia.
@@ -268,10 +269,22 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
 - Menu do botão direito na timeline + Ctrl+C/X/V/D (`clipboard.ts`:
   `copyItems`/`pasteItems`/`splitItemAt`, por chave "tipo:id" do
   `data-sel`): recortar, copiar, colar no instante clicado (Ctrl+V: no
-  playhead), duplicar logo depois, dividir aqui (trecho, áudio, overlay),
-  apagar, aceitar/recusar sugestão. Colado vira aceito; combo colado ganha
-  grupo novo; som colado se solta do motion. Ações em `timelineAction`
-  (`Editor.tsx`); seleção única é exclusiva entre trecho/áudio/overlay/motion.
+  playhead), duplicar logo depois, dividir aqui, apagar, aceitar/recusar
+  sugestão. Colado vira aceito; combo colado ganha grupo novo; som colado se
+  solta do motion. Ações em `timelineAction` (`Editor.tsx`); seleção única é
+  exclusiva entre trecho/áudio/overlay/motion. Dividir (menu e lâmina C) vale
+  para TODO item: trecho, áudio, overlay/texto, motion (o 2º pedaço ancora no
+  corte) e bloco de legenda (cada palavra vai para o lado do meio dela).
+- Entrada e saída (`ElementAnimSchema`: efeito da biblioteca fechada
+  `ANIM_EFFECTS` + duração + curva `EASINGS`; contas em `animations.ts`,
+  `animAt`): `enter`/`exit` no trecho de vídeo (aba Mídia ao clicar no
+  trecho, `SegmentPanel.tsx`), no overlay e no texto (null = padrão antigo do
+  layout: pop do sticker, entrada do texto, corte seco). Render por
+  `useElementAnim` + `withAnim` (`packages/video/src/anim.ts`). Dividir ou
+  cortar um trecho/overlay deixa a entrada no 1º pedaço e a saída no último
+  (`segmentHead`/`segmentTail`). Áudio: `fadeInCurve`/`fadeOutCurve` (linear =
+  fade antigo; a curva vale para o movimento do volume). Na timeline, rampas
+  em diagonal no começo/fim do bloco (`Ramps`) mostram entrada/saída e fades.
 - Ação do servidor que lê a receita gravada (Tratar áudio, narração, passos
   do topo) grava antes as edições não salvas (`saveIfDirty`); o áudio
   tratado entra por `serverPatch` sobre a receita atual (edição feita

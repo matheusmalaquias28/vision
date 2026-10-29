@@ -1,6 +1,8 @@
 import { DEFAULT_TITLE_STYLE, outputDuration, type Overlay, type Recipe, type TitleStyle } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import { ColorField, Prop, ScrubNumber, Section, Segmented, Slider, Toggle } from "../ui/controls";
+import { AnimFields } from "./AnimFields";
+import { FontFields, WeightField } from "./FontFields";
 import { Icon } from "./Icon";
 
 interface TextPanelProps {
@@ -21,13 +23,6 @@ const HEADLINE_STYLE: TitleStyle = {
   boxColor: "#000000",
   maxWidth: 86,
 };
-
-const WEIGHTS = [
-  { value: 500, label: "Médio" },
-  { value: 700, label: "Negrito" },
-  { value: 800, label: "Extra" },
-  { value: 900, label: "Black" },
-];
 
 function newId(overlays: Overlay[]): string {
   return `tx_${String(overlays.length + 1).padStart(2, "0")}_${Date.now().toString(36)}`;
@@ -94,6 +89,8 @@ export const TextPanel: React.FC<TextPanelProps> = ({ recipe, selectedId, playhe
       placement: null,
       framing: null,
       titleStyle: headline ? HEADLINE_STYLE : DEFAULT_TITLE_STYLE,
+      enter: null,
+      exit: null,
     };
     onChange({ ...recipe, overlays: [...recipe.overlays, o] });
     onSelect(o.id);
@@ -202,6 +199,11 @@ export const TextPanel: React.FC<TextPanelProps> = ({ recipe, selectedId, playhe
           </Section>
 
           <Section title="Texto · estilo">
+            <FontFields
+              value={s.fontFamily}
+              onChange={(f) => setStyle({ fontFamily: f })}
+              inherit={`Mesma da legenda · ${recipe.captions.style.fontFamily}`}
+            />
             <Prop label="Tamanho" hint="Também pela alça no canto do texto, no preview">
               <Slider
                 value={s.fontSize}
@@ -212,14 +214,11 @@ export const TextPanel: React.FC<TextPanelProps> = ({ recipe, selectedId, playhe
                 onChange={(v) => setStyle({ fontSize: v })}
               />
             </Prop>
-            <Prop label="Peso">
-              <Segmented
-                size="sm"
-                value={WEIGHTS.some((w) => w.value === s.fontWeight) ? s.fontWeight : 900}
-                options={WEIGHTS}
-                onChange={(v) => setStyle({ fontWeight: v })}
-              />
-            </Prop>
+            <WeightField
+              family={s.fontFamily ?? recipe.captions.style.fontFamily}
+              value={s.fontWeight}
+              onChange={(w) => setStyle({ fontWeight: w })}
+            />
             <Prop label="Alinhar">
               <Segmented
                 size="sm"
@@ -271,6 +270,10 @@ export const TextPanel: React.FC<TextPanelProps> = ({ recipe, selectedId, playhe
                 onChange={(v) => setStyle({ maxWidth: v })}
               />
             </Prop>
+          </Section>
+
+          <Section title="Texto · entrada e saída">
+            <AnimFields enter={text.enter} exit={text.exit} noneLabel="Padrão do texto" onChange={patch} />
           </Section>
         </>
       )}

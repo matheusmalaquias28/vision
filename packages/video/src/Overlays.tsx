@@ -13,9 +13,11 @@ import {
 import {
   framingStyle,
   outputDuration,
+  type AnimCss,
   type Overlay,
   type Recipe,
 } from "@vision/recipe";
+import { useElementAnim, withAnim } from "./anim";
 import { useGoogleFont } from "./fonts";
 import { mediaSrc } from "./media";
 import { AtPoint, dragProps } from "./Positioned";
@@ -27,8 +29,12 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = overlay.titleStyle;
-  useGoogleFont(fontFamily, s.fontWeight);
-  const enter = spring({ frame, fps, config: { damping: 200 }, durationInFrames: 8 });
+  // fonte própria do texto; sem ela, a da legenda (título antigo)
+  const family = s.fontFamily ?? fontFamily;
+  useGoogleFont(family, s.fontWeight);
+  const anim = useElementAnim(overlay.enter, overlay.exit);
+  // entrada própria do texto (projetos antigos) só sem entrada escolhida
+  const enter = overlay.enter ? 1 : spring({ frame, fps, config: { damping: 200 }, durationInFrames: 8 });
   const justify =
     overlay.position === "top"
       ? "flex-start"
@@ -38,10 +44,10 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
   const title = (
     <div
       {...dragProps(`overlay:${overlay.id}`)}
-      style={{
+      style={withAnim({
         maxWidth: `${s.maxWidth}%`,
         textAlign: s.align,
-        fontFamily: `'${fontFamily}', 'Arial Black', sans-serif`,
+        fontFamily: `'${family}', 'Arial Black', sans-serif`,
         fontWeight: s.fontWeight,
         fontSize: s.fontSize,
         color: s.color,
@@ -51,9 +57,9 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
         WebkitTextStroke: s.strokeWidth > 0 ? `${s.strokeWidth}px ${s.strokeColor}` : undefined,
         paintOrder: "stroke",
         lineHeight: s.boxColor ? 1.4 : undefined,
-        transform: `scale(${0.9 + enter * 0.1}) translateY(${(1 - enter) * -30}px)`,
+        transform: enter < 1 ? `scale(${0.9 + enter * 0.1}) translateY(${(1 - enter) * -30}px)` : undefined,
         opacity: enter,
-      }}
+      }, anim)}
     >
       {s.boxColor ? (
         // caixa por linha (clone): cada linha ganha sua faixa, como headline de reels
@@ -125,27 +131,32 @@ const Media: React.FC<{ overlay: Overlay; fit: "cover" | "contain" }> = ({ overl
   );
 };
 
-/** Elemento solto (ícone, personagem): entra com pop, sai com fade */
-const Sticker: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
+/** Elemento solto (ícone, personagem): entra com pop, sai com fade (sem entrada/saída escolhida) */
+const Sticker: React.FC<{ overlay: Overlay; anim: AnimCss | null }> = ({ overlay, anim }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
-  const enter = spring({ frame, fps, config: { damping: 13, stiffness: 190 } });
-  const exit = interpolate(frame, [durationInFrames - 6, durationInFrames], [1, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const enter = overlay.enter ? 1 : spring({ frame, fps, config: { damping: 13, stiffness: 190 } });
+  const exit = overlay.exit
+    ? 1
+    : interpolate(frame, [durationInFrames - 6, durationInFrames], [1, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
   // % de top relativo à ALTURA do quadro (não usar padding-top %: é da largura)
   const top = overlay.position === "top" ? "8%" : overlay.position === "center" ? "30%" : undefined;
   const sticker = (
     <div
       {...dragProps(`overlay:${overlay.id}`)}
-      style={{
-        width: `${overlay.scale * 100}%`,
-        opacity: overlay.opacity * exit,
-        transform: `scale(${interpolate(enter, [0, 1], [0.5, 1])})`,
-        transformOrigin: overlay.position === "bottom" ? "50% 100%" : "50% 50%",
-        mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
-      }}
+      style={withAnim(
+        {
+          width: `${overlay.scale * 100}%`,
+          opacity: overlay.opacity * exit,
+          transform: enter < 1 ? `scale(${interpolate(enter, [0, 1], [0.5, 1])})` : undefined,
+          transformOrigin: overlay.position === "bottom" ? "50% 100%" : "50% 50%",
+          mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
+        },
+        anim
+      )}
     >
       <Media overlay={overlay} fit="contain" />
     </div>
@@ -171,18 +182,22 @@ const Sticker: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
 };
 
 const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
+  const anim = useElementAnim(overlay.enter, overlay.exit);
   if (!overlay.file) return null;
 
-  if (overlay.layout === "sticker") return <Sticker overlay={overlay} />;
+  if (overlay.layout === "sticker") return <Sticker overlay={overlay} anim={anim} />;
 
   if (overlay.layout === "fullscreen") {
     // fundos/transições/molduras: cobrem o quadro e mesclam com o vídeo
     return (
       <AbsoluteFill
-        style={{
-          opacity: overlay.opacity,
-          mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
-        }}
+        style={withAnim(
+          {
+            opacity: overlay.opacity,
+            mixBlendMode: overlay.blend === "normal" ? undefined : overlay.blend,
+          },
+          anim
+        )}
       >
         <Media overlay={overlay} fit="cover" />
       </AbsoluteFill>
@@ -196,7 +211,9 @@ const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
     // (VisionComposition) — cada um com o próprio enquadramento
     return (
       // AbsoluteFill fixa height 100%: a metade precisa de height explícito
-      <AbsoluteFill style={{ overflow: "hidden", height: "50%", top: overlay.layout === "split-top" ? 0 : "50%" }}>
+      <AbsoluteFill
+        style={withAnim({ overflow: "hidden", height: "50%", top: overlay.layout === "split-top" ? 0 : "50%" }, anim)}
+      >
         {media}
       </AbsoluteFill>
     );
@@ -215,14 +232,17 @@ const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
     const pip = (
       <div
         {...dragProps(`overlay:${overlay.id}`)}
-        style={{
-          ...box,
-          aspectRatio: "9 / 16",
-          borderRadius: 24,
-          overflow: "hidden",
-          border: "4px solid white",
-          boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
-        }}
+        style={withAnim(
+          {
+            ...box,
+            aspectRatio: "9 / 16",
+            borderRadius: 24,
+            overflow: "hidden",
+            border: "4px solid white",
+            boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
+          },
+          anim
+        )}
       >
         {media}
       </div>
@@ -233,12 +253,15 @@ const MediaOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
   const card = (
     <div
       {...dragProps(`overlay:${overlay.id}`)}
-      style={{
-        width: "86%",
-        borderRadius: 24,
-        overflow: "hidden",
-        boxShadow: "0 12px 50px rgba(0,0,0,0.6)",
-      }}
+      style={withAnim(
+        {
+          width: "86%",
+          borderRadius: 24,
+          overflow: "hidden",
+          boxShadow: "0 12px 50px rgba(0,0,0,0.6)",
+        },
+        anim
+      )}
     >
       {media}
     </div>

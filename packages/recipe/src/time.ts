@@ -1,3 +1,4 @@
+import { segmentHead, segmentTail } from "./animations";
 import type { Segment, SuggestedCut } from "./schema";
 
 // Segmentos menores que isso são descartados ao aplicar um corte
@@ -102,20 +103,16 @@ export function applyCutToSegments(
       result.push(s);
       continue;
     }
-    const left: Segment = {
-      ...s,
-      sourceEnd: Math.min(cutStart, s.sourceEnd),
-    };
-    const right: Segment = {
-      ...s,
-      sourceStart: Math.max(cutEnd, s.sourceStart),
-    };
+    const left: Segment = { ...s, sourceEnd: Math.min(cutStart, s.sourceEnd) };
+    const right: Segment = { ...s, sourceStart: Math.max(cutEnd, s.sourceStart) };
     const keepLeft = segmentDuration(left) >= MIN_SEGMENT_SECONDS;
     const keepRight = segmentDuration(right) >= MIN_SEGMENT_SECONDS;
-    if (keepLeft) result.push(left);
+    // sobraram as duas: a entrada fica na da esquerda e a saída na da direita
+    // (sobrou uma só: ela é o trecho inteiro e fica com as duas)
+    if (keepLeft) result.push(keepRight ? segmentHead(left) : left);
     // sobra direita herda o id quando é a única parte que restou
     if (keepRight) {
-      result.push(keepLeft ? { ...right, id: freshSegmentId(s.id, taken) } : right);
+      result.push(keepLeft ? { ...segmentTail(right), id: freshSegmentId(s.id, taken) } : right);
     }
   }
   return result;
@@ -209,9 +206,9 @@ export function insertClipSegment(
     if (!inserted && at > acc && at < acc + dur) {
       // divide o segmento no ponto de inserção
       const splitRaw = s.sourceStart + (at - acc);
-      result.push({ ...s, sourceEnd: splitRaw });
+      result.push({ ...segmentHead(s), sourceEnd: splitRaw });
       result.push(clip);
-      result.push({ ...s, id: freshSegmentId(s.id, taken), sourceStart: splitRaw });
+      result.push({ ...segmentTail(s), id: freshSegmentId(s.id, taken), sourceStart: splitRaw });
       inserted = true;
     } else {
       if (!inserted && at <= acc) {
@@ -242,8 +239,8 @@ export function splitSegmentAt(segments: Segment[], atOutputSeconds: number): Se
       const split = Math.round((s.sourceStart + local) * 1000) / 1000;
       return [
         ...segments.slice(0, i),
-        { ...s, sourceEnd: split },
-        { ...s, id: freshSegmentId(s.id, taken), sourceStart: split },
+        { ...segmentHead(s), sourceEnd: split },
+        { ...segmentTail(s), id: freshSegmentId(s.id, taken), sourceStart: split },
         ...segments.slice(i + 1),
       ];
     }

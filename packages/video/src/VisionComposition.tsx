@@ -21,6 +21,7 @@ import {
   type Source,
   type VisualLayer,
 } from "@vision/recipe";
+import { useElementAnim, withAnim } from "./anim";
 import { AudioClips } from "./AudioClips";
 import { Captions } from "./Captions";
 import { Motions } from "./Motions";
@@ -40,10 +41,12 @@ const SegmentVideo: React.FC<{
   const enhanced = useEnhanced && source.enhancedAudio !== null;
   const trim = Math.round(segment.sourceStart * fps);
   const temp = temperatureLayer(source.color);
+  // entrada/saída do trecho (o fundo do quadro aparece por trás: preto)
+  const anim = useElementAnim(segment.enter, segment.exit);
   return (
     <>
       {/* isolado: a camada de temperatura só mistura com o vídeo, nunca com legenda/motions */}
-      <AbsoluteFill style={{ isolation: "isolate", overflow: "hidden" }}>
+      <AbsoluteFill style={withAnim({ isolation: "isolate", overflow: "hidden" }, anim)}>
         <OffthreadVideo
           src={mediaSrc(proxyFile ?? source.file)}
           trimBefore={trim}
