@@ -1,5 +1,5 @@
 import type { Asset } from "./library";
-import type { Overlay, Segment } from "./schema";
+import { DEFAULT_TITLE_STYLE, type Overlay, type Segment } from "./schema";
 import { outputDuration, segmentDuration } from "./time";
 
 /** Transição a até essa distância (s) de um corte gruda nele */
@@ -98,6 +98,7 @@ export function overlayFromAsset(
     kind,
     text: asset.name,
     file: asset.file,
+    titleStyle: DEFAULT_TITLE_STYLE,
     start: round2(start),
     end,
     position,

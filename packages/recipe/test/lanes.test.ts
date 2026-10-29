@@ -100,7 +100,7 @@ describe("enforceLanes", () => {
     const base = recipe();
     const before: Recipe = {
       ...base,
-      overlays: [{ ...parseRecipe({ ...base, overlays: [{ id: "o1", kind: "title", text: "A", start: 0, end: 5 }] }).overlays[0] }],
+      overlays: [{ ...parseRecipe({ ...base, overlays: [{ id: "o1", kind: "image", file: "media/a.png", start: 0, end: 5 }] }).overlays[0] }],
       audioClips: parseRecipe({ ...base, audioClips: [{ id: "m1", kind: "music", file: "media/m.mp3", start: 0, duration: 10 }] }).audioClips,
     };
     const next: Recipe = {
@@ -112,6 +112,25 @@ describe("enforceLanes", () => {
     expect(out.overlays.find((o) => o.id === "o2")).toMatchObject({ start: 5, end: 8 });
     expect(out.audioClips.find((c) => c.id === "m2")?.start).toBe(10);
     expect(laneSpansFor(out, "overlay:o2")).toEqual([expect.objectContaining({ start: 0, end: 5 })]);
+  });
+
+  it("texto livre (headline) fica onde está, junto de imagens e de outros textos", () => {
+    const base = recipe();
+    const before = parseRecipe({
+      ...base,
+      overlays: [{ id: "img", kind: "image", file: "media/a.png", start: 2, end: 6 }],
+    });
+    const headline = parseRecipe({ ...base, overlays: [{ id: "h", kind: "title", text: "HEADLINE", start: 0, end: null }] })
+      .overlays[0];
+    const next: Recipe = {
+      ...before,
+      overlays: [...before.overlays, headline, { ...headline, id: "h2", start: 3, end: 5 }],
+    };
+    const out = enforceLanes(before, next);
+    expect(out.overlays.find((o) => o.id === "h")).toMatchObject({ start: 0, end: null });
+    expect(out.overlays.find((o) => o.id === "h2")).toMatchObject({ start: 3, end: 5 });
+    expect(laneSpansFor(out, "overlay:h")).toEqual([]);
+    expect(headline.titleStyle).toMatchObject({ fontSize: 58, uppercase: true, strokeWidth: 10 });
   });
 });
 

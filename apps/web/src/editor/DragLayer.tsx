@@ -1,5 +1,13 @@
 import type { PlayerRef } from "@remotion/player";
-import { getPlacement, MOTION_LABEL, setPlacement, type Point, type Recipe } from "@vision/recipe";
+import {
+  canResize,
+  getPlacement,
+  MOTION_LABEL,
+  resizeTarget,
+  setPlacement,
+  type Point,
+  type Recipe,
+} from "@vision/recipe";
 import { DRAG_ATTR } from "@vision/video";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -38,7 +46,7 @@ function label(recipe: Recipe, id: string): string {
     return m ? MOTION_LABEL[m.kind] : "Motion";
   }
   const o = recipe.overlays.find((x) => x.id === key);
-  return o?.kind === "title" ? "Título" : "Overlay";
+  return o?.kind === "title" ? "Texto" : "Overlay";
 }
 
 /**
@@ -143,6 +151,33 @@ export const DragLayer: React.FC<DragLayerProps> = ({ recipe, playerRef, selecte
     window.addEventListener("pointerup", onUp);
   };
 
+  /**
+   * Alça do canto: o tamanho acompanha a distância do ponteiro ao centro do
+   * elemento (fonte da legenda/texto, largura do sticker, size do motion).
+   */
+  const startResize = (e: React.PointerEvent, box: Box) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelect(box.id);
+    playerRef.current?.pause();
+    const base = recipeRef.current;
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    const layer = layerRef.current!.getBoundingClientRect();
+    const dist = (x: number, y: number) => Math.max(8, Math.hypot(x - layer.left - cx, y - layer.top - cy));
+    const d0 = dist(e.clientX, e.clientY);
+    setDragging(box.id);
+    const onMove = (ev: PointerEvent) => onChange(resizeTarget(base, box.id, dist(ev.clientX, ev.clientY) / d0));
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDragging(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <div ref={layerRef} className={`drag-layer ${dragging ? "dragging" : ""}`}>
       {frame && guides.x && (
@@ -169,6 +204,14 @@ export const DragLayer: React.FC<DragLayerProps> = ({ recipe, playerRef, selecte
               {label(recipe, b.id)}
               {free ? " · livre" : ""}
             </span>
+            {(selected === b.id || dragging === b.id) && canResize(recipe, b.id) && (
+              <span
+                className="drag-resize"
+                title="Arraste para mudar o tamanho"
+                onPointerDown={(e) => startResize(e, b)}
+                onDoubleClick={(e) => e.stopPropagation()}
+              />
+            )}
           </div>
         );
       })}

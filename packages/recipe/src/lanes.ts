@@ -8,9 +8,11 @@ import { outputDuration, outputToSource } from "./time";
  * Uma camada da timeline nunca tem dois itens ao mesmo tempo (eles ficavam
  * um por cima do outro na tela e na timeline). Camadas: cada camada de
  * motion do registry (câmera, texto, elemento, tela cheia — um combo tem
- * peças em camadas diferentes e pode), os overlays e a música. Efeitos
+ * peças em camadas diferentes e pode), os overlays de mídia e a música. Efeitos
  * sonoros podem tocar juntos (o som de cada motion acompanha o motion): a
- * timeline só os empilha em sub-linhas.
+ * timeline só os empilha em sub-linhas. Textos livres (overlay "title":
+ * headline, aviso) também: uma headline do início ao fim convive com outros
+ * textos e com as imagens/vídeos dos overlays.
  */
 
 /** Trecho ocupado no vídeo final */
@@ -45,6 +47,7 @@ function laneItems(recipe: Recipe): LaneItem[] {
     end: p.outputEnd,
   }));
   for (const o of recipe.overlays) {
+    if (o.kind === "title") continue;
     items.push({ key: `overlay:${o.id}`, lane: "overlay", group: null, start: o.start, end: o.end ?? total });
   }
   for (const c of recipe.audioClips) {

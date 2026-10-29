@@ -239,6 +239,18 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   em % da largura/ALTURA, em `captions.style`, overlays e motions (null = layout
   padrão). Render marca o elemento com `data-vision-drag` (`Positioned.tsx`);
   o editor desenha as alças em `DragLayer.tsx` e grava via `setPlacement`.
+- Tamanho (painel + alça no canto do selecionado no preview, `resizeTarget`
+  em `positioning.ts`): legenda → `fontSizePx`, texto livre →
+  `titleStyle.fontSize`, sticker → `scale`, motion de camada texto/elemento →
+  `motion.size` (`motionResizable`; câmera e tela cheia não). `size` vira CSS
+  `zoom` no elemento `data-vision-drag` do motion (`Motions.tsx`): cresce sem
+  sair do lugar do layout e sem mexer na animação. Padrão 1 = render antigo.
+- Texto livre (headline, aviso): overlay `kind: "title"` com `titleStyle`
+  (tamanho, peso, caixa alta, alinhamento, cor, contorno, faixa atrás por
+  linha, largura máx.; padrões = título antigo). À parte da legenda: aba
+  "Texto" (`TextPanel.tsx`), trilha própria "Textos" logo acima de Overlays,
+  fora da regra de camada (`lanes.ts`: convive com outros textos e com as
+  mídias, sobrepostos descem de sub-linha). O painel de Overlays só tem mídia.
 - `recipe.layerOrder` empilha as camadas visuais (primeira = na frente); a
   composição e a timeline seguem essa ordem.
 - Uma camada nunca tem dois itens ao mesmo tempo (`lanes.ts`): cada camada

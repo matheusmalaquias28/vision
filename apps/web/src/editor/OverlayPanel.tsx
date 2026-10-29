@@ -1,4 +1,4 @@
-import { isSplitLayout, outputDuration, outputToSource, type Framing, type Overlay, type Recipe } from "@vision/recipe";
+import { DEFAULT_TITLE_STYLE, isSplitLayout, outputDuration, outputToSource, type Framing, type Overlay, type Recipe } from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import { listAssets, uploadAsset, type MusicTrack } from "../api";
 import { inspectMediaFile } from "./mediaFiles";
@@ -15,6 +15,7 @@ const DEFAULTS = {
   mediaDurationSeconds: null,
   placement: null,
   framing: null,
+  titleStyle: DEFAULT_TITLE_STYLE,
 };
 
 function newId(overlays: Overlay[]): string {
@@ -43,7 +44,9 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
 }) => {
   const [assets, setAssets] = useState<MusicTrack[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const overlay = recipe.overlays.find((o) => o.id === selectedId);
+  // textos livres (kind title) têm painel próprio: aqui só imagem e vídeo
+  const media = recipe.overlays.filter((o) => o.kind !== "title");
+  const overlay = media.find((o) => o.id === selectedId);
   const duration = outputDuration(recipe.timeline.segments);
 
   const refreshAssets = () => {
@@ -61,22 +64,6 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
   const patch = (p: Partial<Overlay>) => {
     if (!overlay) return;
     setOverlays(recipe.overlays.map((o) => (o.id === overlay.id ? ({ ...o, ...p } as Overlay) : o)));
-  };
-
-  const addTitle = () => {
-    const o: Overlay = {
-      id: newId(recipe.overlays),
-      kind: "title",
-      text: "TÍTULO",
-      file: null,
-      start: Math.round(playheadSeconds * 100) / 100,
-      end: null,
-      position: "top",
-      layout: "overlay",
-      ...DEFAULTS,
-    };
-    setOverlays([...recipe.overlays, o]);
-    onSelect(o.id);
   };
 
   const addMedia = async (file: File) => {
@@ -108,17 +95,14 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
     }
   };
 
-  const sorted = [...recipe.overlays].sort((a, b) => a.start - b.start);
+  const sorted = [...media].sort((a, b) => a.start - b.start);
 
   return (
     <>
       <Section
-        title={`Overlays (${recipe.overlays.length})`}
+        title={`Overlays (${media.length})`}
         actions={
           <>
-            <button className="sm" onClick={addTitle} title="Título fixo no playhead">
-              <Icon name="text" size={13} /> Título
-            </button>
             <label className="file-btn sm" title="Imagem ou vídeo sobre o vídeo principal">
               <Icon name="plus" size={13} /> Mídia
               <input
@@ -136,8 +120,8 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
       >
         {sorted.length === 0 ? (
           <p className="empty-hint">
-            Sem overlays. Um <strong>título</strong> fixo ou uma <strong>mídia</strong> (print,
-            b-roll, logo) entram no playhead.
+            Sem overlays. Uma <strong>mídia</strong> (print, b-roll, logo) entra no playhead. Textos e
+            headlines ficam na aba <strong>Texto</strong>.
           </p>
         ) : (
           <div className="list">
@@ -148,7 +132,7 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
                 onClick={() => onSelect(o.id === selectedId ? null : o.id)}
               >
                 <span className="lr-time">{fmtTime(o.start)}</span>
-                <Icon name={o.kind === "title" ? "text" : o.kind === "video" ? "film" : "layers"} size={13} />
+                <Icon name={o.kind === "video" ? "film" : "layers"} size={13} />
                 <span className="lr-main">{o.text || o.file?.split("/").pop()}</span>
                 {o.layout === "fullscreen" && <span className="pill">tela cheia</span>}
                 {o.layout === "sticker" && <span className="pill">sticker</span>}
@@ -161,11 +145,7 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
 
       {overlay && (
         <Section key={overlay.id} title="Overlay · propriedades">
-          {overlay.kind === "title" ? (
-            <Prop label="Texto">
-              <input value={overlay.text} onChange={(e) => patch({ text: e.target.value })} />
-            </Prop>
-          ) : overlay.assetId ? (
+          {overlay.assetId ? (
             <Prop label="Da biblioteca">
               <span className="timing">{overlay.text}</span>
             </Prop>
@@ -209,22 +189,20 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
               />
             )}
           </Prop>
-          {overlay.kind !== "title" && (
-            <Prop label="Layout">
-              <Select
-                value={overlay.layout}
-                onChange={(e) => patch({ layout: e.target.value as Overlay["layout"] })}
-              >
-                <option value="fullscreen">Tela cheia</option>
-                <option value="sticker">Sticker (solto)</option>
-                <option value="pip">PiP (janela no canto)</option>
-                <option value="split-bottom">Split (metade de baixo)</option>
-                <option value="split-top">Split (metade de cima)</option>
-                <option value="overlay">Destaque central</option>
-              </Select>
-            </Prop>
-          )}
-          {overlay.kind !== "title" && overlay.layout === "sticker" && (
+          <Prop label="Layout">
+            <Select
+              value={overlay.layout}
+              onChange={(e) => patch({ layout: e.target.value as Overlay["layout"] })}
+            >
+              <option value="fullscreen">Tela cheia</option>
+              <option value="sticker">Sticker (solto)</option>
+              <option value="pip">PiP (janela no canto)</option>
+              <option value="split-bottom">Split (metade de baixo)</option>
+              <option value="split-top">Split (metade de cima)</option>
+              <option value="overlay">Destaque central</option>
+            </Select>
+          </Prop>
+          {overlay.layout === "sticker" && (
             <Prop label="Tamanho">
               <Slider
                 value={overlay.scale}
@@ -238,7 +216,6 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
               />
             </Prop>
           )}
-          {overlay.kind !== "title" && (
             <>
               <Prop label="Mescla" hint="Screen some o preto (luz); Multiply some o branco (moldura/textura)">
                 <Segmented
@@ -264,7 +241,6 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
                 />
               </Prop>
             </>
-          )}
           {isSplitLayout(overlay.layout) ? (
             <Prop label="Metade" hint="O vídeo principal vai para a outra metade">
               <Segmented
@@ -289,13 +265,13 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
               />
             </Prop>
           ) : null}
-          {overlay.kind !== "title" && overlay.layout !== "sticker" && (
+          {overlay.layout !== "sticker" && (
             <>
               <p className="prop-group">Enquadramento do clipe</p>
               <FramingFields value={overlay.framing} onChange={(framing) => patch({ framing })} />
             </>
           )}
-          {overlay.kind !== "title" && isSplitLayout(overlay.layout) && mainSource && (
+          {isSplitLayout(overlay.layout) && mainSource && (
             <>
               <p className="prop-group" title="Vale para todos os trechos desse vídeo">
                 Vídeo principal (outra metade)

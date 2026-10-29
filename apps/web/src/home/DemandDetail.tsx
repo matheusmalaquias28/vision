@@ -13,7 +13,8 @@ import { Icon } from "../editor/Icon";
 import { Select } from "../ui/controls";
 import { DemandNotes } from "./DemandNotes";
 import { StartVideoPanel } from "./StartVideoPanel";
-import { fmtDateTime, fmtDay, instagramLink, priorityTone, safeUrl } from "./demandUtil";
+import { Avatar, DueDate, PriorityBadge, StatusDot } from "./DemandBadges";
+import { fmtDateTime, instagramLink, safeUrl, statusTone } from "./demandUtil";
 
 interface DemandDetailProps {
   demandId: string;
@@ -187,160 +188,204 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
 
   const d = data?.demand;
   const insta = instagramLink(d?.instagram ?? data?.client?.instagram ?? null);
-  const tone = priorityTone(d?.priority ?? null);
   const columns = d && !statuses.includes(d.status) ? [...statuses, d.status] : statuses;
 
   return (
-    <div className="drawer-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer" role="dialog" aria-label="Demanda">
+    <div className="modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        className={`dmodal ${d ? `st-${statusTone(d.status)}` : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Demanda"
+      >
         {!d ? (
-          <div className="drawer-loading">{error ?? "Carregando…"}</div>
+          <div className="dmodal-loading">{error ?? "Carregando…"}</div>
         ) : (
           <>
-            <header className="dd-head">
-              <div className="dd-head-main">
-                <button className="dd-client-link" onClick={() => onOpenClient(d.clientId)}>
-                  {d.clientName}
-                  <Icon name="chevronRight" size={12} />
-                </button>
+            <header className="dmodal-head">
+              <div className="dmodal-head-main">
+                <div className="dmodal-crumbs">
+                  <Avatar name={d.clientName} size={22} className="square" />
+                  <button className="dd-client-link" onClick={() => onOpenClient(d.clientId)}>
+                    {d.clientName}
+                    <Icon name="chevronRight" size={12} />
+                  </button>
+                  {d.categoria && <span className="dmodal-tag">{d.categoria}</span>}
+                  {d.squad && <span className="dmodal-tag">{d.squad}</span>}
+                </div>
                 <h2>{d.title || "Sem título"}</h2>
               </div>
-              <button className="icon ghost" title="Fechar (Esc)" onClick={onClose}>
-                <Icon name="x" size={16} />
+              <button className="icon ghost dmodal-close" title="Fechar (Esc)" onClick={onClose}>
+                <Icon name="x" size={18} />
               </button>
             </header>
 
-            <div className="dd-status-row">
-              <Select
-                className="dd-status-select"
-                value={d.status}
-                disabled={saving}
-                onChange={(e) => changeStatus(e.target.value)}
-                aria-label="Status da demanda"
-              >
-                {columns.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </Select>
-              {saving && <span className="dd-saving">enviando ao War…</span>}
-              {!saving && d.syncState === "error" && (
-                <button className="sm danger" onClick={() => changeStatus(d.status, true)}>
-                  <Icon name="refresh" size={13} />
-                  Reenviar ao War
-                </button>
-              )}
-              {d.priority && <span className={`prio prio-${tone}`}>{d.priority}</span>}
+            <div className="dmodal-props">
+              <div className="dm-prop">
+                <span className="dm-prop-label">Status</span>
+                <span className="status-select">
+                  <StatusDot status={d.status} />
+                  <Select
+                    value={d.status}
+                    disabled={saving}
+                    onChange={(e) => changeStatus(e.target.value)}
+                    aria-label="Status da demanda"
+                  >
+                    {columns.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                </span>
+              </div>
+              <div className="dm-prop">
+                <span className="dm-prop-label">Prioridade</span>
+                {d.priority ? <PriorityBadge priority={d.priority} /> : <span className="dm-prop-value">—</span>}
+              </div>
+              <div className="dm-prop">
+                <span className="dm-prop-label">Entrega</span>
+                <DueDate dueDate={d.dueDate} done={statusTone(d.status) === "done"} size="lg" />
+              </div>
+              <div className="dm-prop">
+                <span className="dm-prop-label">Criada</span>
+                <span className="dm-prop-value">
+                  <Icon name="clock" size={14} />
+                  {fmtDateTime(d.warCreatedAt ?? d.createdAt)}
+                </span>
+              </div>
+              <div className="dm-prop">
+                <span className="dm-prop-label">Gestor</span>
+                <span className="dm-prop-value">
+                  {d.gestor ? (
+                    <>
+                      <Avatar name={d.gestor} size={20} />
+                      {d.gestor}
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </span>
+              </div>
+              <span className="dmodal-sync">
+                {saving && <span className="dd-saving">enviando ao War…</span>}
+                {!saving && d.syncState === "error" && (
+                  <button className="sm danger" onClick={() => changeStatus(d.status, true)}>
+                    <Icon name="refresh" size={13} />
+                    Reenviar ao War
+                  </button>
+                )}
+              </span>
             </div>
-            {error && <p className="note error">{error}</p>}
+            {error && <p className="note error dmodal-error">{error}</p>}
 
-            <div className="drawer-body">
-              <a
-                className={`dd-materials ${safeUrl(d.driveMateriais) ? "" : "disabled"}`}
-                href={safeUrl(d.driveMateriais) ?? undefined}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                <span className="dd-materials-icon">
-                  <Icon name="folder" size={18} />
-                </span>
-                <span>
-                  <strong>Drive de Materiais</strong>
-                  <span>{safeUrl(d.driveMateriais) ? "Onde estão os vídeos brutos" : "Link não informado"}</span>
-                </span>
-                <Icon name="external" size={14} />
-              </a>
+            <div className="dmodal-body">
+              <div className="dmodal-main">
+                <a
+                  className={`dd-materials ${safeUrl(d.driveMateriais) ? "" : "disabled"}`}
+                  href={safeUrl(d.driveMateriais) ?? undefined}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  <span className="dd-materials-icon">
+                    <Icon name="folder" size={18} />
+                  </span>
+                  <span>
+                    <strong>Drive de Materiais</strong>
+                    <span>{safeUrl(d.driveMateriais) ? "Onde estão os vídeos brutos" : "Link não informado"}</span>
+                  </span>
+                  <Icon name="external" size={14} />
+                </a>
 
-              <section className="dd-section">
-                <h3>
-                  Vídeos <span className="dd-sub">{d.delivered}/{d.videoCount} entregues</span>
-                </h3>
-                <ul className="dd-videos">
-                  {d.videos.map((v) => {
-                    const open = starting?.index === v.index && !v.projectId;
-                    return (
-                      <React.Fragment key={v.index}>
-                        <VideoRow
-                          video={v}
-                          disabled={busy !== null}
-                          starting={open}
-                          onOpen={() => v.projectId && onOpenProject(v.projectId)}
-                          onStart={(files) => setStarting({ index: v.index, files })}
-                        />
-                        {open && starting && (
-                          <StartVideoPanel
-                            index={v.index}
-                            warBriefing={d.briefing || d.briefingText || ""}
-                            initialFiles={starting.files}
-                            busy={busy}
-                            onCancel={() => setStarting(null)}
-                            onStart={(files, briefing) => onStartVideo(d, v.index, files, briefing)}
+                <section className="dd-section">
+                  <h3>
+                    Vídeos <span className="dd-sub">{d.delivered}/{d.videoCount} entregues</span>
+                  </h3>
+                  <ul className="dd-videos">
+                    {d.videos.map((v) => {
+                      const open = starting?.index === v.index && !v.projectId;
+                      return (
+                        <React.Fragment key={v.index}>
+                          <VideoRow
+                            video={v}
+                            disabled={busy !== null}
+                            starting={open}
+                            onOpen={() => v.projectId && onOpenProject(v.projectId)}
+                            onStart={(files) => setStarting({ index: v.index, files })}
                           />
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </ul>
-                {busy && <p className="dd-busy">{busy}…</p>}
-              </section>
+                          {open && starting && (
+                            <StartVideoPanel
+                              index={v.index}
+                              warBriefing={d.briefing || d.briefingText || ""}
+                              initialFiles={starting.files}
+                              busy={busy}
+                              onCancel={() => setStarting(null)}
+                              onStart={(files, briefing) => onStartVideo(d, v.index, files, briefing)}
+                            />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </ul>
+                  {busy && <p className="dd-busy">{busy}…</p>}
+                </section>
 
-              <section className="dd-section">
-                <h3>Briefing</h3>
-                <p className="dd-briefing">{d.briefing || d.briefingText || "Sem briefing."}</p>
-              </section>
+                <section className="dd-section">
+                  <h3>Briefing</h3>
+                  <p className="dd-briefing">{d.briefing || d.briefingText || "Sem briefing."}</p>
+                </section>
 
-              <DemandNotes demandId={d.id} notes={d.notas} onChanged={load} />
+                <section className="dd-section">
+                  <h3>Informações</h3>
+                  <dl className="dd-fields">
+                    <dt>Instagram</dt>
+                    <dd>{insta ? <ExtLink href={insta.url}>{insta.handle}</ExtLink> : "—"}</dd>
+                    <dt>Drive para editados</dt>
+                    <dd>
+                      <ExtLink href={d.driveEditados}>abrir pasta</ExtLink>
+                    </dd>
+                    <dt>Drive do cliente</dt>
+                    <dd>
+                      <ExtLink href={data?.client?.drive ?? null}>abrir pasta</ExtLink>
+                    </dd>
+                    <dt>Solicitante</dt>
+                    <dd>{d.solicitante ?? "—"}</dd>
+                    <dt>Editor (War)</dt>
+                    <dd>{d.editor ?? "—"}</dd>
+                    <dt>Squad</dt>
+                    <dd>{d.squad ?? "—"}</dd>
+                    <dt>Categoria</dt>
+                    <dd>{d.categoria ?? "—"}</dd>
+                  </dl>
+                </section>
 
-              <section className="dd-section">
-                <h3>Informações</h3>
-                <dl className="dd-fields">
-                  <dt>Instagram</dt>
-                  <dd>{insta ? <ExtLink href={insta.url}>{insta.handle}</ExtLink> : "—"}</dd>
-                  <dt>Drive para editados</dt>
-                  <dd>
-                    <ExtLink href={d.driveEditados}>abrir pasta</ExtLink>
-                  </dd>
-                  <dt>Drive do cliente</dt>
-                  <dd>
-                    <ExtLink href={data?.client?.drive ?? null}>abrir pasta</ExtLink>
-                  </dd>
-                  <dt>Prazo</dt>
-                  <dd>{fmtDay(d.dueDate)}</dd>
-                  <dt>Gestor</dt>
-                  <dd>{d.gestor ?? "—"}</dd>
-                  <dt>Solicitante</dt>
-                  <dd>{d.solicitante ?? "—"}</dd>
-                  <dt>Editor (War)</dt>
-                  <dd>{d.editor ?? "—"}</dd>
-                  <dt>Squad</dt>
-                  <dd>{d.squad ?? "—"}</dd>
-                  <dt>Categoria</dt>
-                  <dd>{d.categoria ?? "—"}</dd>
-                  <dt>Criada no War</dt>
-                  <dd>{d.warCreatedAt ? fmtDateTime(d.warCreatedAt) : "—"}</dd>
-                </dl>
-              </section>
+                <section className="dd-section">
+                  <h3>Histórico</h3>
+                  <ol className="dd-events">
+                    {data.events.map((e) => (
+                      <li key={e.id} className={e.ok ? "" : "fail"}>
+                        <span>{eventLabel(e)}</span>
+                        <span className="dd-event-meta">
+                          {fmtDateTime(e.createdAt)}
+                          {e.by ? ` · ${e.by}` : ""}
+                          {!e.ok && e.error ? ` · ${e.error}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              </div>
 
-              <section className="dd-section">
-                <h3>Histórico</h3>
-                <ol className="dd-events">
-                  {data.events.map((e) => (
-                    <li key={e.id} className={e.ok ? "" : "fail"}>
-                      <span>{eventLabel(e)}</span>
-                      <span className="dd-event-meta">
-                        {fmtDateTime(e.createdAt)}
-                        {e.by ? ` · ${e.by}` : ""}
-                        {!e.ok && e.error ? ` · ${e.error}` : ""}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              </section>
+              <DemandNotes
+                demandId={d.id}
+                notes={d.notas}
+                people={[d.gestor, d.solicitante, d.editor]}
+                onChanged={load}
+              />
             </div>
           </>
         )}
-      </aside>
+      </div>
     </div>
   );
 };

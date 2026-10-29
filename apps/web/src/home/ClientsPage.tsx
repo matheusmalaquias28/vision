@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { getClient, listClients, type Client, type ClientStats, type Demand } from "../api";
 import { Icon } from "../editor/Icon";
-import { fmtDay, instagramLink, priorityTone, safeUrl } from "./demandUtil";
+import { PriorityBadge } from "./DemandBadges";
+import { fmtDay, instagramLink, safeUrl } from "./demandUtil";
 
 interface ClientsPageProps {
   clientId: string | null;
@@ -94,7 +95,7 @@ const ClientFile: React.FC<{ id: string; onBack: () => void; onOpenDemand: (id: 
             <tr key={d.id} onClick={() => onOpenDemand(d.id)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onOpenDemand(d.id)}>
               <td className="cl-strong">{d.title || "Sem título"}</td>
               <td>{d.status}</td>
-              <td>{d.priority && <span className={`prio prio-${priorityTone(d.priority)}`}>{d.priority}</span>}</td>
+              <td><PriorityBadge priority={d.priority} compact /></td>
               <td>
                 {d.delivered}/{d.videoCount}
               </td>

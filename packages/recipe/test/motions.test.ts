@@ -47,6 +47,7 @@ const keyword = (sourceTime: number, text = "PRAZO"): MotionCandidate => ({
   note: "",
   group: null,
   accentColor: null,
+  size: 1,
   params: { text, position: "top", variant: "pop", intensity: "normal" },
 });
 
@@ -129,6 +130,7 @@ describe("mergeMotionSuggestions / reviewMotions", () => {
       note: "",
       group: null,
       accentColor: null,
+      size: 1,
       params: { from: 0, to: 2, decimals: 0, prefix: "", suffix: " meses", label: "", variant: "bold" },
     };
     const merged = mergeMotionSuggestions(r, [keyword(5), counter]);

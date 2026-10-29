@@ -50,6 +50,9 @@ export type IconName =
   | "external"
   | "user"
   | "calendar"
+  | "send"
+  | "clock"
+  | "flag"
   | "cloud"
   | "board"
   | "refresh"
@@ -81,6 +84,24 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect x="4" y="5.5" width="16" height="14" rx="2" />
       <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+    </>
+  ),
+  send: (
+    <>
+      <path d="M20 4L9.5 14.5" />
+      <path d="M20 4l-6.5 16-4-5.5L4 10.5z" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  ),
+  flag: (
+    <>
+      <path d="M5.5 20.5V4.5" />
+      <path d="M5.5 5h11l-2.5 4 2.5 4h-11" />
     </>
   ),
   cloud: (

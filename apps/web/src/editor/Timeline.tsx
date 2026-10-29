@@ -425,10 +425,12 @@ export const Timeline: React.FC<TimelineProps> = ({
     return clamp((clientX - left) / pxPerSec, 0, duration);
   };
 
-  const startScrub = (e: React.PointerEvent) => {
+  /** fromLine: pegou a própria agulha, que já está no lugar (não pula para o ponteiro) */
+  const startScrub = (e: React.PointerEvent, fromLine = false) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    onSeek(timeAt(e.clientX));
+    if (fromLine) e.stopPropagation();
+    else onSeek(timeAt(e.clientX));
     const onMove = (ev: PointerEvent) => onSeek(timeAt(ev.clientX));
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -805,6 +807,16 @@ export const Timeline: React.FC<TimelineProps> = ({
     packRows(sfxClips.map((c) => ({ id: c.id, start: c.start, end: audioClipEnd(c) }))).map((x) => [x.item.id, x.row])
   );
   const sfxRows = Math.max(1, ...[...sfxRowOf.values()].map((r) => r + 1));
+  // textos livres ficam fora da regra de camada: os sobrepostos descem de sub-linha
+  const titleOverlays = recipe.overlays.filter((o) => o.kind === "title");
+  const mediaOverlays = recipe.overlays.filter((o) => o.kind !== "title");
+  const textRowOf = new Map(
+    packRows(titleOverlays.map((o) => ({ id: o.id, start: o.start, end: o.end ?? duration }))).map((x) => [
+      x.item.id,
+      x.row,
+    ])
+  );
+  const textRows = Math.max(1, ...[...textRowOf.values()].map((r) => r + 1));
   const laneHeight = (l: VisualLayer) => (l === "motions" ? ROW.motion * motionRows : LAYER_ROW[l]);
   /** Bloco numa sub-linha: posição explícita no lugar do top/bottom fixo do CSS */
   const subRow = (row: number, rowH: number): React.CSSProperties => ({ top: row * rowH + 4, bottom: "auto", height: rowH - 8 });
@@ -1086,11 +1098,38 @@ export const Timeline: React.FC<TimelineProps> = ({
     ),
     overlays: (
       <>
-        {/* overlays */}
-        {head("trk-overlay", "Overlays", recipe.overlays.length, "overlays")}
+        {/* textos livres (headline, avisos): trilha própria, à parte da legenda; podem conviver (sub-linhas) */}
+        {head("trk-text", "Textos", titleOverlays.length)}
+        <div className="tl-lane" data-track="texts" onPointerDown={laneDown}>
+          {titleOverlays.length === 0 && <span className="lane-empty">Sem textos · aba Texto › Headline ou Texto</span>}
+          {titleOverlays.map((o) => {
+            const end = o.end ?? duration;
+            return (
+              <div
+                key={o.id}
+                data-sel={`overlay:${o.id}`}
+                className={`blk ov-blk txt-blk ${selectedOverlay === o.id ? "selected" : ""} ${inMulti(`overlay:${o.id}`)}`}
+                style={{
+                  left: o.start * pxPerSec,
+                  width: Math.max((end - o.start) * pxPerSec, 16),
+                  ...(textRows > 1 ? subRow(textRowOf.get(o.id) ?? 0, ROW.overlay) : {}),
+                }}
+                onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
+                title={o.text}
+              >
+                <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
+                {o.text.replace(/\s+/g, " ")}
+                <div className="handle handle-r" onPointerDown={(e) => startOverlayDrag(e, o.id, "end")} />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* overlays de mídia */}
+        {head("trk-overlay", "Overlays", mediaOverlays.length, "overlays")}
         <div className={`tl-lane alt ${laneDrop("overlays")}`} data-track="overlays" onPointerDown={laneDown}>
-          {recipe.overlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
-          {recipe.overlays.map((o) => {
+          {mediaOverlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
+          {mediaOverlays.map((o) => {
             const end = o.end ?? duration;
             return (
               <div
@@ -1099,7 +1138,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""} ${inMulti(`overlay:${o.id}`)}`}
                 style={{ left: o.start * pxPerSec, width: Math.max((end - o.start) * pxPerSec, 16) }}
                 onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
-                title={o.kind === "title" ? o.text : (o.file ?? "")}
+                title={o.file ?? ""}
               >
                 <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />
                 {o.text || o.file?.split("/").pop()}
@@ -1254,7 +1293,13 @@ export const Timeline: React.FC<TimelineProps> = ({
             gridTemplateRows: [
               ROW.ruler,
               // a trilha de efeitos de vídeo vem logo abaixo do vídeo, onde quer que ele esteja
-              ...recipe.layerOrder.flatMap((l) => (l === "video" ? [laneHeight(l), ROW.effect] : [laneHeight(l)])),
+              ...recipe.layerOrder.flatMap((l) =>
+                l === "video"
+                  ? [laneHeight(l), ROW.effect]
+                  : l === "overlays"
+                    ? [ROW.overlay * textRows, laneHeight(l)] // Textos logo acima dos Overlays de mídia
+                    : [laneHeight(l)]
+              ),
               ROW.clipAudio,
               ROW.music,
               ROW.sfx * sfxRows,
@@ -1330,6 +1375,10 @@ export const Timeline: React.FC<TimelineProps> = ({
           <div className="tl-ph-layer">
             <div className="tl-playhead" style={{ left: clamp(playheadSeconds, 0, duration) * pxPerSec }}>
               <span className="tl-playhead-head" />
+              {/* a linha inteira também arrasta (na lâmina o clique é corte) */}
+              {tool !== "blade" && (
+                <span className="tl-playhead-grip" onPointerDown={(e) => startScrub(e, true)} />
+              )}
             </div>
             {dropAt !== null && <div className="tl-drop" style={{ left: dropAt * pxPerSec }} />}
             {tool === "blade" && bladeAt !== null && (

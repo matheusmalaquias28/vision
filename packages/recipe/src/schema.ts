@@ -173,6 +173,31 @@ export const SourceSchema = z.object({
   framing: FramingSchema.nullable().default(null),
 });
 
+/** Cor só em hexadecimal #RRGGBB: nada de CSS livre na receita */
+export const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "cor deve ser #RRGGBB");
+
+/**
+ * Visual do texto livre (overlay "title": headline, aviso, chamada), à parte
+ * da legenda. Os padrões reproduzem o título antigo: projetos salvos renderizam igual.
+ */
+export const TitleStyleSchema = z.object({
+  /** px num quadro de 1080 de largura */
+  fontSize: z.number().min(16).max(240).default(58),
+  fontWeight: z.number().int().min(300).max(900).default(900),
+  uppercase: z.boolean().default(true),
+  align: z.enum(["left", "center", "right"]).default("center"),
+  color: HexColorSchema.default("#FFFFFF"),
+  /** Contorno (0 = sem) */
+  strokeWidth: z.number().min(0).max(30).default(10),
+  strokeColor: HexColorSchema.default("#000000"),
+  /** Caixa atrás do texto (null = sem caixa) */
+  boxColor: HexColorSchema.nullable().default(null),
+  /** Largura máxima em % da largura do quadro (quebra linha depois disso) */
+  maxWidth: z.number().min(20).max(100).default(88),
+});
+export type TitleStyle = z.infer<typeof TitleStyleSchema>;
+export const DEFAULT_TITLE_STYLE: TitleStyle = TitleStyleSchema.parse({});
+
 /** Overlays vivem no tempo do VÍDEO FINAL (decoram a edição pronta) */
 export const OverlaySchema = z
   .object({
@@ -204,6 +229,8 @@ export const OverlaySchema = z
     placement: PointSchema.nullable().default(null),
     /** Enquadramento da mídia dentro da área (split, PiP, tela cheia); null = centro */
     framing: FramingSchema.nullable().default(null),
+    /** Só no kind "title" */
+    titleStyle: TitleStyleSchema.default({}),
   })
   .refine((o) => (o.kind === "title" ? o.text.length > 0 : o.file !== null), {
     message: "overlay: title exige text; image/video exigem file",
@@ -235,9 +262,6 @@ export const MOTION_KINDS = [
 ] as const;
 export type MotionKind = (typeof MOTION_KINDS)[number];
 
-/** Cor só em hexadecimal #RRGGBB: nada de CSS livre na receita */
-export const HexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, "cor deve ser #RRGGBB");
-
 /** Intensidade visual comum (escala, contraste, tamanho), sem CSS livre */
 export const MOTION_INTENSITIES = ["subtle", "normal", "strong"] as const;
 const intensity = z.enum(MOTION_INTENSITIES).default("normal");
@@ -262,6 +286,8 @@ const motionBase = {
   group: z.string().max(60).nullable().default(null),
   /** Cor de destaque só deste motion (null = cor padrão dos motions do vídeo) */
   accentColor: HexColorSchema.nullable().default(null),
+  /** Tamanho do elemento na tela (1 = padrão do tipo); câmera e tela cheia ignoram */
+  size: z.number().min(0.3).max(3).default(1),
 };
 
 export const MotionSchema = z.discriminatedUnion("kind", [

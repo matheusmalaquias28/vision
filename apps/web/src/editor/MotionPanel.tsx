@@ -11,6 +11,7 @@ import {
   MOTION_LABEL,
   MOTION_REGISTRY,
   motionOutputStart,
+  motionResizable,
   motionSummary,
   removeMotionGroup,
   reviewMotions,
@@ -62,6 +63,7 @@ function newMotion(kind: MotionKind, at: SourceTime): Motion {
     placement: null,
     group: null,
     accentColor: null,
+    size: 1,
     params: man.defaults(),
   } as Motion;
 }
@@ -466,6 +468,26 @@ export const MotionPanel: React.FC<MotionPanelProps> = ({
               >
                 Aplicar a todos
               </button>
+            </Prop>
+          )}
+
+          {motionResizable(selected) && (
+            <Prop label="Escala" hint="Tamanho na tela; também pela alça no canto do elemento, no preview">
+              <Slider
+                value={selected.size}
+                min={0.3}
+                max={3}
+                step={0.05}
+                unit="%"
+                format={(v) => String(Math.round(v * 100))}
+                parse={(s) => Number(s) / 100}
+                onChange={(v) => replace({ ...selected, size: v })}
+              />
+              {selected.size !== 1 && (
+                <button className="sm ghost" title="Volta ao tamanho padrão do tipo" onClick={() => replace({ ...selected, size: 1 })}>
+                  Padrão
+                </button>
+              )}
             </Prop>
           )}
 

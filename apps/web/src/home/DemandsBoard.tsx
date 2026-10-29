@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
 import type { Demand } from "../api";
 import { Icon } from "../editor/Icon";
-import { fmtDay, priorityTone } from "./demandUtil";
+import { Avatar, DueDate, PriorityBadge, StatusDot } from "./DemandBadges";
+import { dueInfo, fmtDay, priorityTone, statusTone } from "./demandUtil";
 
 interface DemandsBoardProps {
   statuses: string[];
@@ -11,10 +12,12 @@ interface DemandsBoardProps {
 }
 
 const DemandCard: React.FC<{ demand: Demand; onOpen: () => void }> = ({ demand: d, onOpen }) => {
-  const tone = priorityTone(d.priority);
+  const done = statusTone(d.status) === "done";
+  const analyzing = d.videos.some((v) => v.analysis?.status === "queued" || v.analysis?.status === "running");
+  const progress = d.videoCount > 0 ? d.delivered / d.videoCount : 0;
   return (
     <button
-      className="dm-card"
+      className={`dm-card st-${statusTone(d.status)}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/x-vision-demand", d.id);
@@ -23,35 +26,55 @@ const DemandCard: React.FC<{ demand: Demand; onOpen: () => void }> = ({ demand: 
       onClick={onOpen}
     >
       <span className="dm-card-top">
+        <Avatar name={d.clientName} size={20} className="square" />
         <span className="dm-client">{d.clientName}</span>
-        {d.priority && <span className={`prio prio-${tone}`}>{d.priority}</span>}
+        <PriorityBadge priority={d.priority} compact />
       </span>
       <span className="dm-title">{d.title || "Sem título"}</span>
-      <span className="dm-meta">
-        <span className={`dm-videos ${d.delivered === d.videoCount ? "done" : ""}`} title="Vídeos entregues no Drive">
+      <span className="dm-dates">
+        <span className="dm-date-cell">
+          <span className="dm-date-label">Entrega</span>
+          <DueDate dueDate={d.dueDate} done={done} />
+        </span>
+        <span className="dm-date-cell">
+          <span className="dm-date-label">Criada</span>
+          <span className="dm-created">
+            <Icon name="clock" size={13} />
+            {fmtDay(d.warCreatedAt ?? d.createdAt)}
+          </span>
+        </span>
+      </span>
+      <span className="dm-foot">
+        <span
+          className={`dm-videos ${d.videoCount > 0 && d.delivered === d.videoCount ? "done" : ""}`}
+          title="Vídeos entregues no Drive"
+        >
           <Icon name="film" size={12} />
           {d.delivered}/{d.videoCount}
+          <span className="dm-progress">
+            <span style={{ width: `${progress * 100}%` }} />
+          </span>
         </span>
-        {d.dueDate && (
-          <span title="Prazo">
-            <Icon name="calendar" size={12} />
-            {fmtDay(d.dueDate)}
-          </span>
-        )}
-        {d.editor && (
-          <span className="dm-editor" title="Editor selecionado no War">
-            <Icon name="user" size={12} />
-            {d.editor}
-          </span>
-        )}
-        {d.videos.some((v) => v.analysis?.status === "queued" || v.analysis?.status === "running") && (
+        {analyzing && (
           <span className="dm-analyzing" title="Transcrição, cortes e motions rodando no servidor">
-            IA analisando
+            <Icon name="sparkles" size={12} />
+            IA
           </span>
         )}
         {d.syncState === "error" && (
           <span className="dm-sync-err" title={d.syncError ?? "Status não chegou ao War"}>
             não sincronizado
+          </span>
+        )}
+        {d.notas.some((n) => !n.apagadoEm) && (
+          <span className="dm-notes" title="Comentários na conversa">
+            <Icon name="chat" size={12} />
+            {d.notas.filter((n) => !n.apagadoEm).length}
+          </span>
+        )}
+        {d.editor && (
+          <span className="dm-editor" title={`Editor: ${d.editor}`}>
+            <Avatar name={d.editor} size={20} />
           </span>
         )}
       </span>
@@ -79,11 +102,31 @@ export const DemandsBoard: React.FC<DemandsBoardProps> = ({ statuses, demands, o
       (a.warCreatedAt ?? a.createdAt).localeCompare(b.warCreatedAt ?? b.createdAt)
   );
 
+  const open = demands.filter((d) => statusTone(d.status) !== "done");
+  const late = open.filter((d) => dueInfo(d.dueDate)?.tone === "late").length;
+  const today = open.filter((d) => dueInfo(d.dueDate)?.tone === "today").length;
+
   return (
     <div className="board">
       <div className="board-bar">
-        <h2>Demandas</h2>
-        <span className="board-count">{demands.length}</span>
+        <div className="board-title">
+          <h2>Demandas</h2>
+          <span className="board-summary">
+            <span>
+              <strong>{open.length}</strong> em aberto
+            </span>
+            {today > 0 && (
+              <span className="sum-today">
+                <strong>{today}</strong> entrega hoje
+              </span>
+            )}
+            {late > 0 && (
+              <span className="sum-late">
+                <strong>{late}</strong> atrasada{late > 1 ? "s" : ""}
+              </span>
+            )}
+          </span>
+        </div>
         <label className="board-search">
           <Icon name="search" size={14} />
           <input
@@ -109,7 +152,7 @@ export const DemandsBoard: React.FC<DemandsBoardProps> = ({ statuses, demands, o
             return (
               <section
                 key={status}
-                className={`board-col ${over === status ? "over" : ""}`}
+                className={`board-col st-${statusTone(status)} ${over === status ? "over" : ""}`}
                 onDragOver={(e) => {
                   if (!e.dataTransfer.types.includes("text/x-vision-demand")) return;
                   e.preventDefault();
@@ -127,13 +170,15 @@ export const DemandsBoard: React.FC<DemandsBoardProps> = ({ statuses, demands, o
                 }}
               >
                 <header className="board-col-head">
-                  <span>{status}</span>
+                  <StatusDot status={status} />
+                  <span className="board-col-name">{status}</span>
                   <span className="board-col-count">{items.length}</span>
                 </header>
                 <div className="board-col-body">
                   {items.map((d) => (
                     <DemandCard key={d.id} demand={d} onOpen={() => onOpen(d.id)} />
                   ))}
+                  {items.length === 0 && <span className="board-col-empty">Solte uma demanda aqui</span>}
                 </div>
               </section>
             );

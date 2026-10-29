@@ -32,6 +32,7 @@ import {
   type AudioClip,
   type CutPace,
   type Recipe,
+  DEFAULT_TITLE_STYLE,
 } from "@vision/recipe";
 import { recipeMetadata } from "@vision/video";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -75,6 +76,7 @@ import { MediaPanel } from "./MediaPanel";
 import { MotionGallery } from "./MotionGallery";
 import { insertCombo, insertMotion, MotionPanel } from "./MotionPanel";
 import { OverlayPanel } from "./OverlayPanel";
+import { TextPanel } from "./TextPanel";
 import { PipelineStep } from "./PipelineStep";
 import { PlayerPanel } from "./PlayerPanel";
 import { RenderPanel } from "./RenderPanel";
@@ -114,7 +116,7 @@ function readLightPreview(): boolean {
   }
 }
 
-type InspectorTab = "motions" | "legenda" | "audio" | "midia" | "cor" | "exportar";
+type InspectorTab = "motions" | "legenda" | "texto" | "audio" | "midia" | "cor" | "exportar";
 
 /** Receita sem ajuste de cor (comparar antes/depois no preview) */
 function withoutColor(recipe: Recipe): Recipe {
@@ -746,7 +748,8 @@ export const Editor: React.FC<EditorProps> = ({
       setSelectedSegment(null);
       setSelectedAudioClip(null);
       setSelectedMotion(null);
-      setTab("midia");
+      // texto livre tem aba própria, à parte da legenda e das mídias
+      setTab(recipe?.overlays.find((o) => o.id === id)?.kind === "title" ? "texto" : "midia");
     }
   };
   // alvo arrastado no preview leva o inspetor ao painel do elemento
@@ -760,7 +763,7 @@ export const Editor: React.FC<EditorProps> = ({
   };
   const previewTarget = captionPicked && tab === "legenda"
     ? "caption"
-    : tab === "midia" && selectedOverlay
+    : (tab === "midia" || tab === "texto") && selectedOverlay
       ? `overlay:${selectedOverlay}`
       : tab === "motions" && selectedMotion
         ? `motion:${selectedMotion}`
@@ -955,6 +958,7 @@ export const Editor: React.FC<EditorProps> = ({
               kind: isVideo ? "video" : "image",
               text: "",
               file: up.file,
+              titleStyle: DEFAULT_TITLE_STYLE,
               start,
               end: Math.round(Math.min(start + length, total) * 100) / 100,
               // vídeo por cima entra sem som (Overlays é trilha visual)
@@ -1285,6 +1289,7 @@ export const Editor: React.FC<EditorProps> = ({
             tabs={[
               { id: "motions", label: "Motions", badge: pendingMotions },
               { id: "legenda", label: "Legenda" },
+              { id: "texto", label: "Texto" },
               { id: "audio", label: "Áudio" },
               { id: "midia", label: "Mídia" },
               { id: "cor", label: "Cor" },
@@ -1354,6 +1359,15 @@ export const Editor: React.FC<EditorProps> = ({
                   onSelect={setSelectedOverlay}
                 />
               </>
+            )}
+            {tab === "texto" && (
+              <TextPanel
+                recipe={recipe}
+                selectedId={selectedOverlay}
+                playheadSeconds={playheadOutput}
+                onChange={update}
+                onSelect={setSelectedOverlay}
+              />
             )}
             {tab === "cor" && (
               <ColorPanel

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPlacement, setPlacement } from "../src/positioning";
+import { canResize, getPlacement, resizeTarget, setPlacement } from "../src/positioning";
 import { parseRecipe, type Recipe } from "../src/schema";
 
 function recipe(): Recipe {
@@ -57,5 +57,31 @@ describe("setPlacement", () => {
     const r = recipe();
     expect(setPlacement(r, "overlay:nada", { x: 1, y: 1 }).overlays).toEqual(r.overlays);
     expect(setPlacement(r, "xyz", { x: 1, y: 1 })).toBe(r);
+  });
+});
+
+describe("resizeTarget", () => {
+  it("muda fonte da legenda e do texto livre, size do motion (e aceita a sugestão)", () => {
+    let r = recipe();
+    const caption = r.captions.style.fontSizePx;
+    r = resizeTarget(r, "caption", 1.5);
+    r = resizeTarget(r, "overlay:ov_1", 2);
+    r = resizeTarget(r, "motion:mo_1", 1.3);
+    expect(r.captions.style.fontSizePx).toBe(Math.round(caption * 1.5));
+    expect(r.overlays[0].titleStyle.fontSize).toBe(116);
+    expect(r.motions[0]).toMatchObject({ size: 1.3, status: "accepted" });
+  });
+
+  it("respeita os limites do schema", () => {
+    const r = resizeTarget(recipe(), "motion:mo_1", 10);
+    expect(r.motions[0].size).toBe(3);
+    expect(resizeTarget(recipe(), "overlay:ov_1", 0.01).overlays[0].titleStyle.fontSize).toBe(16);
+  });
+
+  it("zoom de câmera não tem tamanho", () => {
+    const base = recipe();
+    const r = { ...base, motions: [{ ...base.motions[0], kind: "zoom" } as unknown as (typeof base.motions)[number]] };
+    expect(canResize(r, "motion:mo_1")).toBe(false);
+    expect(resizeTarget(r, "motion:mo_1", 2)).toBe(r);
   });
 });

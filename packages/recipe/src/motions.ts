@@ -118,6 +118,7 @@ export function punchInMotions(segments: Pick<Segment, "sourceId" | "sourceStart
         placement: null,
         group: PUNCH_IN_GROUP,
         accentColor: null,
+        size: 1,
         params: { scale: 1.08, style: "punch", focusX: 50, focusY: 40 },
       }) as Motion
   );

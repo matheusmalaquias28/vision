@@ -8,13 +8,13 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { resolveMotionAccent, type CaptionStyle, type MotionOf, type PlacedMotion } from "@vision/recipe";
+import { motionResizable, resolveMotionAccent, type CaptionStyle, type MotionOf, type PlacedMotion } from "@vision/recipe";
 import { AnnotationMotion, CalloutMotion, ChartMotion, ShineSweep, SpeedLinesMotion } from "./ElementsMotions";
 import { IllustrationMotion } from "./IllustrationMotion";
 import { ScreenMotion } from "./ScreenMotion";
 import { TransitionMotion } from "./TransitionMotion";
 import { useGoogleFont } from "./fonts";
-import { AtPoint, dragProps } from "./Positioned";
+import { AtPoint, DRAG_ATTR, dragProps } from "./Positioned";
 
 /**
  * Componentes da biblioteca fechada de motions (metadados em
@@ -1261,6 +1261,8 @@ export const Motions: React.FC<{
   useMotionFonts(style);
   return (
     <>
+      {/* tamanho do motion (size): zoom no elemento visível, que cresce sem sair do lugar do layout */}
+      <style>{`[${DRAG_ATTR}^="motion:"] { zoom: var(--vision-size, 1); }`}</style>
       {placed.map(({ motion: m, outputStart }) => {
         if (m.kind === "zoom") return null;
         // todos os componentes leem o destaque de highlightColor: resolve aqui, uma vez
@@ -1271,6 +1273,7 @@ export const Motions: React.FC<{
             key={m.id}
             from={Math.round(outputStart * fps)}
             durationInFrames={Math.max(1, Math.round(m.durationSeconds * fps))}
+            style={motionResizable(m) && m.size !== 1 ? ({ "--vision-size": m.size } as React.CSSProperties) : undefined}
           >
             <MotionBody m={m} style={motionStyle} />
           </Sequence>

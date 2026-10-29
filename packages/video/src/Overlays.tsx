@@ -16,6 +16,7 @@ import {
   type Overlay,
   type Recipe,
 } from "@vision/recipe";
+import { useGoogleFont } from "./fonts";
 import { mediaSrc } from "./media";
 import { AtPoint, dragProps } from "./Positioned";
 
@@ -25,6 +26,8 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const s = overlay.titleStyle;
+  useGoogleFont(fontFamily, s.fontWeight);
   const enter = spring({ frame, fps, config: { damping: 200 }, durationInFrames: 8 });
   const justify =
     overlay.position === "top"
@@ -36,20 +39,38 @@ const TitleOverlay: React.FC<{ overlay: Overlay; fontFamily: string }> = ({
     <div
       {...dragProps(`overlay:${overlay.id}`)}
       style={{
-        maxWidth: "88%",
-        textAlign: "center",
+        maxWidth: `${s.maxWidth}%`,
+        textAlign: s.align,
         fontFamily: `'${fontFamily}', 'Arial Black', sans-serif`,
-        fontWeight: 900,
-        fontSize: 58,
-        color: "white",
-        textTransform: "uppercase",
-        WebkitTextStroke: "10px black",
+        fontWeight: s.fontWeight,
+        fontSize: s.fontSize,
+        color: s.color,
+        textTransform: s.uppercase ? "uppercase" : "none",
+        // quebra de linha digitada no painel vale (headline em 2 linhas)
+        whiteSpace: "pre-wrap",
+        WebkitTextStroke: s.strokeWidth > 0 ? `${s.strokeWidth}px ${s.strokeColor}` : undefined,
         paintOrder: "stroke",
+        lineHeight: s.boxColor ? 1.4 : undefined,
         transform: `scale(${0.9 + enter * 0.1}) translateY(${(1 - enter) * -30}px)`,
         opacity: enter,
       }}
     >
-      {overlay.text}
+      {s.boxColor ? (
+        // caixa por linha (clone): cada linha ganha sua faixa, como headline de reels
+        <span
+          style={{
+            background: s.boxColor,
+            padding: "0.06em 0.32em",
+            borderRadius: "0.16em",
+            boxDecorationBreak: "clone",
+            WebkitBoxDecorationBreak: "clone",
+          }}
+        >
+          {overlay.text}
+        </span>
+      ) : (
+        overlay.text
+      )}
     </div>
   );
   if (overlay.placement) return <AtPoint at={overlay.placement}>{title}</AtPoint>;
