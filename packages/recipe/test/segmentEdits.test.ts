@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withExtractedAudio } from "../src/audioClips";
+import { lineToVolume, volumeToLine, withExtractedAudio } from "../src/audioClips";
 import { isNeutralGrade, NEUTRAL_GRADE, sharpenFilter } from "../src/color";
 import { segmentFraming } from "../src/framing";
 import { parseRecipe } from "../src/schema";
@@ -82,5 +82,31 @@ describe("extrair áudio", () => {
     const r = withExtractedAudio(recipe(), { kind: "overlay", id: "ov_1" }, { ...extracted, durationSeconds: 3 }, "aud_2")!;
     expect(r.audioClips.find((c) => c.id === "aud_2")).toMatchObject({ start: 2, duration: 3, offset: 0 });
     expect(withExtractedAudio(recipe(), { kind: "overlay", id: "ov_2" }, extracted, "aud_3")).toBeNull();
+  });
+});
+
+describe("linha de volume", () => {
+  it("dB na altura: 100% em cima, mudo embaixo, música a 12% no meio", () => {
+    expect(volumeToLine(1)).toBe(1);
+    expect(volumeToLine(0)).toBe(0);
+    expect(volumeToLine(0.12)).toBeGreaterThan(0.4);
+    expect(volumeToLine(0.12)).toBeLessThan(0.6);
+    expect(lineToVolume(1)).toBe(1);
+    expect(lineToVolume(0.01)).toBe(0);
+    expect(lineToVolume(-1)).toBe(0);
+    expect(lineToVolume(2)).toBe(1);
+  });
+
+  it("ida e volta mantém o volume (a 1%)", () => {
+    for (const v of [0.05, 0.12, 0.3, 0.5, 0.8, 1]) expect(lineToVolume(volumeToLine(v))).toBeCloseTo(v, 2);
+  });
+
+  it("volume do trecho vale no áudio extraído e passa para os pedaços ao dividir", () => {
+    const r = recipe();
+    const segs = r.timeline.segments.map((s) => (s.id === "seg_02" ? { ...s, volume: 0.5 } : s));
+    const withVol = { ...r, timeline: { ...r.timeline, segments: segs } };
+    const out = withExtractedAudio(withVol, { kind: "segment", id: "seg_02" }, { file: "x.m4a", durationSeconds: 30 }, "a")!;
+    expect(out.audioClips[0].volume).toBe(0.5);
+    expect(splitSegmentAt(segs, 8).slice(1).map((s) => s.volume)).toEqual([0.5, 0.5]);
   });
 });

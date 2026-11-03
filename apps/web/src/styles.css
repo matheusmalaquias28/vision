@@ -2026,6 +2026,67 @@ kbd {
   border-color: color-mix(in oklch, var(--trk-audio) 45%, transparent);
 }
 
+/* linha de volume dos clipes de áudio: arrastar para cima/baixo */
+.vol-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  margin-top: -5px;
+  z-index: 2;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.vol-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: oklch(0.97 0.02 90 / 0.85);
+  box-shadow: 0 0 0 0.5px oklch(0.1 0 0 / 0.6);
+}
+
+.vol-line:hover::before,
+.vol-line.dragging::before {
+  background: oklch(0.92 0.16 95);
+  height: 3px;
+  top: 3.5px;
+}
+
+.vol-line.silent::before {
+  background: oklch(0.7 0.18 25 / 0.9);
+}
+
+.vol-label {
+  position: absolute;
+  right: 10px;
+  bottom: 7px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: oklch(0.15 0 0);
+  background: oklch(0.92 0.16 95);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.vol-label.below {
+  bottom: auto;
+  top: 7px;
+}
+
+.vol-line:hover .vol-label,
+.vol-line.dragging .vol-label {
+  opacity: 1;
+}
+
 /* trecho sem som (áudio extraído para Efeitos ou desligado) */
 .clip-audio.muted {
   opacity: 0.4;

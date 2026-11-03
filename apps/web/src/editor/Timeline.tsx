@@ -27,6 +27,8 @@ import {
   type TrackId,
   sourceToOutput,
   splitAudioClip,
+  lineToVolume,
+  volumeToLine,
   splitItemAt,
   splitSegmentAt,
   type Asset,
@@ -110,6 +112,59 @@ const Ramps: React.FC<{ inSec: number; outSec: number; pxPerSec: number }> = ({ 
     {outSec > 0 && <span className="ramp ramp-out" style={{ width: outSec * pxPerSec }} />}
   </>
 );
+
+/**
+ * Linha de volume sobre o clipe de áudio: arrastar para cima/baixo muda o
+ * volume (escala em dB, `volumeToLine`), Shift = ajuste fino, duplo clique
+ * volta a 100%. Na lâmina ela some (o clique corta o clipe).
+ */
+const VolumeLine: React.FC<{
+  volume: number;
+  disabled?: boolean;
+  onStart: () => void;
+  onChange: (volume: number) => void;
+}> = ({ volume, disabled, onStart, onChange }) => {
+  const [dragging, setDragging] = useState(false);
+  if (disabled) return null;
+  const line = volumeToLine(volume);
+  const down = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onStart();
+    const height = e.currentTarget.parentElement?.getBoundingClientRect().height ?? 30;
+    const startY = e.clientY;
+    const startLine = line;
+    setDragging(true);
+    const onMove = (ev: PointerEvent) => {
+      const dy = (ev.clientY - startY) * (ev.shiftKey ? 0.25 : 1);
+      onChange(lineToVolume(startLine - dy / height));
+    };
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  const pct = Math.round(volume * 100);
+  return (
+    <div
+      className={`vol-line ${dragging ? "dragging" : ""} ${volume === 0 ? "silent" : ""}`}
+      style={{ top: `${(1 - line) * 100}%` }}
+      title={`Volume ${pct}% · arraste para cima/baixo (Shift = fino) · duplo clique = 100%`}
+      onPointerDown={down}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onStart();
+        onChange(1);
+      }}
+    >
+      <span className={`vol-label ${line > 0.6 ? "below" : ""}`}>{volume === 0 ? "mudo" : `${pct}%`}</span>
+    </div>
+  );
+};
 
 function fileName(file: string): string {
   return file.split("/").pop() ?? file;
@@ -905,6 +960,12 @@ export const Timeline: React.FC<TimelineProps> = ({
           </span>
         )}
         <Ramps inSec={c.fadeInSeconds} outSec={c.fadeOutSeconds} pxPerSec={pxPerSec} />
+        <VolumeLine
+          volume={c.volume}
+          disabled={tool === "blade"}
+          onStart={() => onSelectAudioClip(c.id)}
+          onChange={(volume) => setAudioClips(recipe.audioClips.map((x) => (x.id === c.id ? { ...x, volume } : x)))}
+        />
         <div className="handle handle-l" onPointerDown={drag("start")} />
         <div className="handle handle-r" onPointerDown={drag("end")} />
       </div>
@@ -1380,6 +1441,15 @@ export const Timeline: React.FC<TimelineProps> = ({
                       height={ROW.clipAudio - 10}
                     />
                   )}
+                  {/* trecho mudo (som extraído) não tem volume para ajustar: religa no painel do trecho */}
+                  <VolumeLine
+                    volume={seg.volume ?? 1}
+                    disabled={tool === "blade" || seg.muted === true}
+                    onStart={() => onSelectSegment(seg.id)}
+                    onChange={(volume) =>
+                      setSegments(segments.map((s) => (s.id === seg.id ? { ...s, volume: volume === 1 ? null : volume } : s)))
+                    }
+                  />
                   <div className="handle handle-l" onPointerDown={(e) => startEdgeDrag(e, i, "start")} />
                   <div className="handle handle-r" onPointerDown={(e) => startEdgeDrag(e, i, "end")} />
                 </div>

@@ -1,6 +1,6 @@
 import { segmentDuration, segmentFraming, type ElementAnim, type Framing, type Recipe, type Segment } from "@vision/recipe";
 import React from "react";
-import { Prop, Section, Toggle } from "../ui/controls";
+import { Prop, Section, Slider, Toggle } from "../ui/controls";
 import { AnimFields } from "./AnimFields";
 import { FramingFields } from "./FramingFields";
 
@@ -16,7 +16,7 @@ export const SegmentPanel: React.FC<SegmentPanelProps> = ({ recipe, segmentId, o
   const seg = segments.find((s) => s.id === segmentId);
   if (!seg) return null;
   const source = recipe.sources.find((s) => s.id === seg.sourceId);
-  const patch = (p: Partial<Pick<Segment, "enter" | "exit" | "framing" | "muted">>) =>
+  const patch = (p: Partial<Pick<Segment, "enter" | "exit" | "framing" | "muted" | "volume">>) =>
     onChange({
       ...recipe,
       timeline: { ...recipe.timeline, segments: segments.map((s) => (s.id === seg.id ? { ...s, ...p } : s)) },
@@ -51,6 +51,20 @@ export const SegmentPanel: React.FC<SegmentPanelProps> = ({ recipe, segmentId, o
         <Prop label="Som do trecho" hint="Desligado quando o áudio foi extraído para a trilha de Efeitos (botão direito → Extrair áudio)">
           <Toggle checked={!seg.muted} onChange={(on) => patch({ muted: on ? null : true })} label="Som do trecho" />
         </Prop>
+        {!seg.muted && (
+          <Prop label="Volume do trecho" hint="O mesmo da linha amarela na trilha Áudio do vídeo; multiplica o volume geral do vídeo (aba Áudio)">
+            <Slider
+              value={seg.volume ?? 1}
+              min={0}
+              max={1}
+              step={0.01}
+              unit="%"
+              format={(v) => String(Math.round(v * 100))}
+              parse={(s) => Number(s) / 100}
+              onChange={(v) => patch({ volume: v === 1 ? null : v })}
+            />
+          </Prop>
+        )}
         <div className="row row-end">
           {own && (
             <button className="sm ghost" title="Volta a seguir o enquadramento do vídeo todo" onClick={() => patch({ framing: null })}>

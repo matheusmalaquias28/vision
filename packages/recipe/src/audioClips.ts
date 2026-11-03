@@ -129,7 +129,7 @@ export function withExtractedAudio(
     if (i < 0) return null;
     const seg = segs[i];
     const start = segs.slice(0, i).reduce((acc, s) => acc + segmentDuration(s), 0);
-    const clip = clipOf(start, segmentDuration(seg), seg.sourceStart, recipe.audio.originalVolume);
+    const clip = clipOf(start, segmentDuration(seg), seg.sourceStart, recipe.audio.originalVolume * (seg.volume ?? 1));
     return {
       ...recipe,
       timeline: { ...recipe.timeline, segments: segs.map((s) => (s.id === seg.id ? { ...s, muted: true } : s)) },
@@ -140,4 +140,26 @@ export function withExtractedAudio(
   if (!o) return null;
   const clip = clipOf(o.start, (o.end ?? total) - o.start, 0, 1);
   return { ...recipe, audioClips: [...recipe.audioClips, clip] };
+}
+
+/** Piso da linha de volume: abaixo disso a linha encosta embaixo (mudo) */
+const VOLUME_FLOOR_DB = -40;
+
+/**
+ * Linha de volume da timeline: volume 0–1 → altura 0–1 (0 = embaixo/mudo,
+ * 1 = em cima/100%). Em dB, como o ouvido percebe: a música a 12% fica no
+ * meio da altura, não colada no chão.
+ */
+export function volumeToLine(volume: number): number {
+  if (volume <= 0.01) return 0;
+  const db = 20 * Math.log10(Math.min(volume, 1));
+  return Math.min(1, Math.max(0, (db - VOLUME_FLOOR_DB) / -VOLUME_FLOOR_DB));
+}
+
+/** Inverso de volumeToLine, arredondado a 1%; perto do chão vira mudo */
+export function lineToVolume(line: number): number {
+  const p = Math.min(1, Math.max(0, line));
+  if (p < 0.02) return 0;
+  const v = Math.pow(10, (VOLUME_FLOOR_DB * (1 - p)) / 20);
+  return Math.max(0.01, Math.round(v * 100) / 100);
 }

@@ -117,6 +117,11 @@ export const SegmentSchema = z
     framing: FramingSchema.nullish(),
     /** Som do trecho desligado (ex.: o áudio foi extraído para a trilha de Efeitos) */
     muted: z.boolean().nullish(),
+    /**
+     * Volume só deste trecho (ausente/null = 1), multiplicado pelo
+     * `audio.originalVolume`. Até 1: acima disso o Player não reproduz igual ao MP4.
+     */
+    volume: z.number().min(0).max(1).nullish(),
   })
   .refine((s) => s.sourceEnd > s.sourceStart, {
     message: "segment: duração deve ser positiva",

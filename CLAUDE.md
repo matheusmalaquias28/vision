@@ -143,6 +143,10 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `POST /api/projects/:id/extract-audio` (`pipeline/extractAudio.ts`, m4a em
   `assets/audio-<hash>`) → `withExtractedAudio`: clipe sfx alinhado e o
   trecho fica `muted` (religa no painel do trecho).
+- Linha de volume (`VolumeLine` em `Timeline.tsx`) em todo clipe de áudio:
+  arrastar = `audioClip.volume` ou `segment.volume` (0–1, × `originalVolume`;
+  acima de 1 o Player não toca igual ao MP4). Altura em dB
+  (`volumeToLine`/`lineToVolume`, −40 dB…0), Shift fino, duplo clique 100%.
   AbsoluteFill do Remotion fixa height 100%: metade precisa de height "50%".
 - Camadas da timeline (`mediaRules.ts`): áudio só em trilha de áudio
   (Música, Efeitos, Áudio do vídeo), nunca com vídeo/texto; vídeo de overlay

@@ -43,6 +43,8 @@ const SegmentVideo: React.FC<{
   const enhanced = useEnhanced && source.enhancedAudio !== null;
   // trecho mudo (som extraído para a trilha de Efeitos): nem o original nem o tratado
   const muted = segment.muted === true;
+  // volume do trecho (linha de volume na timeline) × volume geral do vídeo
+  const volume = originalVolume * (segment.volume ?? 1);
   const trim = Math.round(segment.sourceStart * fps);
   const temp = temperatureLayer(source.color);
   const sharpen = sharpenFilter(source.color);
@@ -67,7 +69,7 @@ const SegmentVideo: React.FC<{
         <OffthreadVideo
           src={mediaSrc(proxyFile ?? source.file)}
           trimBefore={trim}
-          volume={enhanced || muted ? 0 : originalVolume}
+          volume={enhanced || muted ? 0 : volume}
           muted={enhanced || muted}
           pauseWhenBuffering
           style={{
@@ -88,7 +90,7 @@ const SegmentVideo: React.FC<{
         <Audio
           src={mediaSrc(source.enhancedAudio)}
           trimBefore={trim}
-          volume={originalVolume}
+          volume={volume}
         />
       ) : null}
     </>
