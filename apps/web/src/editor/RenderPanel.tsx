@@ -3,7 +3,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   deliverProject,
   getRenderJob,
-  putRecipe,
   startRender,
   type ProjectDemand,
   type RenderJob,
@@ -14,7 +13,8 @@ import { Icon } from "./Icon";
 interface RenderPanelProps {
   recipe: Recipe;
   dirty: boolean;
-  onSaved: () => void;
+  /** Grava antes (na fila dos salvamentos do editor) */
+  saveIfDirty: () => Promise<unknown>;
   /** projeto ligado a uma demanda do War: libera o envio ao Drive */
   demand: ProjectDemand | null;
   onDelivered: () => void;
@@ -23,7 +23,7 @@ interface RenderPanelProps {
 export const RenderPanel: React.FC<RenderPanelProps> = ({
   recipe,
   dirty,
-  onSaved,
+  saveIfDirty,
   demand,
   onDelivered,
 }) => {
@@ -68,10 +68,7 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
     setError(null);
     try {
       // garante que o render usa exatamente o que está na tela
-      if (dirty) {
-        await putRecipe(recipe);
-        onSaved();
-      }
+      await saveIfDirty();
       const started = await startRender(recipe.projectId);
       setJob(started);
       pollRef.current = window.setInterval(async () => {

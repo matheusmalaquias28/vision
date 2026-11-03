@@ -33,15 +33,28 @@ export function isNeutralGrade(g: ColorGrade | null | undefined): boolean {
   );
 }
 
+/** Raio da máscara de nitidez em px de um quadro de 1080 de largura (1,2 não aparecia nem no MP4) */
+const SHARPEN_RADIUS_1080 = 2;
+
 /**
  * Nitidez como máscara de nitidez num filtro SVG (CSS não tem "sharpen"):
  * saída = (1 + k)·original − k·desfocado. null = sem filtro.
  * Projetos antigos não têm o campo (undefined = 0).
+ *
+ * O raio vale em px da composição. O Player mostra o quadro encolhido
+ * (`viewScale` ~0,3): com o raio do MP4 o realce some na redução, então no
+ * preview ele cresce na mesma proporção (o realce fica com a mesma largura na
+ * tela que tem no MP4 visto em tamanho real). Render: viewScale 1.
  */
-export function sharpenFilter(g: ColorGrade | null | undefined): { radius: number; amount: number } | null {
+export function sharpenFilter(
+  g: ColorGrade | null | undefined,
+  opts: { compositionWidth?: number; viewScale?: number } = {}
+): { radius: number; amount: number } | null {
   const s = g?.sharpness ?? 0;
   if (s < 0.005) return null;
-  return { radius: 1.2, amount: r2(s * 1.5) };
+  const base = SHARPEN_RADIUS_1080 * ((opts.compositionWidth ?? 1080) / 1080);
+  const view = Math.min(1, Math.max(0.05, opts.viewScale ?? 1));
+  return { radius: r2(Math.min(base / view, 12)), amount: r2(s * 1.5) };
 }
 
 export type ColorPresetId = "original" | "log" | "vivid" | "soft";

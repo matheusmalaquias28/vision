@@ -115,8 +115,9 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `color.ts`: exposure/contrast/saturation/temperature; null = original). O
   render aplica filtro CSS brightness→contrast→saturate + camada soft-light de
   temperatura isolada no vídeo (`SegmentVideo`): preview = MP4. Nitidez
-  (`sharpness`) = máscara de nitidez em filtro SVG (`sharpenFilter`); modelos
-  e automático não mexem nela. "Automático" =
+  (`sharpness`) = máscara de nitidez em filtro SVG (`sharpenFilter`, raio 2 px
+  a 1080; no Player o raio ÷ `useCurrentScale()`, senão some no quadro
+  encolhido); modelos e automático não mexem nela. "Automático" =
   `POST /api/projects/:id/color/auto` (ffmpeg signalstats em 7 quadros, faixa
   pc/tv do arquivo → `autoGradeFromStats`, conservador: nunca reduz contraste
   nem saturação); não grava, o editor aplica e o operador salva.
@@ -301,6 +302,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   do topo) grava antes as edições não salvas (`saveIfDirty`); o áudio
   tratado entra por `serverPatch` sobre a receita atual (edição feita
   enquanto o servidor trabalhava não some).
+- Salvamento automático (`Editor.tsx`): `AUTOSAVE_MS` (1,5 s) depois da
+  última mudança, nunca com `busy` (passo do servidor). Todo PUT da receita
+  passa por `persist` (fila: um por vez, na ordem; só marca "Salvo" se nada
+  mudou durante o envio) — Ctrl+S, `saveIfDirty`, render. Aviso ao fechar a
+  aba com algo pendente; sair do editor grava na saída.
 - Caminhos de mídia na receita são relativos à raiz do repo com "/". O dir
   `media/` é servido como raiz estática (publicDir no render); componentes usam
   `mediaSrc()` que remove o prefixo `media/`.

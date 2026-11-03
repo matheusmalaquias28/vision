@@ -61,7 +61,10 @@ describe("nitidez", () => {
     expect(sharpenFilter(null)).toBeNull();
     expect(sharpenFilter(NEUTRAL_GRADE)).toBeNull();
     expect(isNeutralGrade({ ...NEUTRAL_GRADE, sharpness: 0.4 })).toBe(false);
-    expect(sharpenFilter({ ...NEUTRAL_GRADE, sharpness: 0.4 })).toEqual({ radius: 1.2, amount: 0.6 });
+    expect(sharpenFilter({ ...NEUTRAL_GRADE, sharpness: 0.4 })).toEqual({ radius: 2, amount: 0.6 });
+    // Player encolhido a 1/3: o raio cresce 3x para o realce aparecer; quadro 720 de largura: raio proporcional
+    expect(sharpenFilter({ ...NEUTRAL_GRADE, sharpness: 1 }, { viewScale: 1 / 3 })?.radius).toBe(6);
+    expect(sharpenFilter({ ...NEUTRAL_GRADE, sharpness: 1 }, { compositionWidth: 720 })?.radius).toBe(1.33);
     const old = recipe({}).sources[0];
     expect(old.color).toBeNull();
   });

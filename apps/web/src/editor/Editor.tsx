@@ -94,6 +94,8 @@ import { NotificationBell } from "../home/NotificationBell";
 const HISTORY_LIMIT = 100;
 /** Mudanças em sequência mais rápida que isso viram um passo só (arrastos) */
 const HISTORY_COALESCE_MS = 400;
+/** Salvamento automático: espera esse tempo sem mudança (arrasto = um envio só) */
+const AUTOSAVE_MS = 1500;
 
 const TL_HEIGHT_KEY = "vision.timelineHeight";
 const CUT_PACE_KEY = "vision.cutPace";
@@ -301,20 +303,43 @@ export const Editor: React.FC<EditorProps> = ({
     };
   }, [projectId, sourceFiles]);
 
+  /**
+   * Grava a receita ATUAL. Um envio por vez, na ordem (um salvamento antigo
+   * nunca chega depois de um novo). Edição feita durante o envio continua
+   * "não salva" e vai no próximo.
+   */
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const savingRef = useRef(false);
+  const persist = useCallback((): Promise<void> => {
+    const run = async () => {
+      const r = recipeRef.current;
+      if (!r) return;
+      savingRef.current = true;
+      try {
+        await putRecipe(r);
+        if (recipeRef.current === r) setDirty(false);
+      } finally {
+        savingRef.current = false;
+      }
+    };
+    const p = saveChain.current.catch(() => undefined).then(run);
+    saveChain.current = p;
+    return p;
+  }, []);
+
   const save = useCallback(async () => {
     const r = recipeRef.current;
     if (!r) return;
     setBusy("salvando");
     setError(null);
     try {
-      await putRecipe(r);
-      setDirty(false);
+      await persist();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [persist]);
 
   const fps = recipe?.render.fps ?? 30;
   const totalFrames = recipe ? recipeMetadata(recipe).durationInFrames : 1;
@@ -659,12 +684,54 @@ export const Editor: React.FC<EditorProps> = ({
   dirtyRef.current = dirty;
   const saveIfDirty = useCallback(async (): Promise<Recipe | null> => {
     const r = recipeRef.current;
-    if (r && dirtyRef.current) {
-      await putRecipe(r);
-      setDirty(false);
-    }
+    if (r && dirtyRef.current) await persist();
+    // espera também um salvamento automático que já estava a caminho
+    else await saveChain.current.catch(() => undefined);
     return r;
+  }, [persist]);
+
+  // ── Salvamento automático: AUTOSAVE_MS depois da última mudança ──
+  // (arrasto vira um envio só, quando para). Nunca durante um passo do servidor
+  // (busy): ele grava a receita dele e o editor recarrega/aplica por cima;
+  // salvar no meio podia apagar o que o servidor acabou de gravar.
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoSaveFailed, setAutoSaveFailed] = useState(false);
+  const [autoSaveRetry, setAutoSaveRetry] = useState(0);
+  useEffect(() => {
+    if (!recipe || !dirty || busy !== null) return;
+    const timer = window.setTimeout(() => {
+      setAutoSaving(true);
+      persist()
+        .then(() => setAutoSaveFailed(false))
+        .catch((e) => {
+          setAutoSaveFailed(true);
+          setError(`Salvamento automático falhou (tenta de novo em 10 s): ${e instanceof Error ? e.message : String(e)}`);
+          window.setTimeout(() => setAutoSaveRetry((n) => n + 1), 10_000);
+        })
+        .finally(() => setAutoSaving(false));
+    }, AUTOSAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [recipe, dirty, busy, persist, autoSaveRetry]);
+
+  // fechar/recarregar a aba com algo ainda não gravado: o navegador pergunta
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current && !savingRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
+
+  // sair do editor (início, outro projeto) antes do salvamento automático: grava na saída
+  useEffect(
+    () => () => {
+      const r = recipeRef.current;
+      if (r && dirtyRef.current) putRecipe(r).catch(() => undefined);
+    },
+    []
+  );
 
   /**
    * Resultado do servidor que só acrescenta campos (ex.: áudio tratado):
@@ -886,7 +953,8 @@ export const Editor: React.FC<EditorProps> = ({
 
   const step = (label: string, fn: () => Promise<Recipe>) =>
     runStep(label, async () => {
-      if (dirty) await putRecipe(recipe);
+      // na fila dos salvamentos (um automático já a caminho não chega depois)
+      await saveIfDirty();
       return fn();
     });
 
@@ -1208,17 +1276,20 @@ export const Editor: React.FC<EditorProps> = ({
         <span className="spacer" />
 
         <span
-          className={`save-state ${busy ? "busy" : dirty ? "dirty" : ""}`}
-          title={dirty ? "Ctrl+S salva" : undefined}
+          className={`save-state ${busy ? "busy" : dirty || autoSaving ? "dirty" : ""}`}
+          title="Salva sozinho a cada alteração (Ctrl+S salva na hora)"
         >
           <span className="save-dot" />
           {busy
             ? `${busyLabel[busy] ?? (busy.startsWith("envio:") ? busy.slice(6) : "Processando")}…`
-            : dirty
+            : autoSaveFailed && dirty
               ? "Não salvo"
-              : "Salvo"}
+              : dirty || autoSaving
+                ? "Salvando…"
+                : "Salvo"}
         </span>
-        {dirty && !busy && (
+        {/* o botão só aparece se o salvamento automático falhou */}
+        {dirty && !busy && autoSaveFailed && (
           <button className="sm" onClick={save}>
             Salvar <Kbd>Ctrl S</Kbd>
           </button>
@@ -1425,7 +1496,7 @@ export const Editor: React.FC<EditorProps> = ({
               <RenderPanel
                 recipe={recipe}
                 dirty={dirty}
-                onSaved={() => setDirty(false)}
+                saveIfDirty={saveIfDirty}
                 demand={demand}
                 onDelivered={() => getProjectDemand(projectId).then(setDemand).catch(() => {})}
               />

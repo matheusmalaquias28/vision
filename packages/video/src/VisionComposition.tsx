@@ -6,6 +6,7 @@ import {
   OffthreadVideo,
   Sequence,
   useCurrentFrame,
+  useCurrentScale,
   useVideoConfig,
 } from "remotion";
 import {
@@ -39,7 +40,7 @@ const SegmentVideo: React.FC<{
   /** cópia leve do bruto (só no editor) */
   proxyFile?: string;
 }> = ({ source, segment, originalVolume, useEnhanced, proxyFile }) => {
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
   const enhanced = useEnhanced && source.enhancedAudio !== null;
   // trecho mudo (som extraído para a trilha de Efeitos): nem o original nem o tratado
   const muted = segment.muted === true;
@@ -47,7 +48,9 @@ const SegmentVideo: React.FC<{
   const volume = originalVolume * (segment.volume ?? 1);
   const trim = Math.round(segment.sourceStart * fps);
   const temp = temperatureLayer(source.color);
-  const sharpen = sharpenFilter(source.color);
+  // no Player o quadro aparece encolhido: o raio acompanha (no render a escala é 1)
+  const viewScale = useCurrentScale();
+  const sharpen = sharpenFilter(source.color, { compositionWidth: width, viewScale });
   // id único por trecho: vários trechos ficam montados ao mesmo tempo (premount)
   const sharpenId = `vision-sharpen-${segment.id}`;
   const filter = [colorFilterCss(source.color), sharpen ? `url(#${sharpenId})` : undefined].filter(Boolean).join(" ");
