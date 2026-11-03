@@ -163,11 +163,11 @@ export function restoreSourceRange(
       prev.sourceStart <= s.sourceStart &&
       s.sourceStart <= prev.sourceEnd + MIN_SEGMENT_SECONDS
     ) {
-      // o segmento original preserva seu id; o restaurado é absorvido
-      const keepId = prev === restored ? s.id : prev.id;
+      // o segmento original preserva seu id (e entrada/saída/enquadramento); o restaurado é absorvido
+      const kept = prev === restored ? s : prev;
       merged[merged.length - 1] = {
-        ...prev,
-        id: keepId,
+        ...kept,
+        sourceStart: prev.sourceStart,
         sourceEnd: Math.max(prev.sourceEnd, s.sourceEnd),
       };
       continue;

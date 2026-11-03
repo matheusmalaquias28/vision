@@ -68,7 +68,16 @@ const SNAP_PX = 6;
 export type TimelineTool = "select" | "blade";
 
 /** Ações do menu do botão direito (o editor executa; ver timelineAction) */
-export type TimelineItemAction = "cut" | "copy" | "paste" | "duplicate" | "split" | "delete" | "accept" | "reject";
+export type TimelineItemAction =
+  | "cut"
+  | "copy"
+  | "paste"
+  | "duplicate"
+  | "split"
+  | "delete"
+  | "accept"
+  | "reject"
+  | "extractAudio";
 
 /** Menu aberto: item clicado ("tipo:id", null = espaço vazio) e o instante sob o cursor */
 interface ContextMenuState {
@@ -941,6 +950,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     );
     const editable = kind === "segment" || kind === "audio" || kind === "overlay" || kind === "motion";
     const splittable = editable || kind === "caption";
+    // som de um vídeo vira clipe na trilha de Efeitos (trecho ainda com som, ou overlay de vídeo)
+    const itemId = m.key ? m.key.slice(m.key.indexOf(":") + 1) : "";
+    const extractable =
+      (kind === "segment" && segments.some((s) => s.id === itemId && !s.muted)) ||
+      (kind === "overlay" && recipe.overlays.some((o) => o.id === itemId && o.kind === "video"));
     return (
       <div ref={ctxMenuRef} className="popover ctx-menu" style={{ left: m.x, top: m.y }} onContextMenu={(e) => e.preventDefault()}>
         {motion?.status === "pending" && (
@@ -960,6 +974,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         {kind !== "caption" && item("paste", "Colar", "plus", "Ctrl V", !canPaste)}
         {editable && item("duplicate", "Duplicar", "layers", "Ctrl D")}
         {splittable && item("split", "Dividir aqui", "fit")}
+        {extractable && item("extractAudio", "Extrair áudio", "music")}
         {m.key && (
           <>
             <div className="ctx-sep" />
@@ -1351,9 +1366,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                 <div
                   key={seg.id}
                   data-sel={`segment:${seg.id}`}
-                  className={`clip clip-audio ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
+                  className={`clip clip-audio ${seg.muted ? "muted" : ""} ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
                   style={{ left: segmentPositions[i] * pxPerSec, width }}
-                  title={`Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
+                  title={`${seg.muted ? "Sem som (extraído ou desligado) · " : ""}Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
                   onPointerDown={(e) => segmentPointerDown(e, seg)}
                 >
                   {waveforms?.[seg.sourceId] && (

@@ -110,6 +110,13 @@ export const SegmentSchema = z
      */
     enter: ElementAnimSchema.nullish(),
     exit: ElementAnimSchema.nullish(),
+    /**
+     * Enquadramento/escala só deste trecho (ausente/null = o da fonte). Dividir
+     * ou cortar o trecho leva o enquadramento para os dois pedaços.
+     */
+    framing: FramingSchema.nullish(),
+    /** Som do trecho desligado (ex.: o áudio foi extraído para a trilha de Efeitos) */
+    muted: z.boolean().nullish(),
   })
   .refine((s) => s.sourceEnd > s.sourceStart, {
     message: "segment: duração deve ser positiva",

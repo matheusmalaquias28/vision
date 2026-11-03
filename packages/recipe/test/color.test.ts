@@ -33,7 +33,7 @@ describe("ajuste de cor", () => {
     expect(colorFilterCss(null)).toBeUndefined();
     expect(colorFilterCss(NEUTRAL_GRADE)).toBeUndefined();
     expect(colorFilterCss({ ...NEUTRAL_GRADE, saturation: 1.5, exposure: 1.2 })).toBe("brightness(1.2) saturate(1.5)");
-    expect(colorFilterCss({ exposure: 1.1, contrast: 1.6, saturation: 1.8, temperature: 0.3 })).toBe(
+    expect(colorFilterCss({ exposure: 1.1, contrast: 1.6, saturation: 1.8, temperature: 0.3, sharpness: 0 })).toBe(
       "brightness(1.1) contrast(1.6) saturate(1.8)"
     );
   });

@@ -14,6 +14,8 @@ import {
   colorFilterCss,
   framingStyle,
   placeMotions,
+  segmentFraming,
+  sharpenFilter,
   temperatureLayer,
   zoomAt,
   type Recipe,
@@ -39,34 +41,50 @@ const SegmentVideo: React.FC<{
 }> = ({ source, segment, originalVolume, useEnhanced, proxyFile }) => {
   const { fps } = useVideoConfig();
   const enhanced = useEnhanced && source.enhancedAudio !== null;
+  // trecho mudo (som extraído para a trilha de Efeitos): nem o original nem o tratado
+  const muted = segment.muted === true;
   const trim = Math.round(segment.sourceStart * fps);
   const temp = temperatureLayer(source.color);
+  const sharpen = sharpenFilter(source.color);
+  // id único por trecho: vários trechos ficam montados ao mesmo tempo (premount)
+  const sharpenId = `vision-sharpen-${segment.id}`;
+  const filter = [colorFilterCss(source.color), sharpen ? `url(#${sharpenId})` : undefined].filter(Boolean).join(" ");
   // entrada/saída do trecho (o fundo do quadro aparece por trás: preto)
   const anim = useElementAnim(segment.enter, segment.exit);
   return (
     <>
+      {sharpen && (
+        // máscara de nitidez: (1 + k)·original − k·desfocado
+        <svg width={0} height={0} style={{ position: "absolute" }} aria-hidden>
+          <filter id={sharpenId} colorInterpolationFilters="sRGB">
+            <feGaussianBlur in="SourceGraphic" stdDeviation={sharpen.radius} result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="arithmetic" k1={0} k2={1 + sharpen.amount} k3={-sharpen.amount} k4={0} />
+          </filter>
+        </svg>
+      )}
       {/* isolado: a camada de temperatura só mistura com o vídeo, nunca com legenda/motions */}
       <AbsoluteFill style={withAnim({ isolation: "isolate", overflow: "hidden" }, anim)}>
         <OffthreadVideo
           src={mediaSrc(proxyFile ?? source.file)}
           trimBefore={trim}
-          volume={enhanced ? 0 : originalVolume}
-          muted={enhanced}
+          volume={enhanced || muted ? 0 : originalVolume}
+          muted={enhanced || muted}
           pauseWhenBuffering
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            // enquadramento: o que aparece quando o vídeo é cortado (metade do split, vídeo horizontal)
-            ...framingStyle(source.framing),
-            filter: colorFilterCss(source.color),
+            // enquadramento: o que aparece quando o vídeo é cortado (metade do split, vídeo horizontal);
+            // o do trecho vence o da fonte
+            ...framingStyle(segmentFraming(segment, source)),
+            filter: filter || undefined,
           }}
         />
         {temp && (
           <AbsoluteFill style={{ backgroundColor: temp.color, opacity: temp.opacity, mixBlendMode: "soft-light" }} />
         )}
       </AbsoluteFill>
-      {enhanced && source.enhancedAudio ? (
+      {enhanced && !muted && source.enhancedAudio ? (
         <Audio
           src={mediaSrc(source.enhancedAudio)}
           trimBefore={trim}

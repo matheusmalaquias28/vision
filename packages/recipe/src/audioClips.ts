@@ -1,4 +1,5 @@
-import type { AudioClip } from "./schema";
+import type { AudioClip, Recipe } from "./schema";
+import { outputDuration, segmentDuration } from "./time";
 
 /** Pedaços menores que isso não são criados ao dividir um clipe */
 export const MIN_AUDIO_CLIP_SECONDS = 0.1;
@@ -97,4 +98,46 @@ export function createAudioClip(opts: {
     origin: "manual",
     note: "",
   };
+}
+
+/** O que teve o som extraído: um trecho da sequência ou um overlay de vídeo */
+export type AudioSourceItem = { kind: "segment"; id: string } | { kind: "overlay"; id: string };
+
+/**
+ * Som extraído de um vídeo (arquivo já gerado no servidor) vira um clipe na
+ * trilha de Efeitos, alinhado com a imagem: trecho → mesmo instante e mesmo
+ * ponto do bruto, e o trecho fica mudo (senão tocaria dobrado); overlay →
+ * início dele (overlay de vídeo já sai sem som). null se o item não existe.
+ */
+export function withExtractedAudio(
+  recipe: Recipe,
+  item: AudioSourceItem,
+  extracted: { file: string; durationSeconds: number },
+  newId: string
+): Recipe | null {
+  const total = outputDuration(recipe.timeline.segments);
+  const base = { id: newId, kind: "sfx" as const, file: extracted.file, mediaDurationSeconds: extracted.durationSeconds };
+  const clipOf = (start: number, duration: number, offset: number, volume: number): AudioClip => ({
+    ...createAudioClip({ ...base, start, videoDuration: total }),
+    duration: round3(Math.max(MIN_AUDIO_CLIP_SECONDS, Math.min(duration, extracted.durationSeconds - offset))),
+    offset: round3(offset),
+    volume: Math.min(1, volume),
+  });
+  if (item.kind === "segment") {
+    const segs = recipe.timeline.segments;
+    const i = segs.findIndex((s) => s.id === item.id);
+    if (i < 0) return null;
+    const seg = segs[i];
+    const start = segs.slice(0, i).reduce((acc, s) => acc + segmentDuration(s), 0);
+    const clip = clipOf(start, segmentDuration(seg), seg.sourceStart, recipe.audio.originalVolume);
+    return {
+      ...recipe,
+      timeline: { ...recipe.timeline, segments: segs.map((s) => (s.id === seg.id ? { ...s, muted: true } : s)) },
+      audioClips: [...recipe.audioClips, clip],
+    };
+  }
+  const o = recipe.overlays.find((x) => x.id === item.id && x.kind === "video");
+  if (!o) return null;
+  const clip = clipOf(o.start, (o.end ?? total) - o.start, 0, 1);
+  return { ...recipe, audioClips: [...recipe.audioClips, clip] };
 }

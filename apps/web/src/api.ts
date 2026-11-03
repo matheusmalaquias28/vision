@@ -205,6 +205,14 @@ export const autoColorApi = (id: string, sourceIds?: string[]) =>
     body: JSON.stringify({ sourceIds }),
   }).then((r) => json<{ grades: Record<string, AutoColorResult> }>(r));
 
+/** Extrai o som de um vídeo do projeto para um arquivo de áudio (m4a) */
+export const extractAudioApi = (id: string, file: string) =>
+  fetch(`/api/projects/${id}/extract-audio`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file }),
+  }).then((r) => json<{ file: string; durationSeconds: number }>(r));
+
 /** Ilustração (Magnific, 1:1 em 1K): gera a imagem e devolve o caminho; fresh = outra para a mesma descrição */
 export const generateIllustrationApi = (id: string, subject: string, fresh = false) =>
   fetch(`/api/projects/${id}/illustrations`, {

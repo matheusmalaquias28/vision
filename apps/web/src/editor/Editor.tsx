@@ -24,6 +24,7 @@ import {
   type TimelineSelection,
   duplicateAudioClip,
   duplicateSegment,
+  withExtractedAudio,
   outputDuration,
   outputToSource,
   overlayFromAsset,
@@ -40,6 +41,7 @@ import {
   addSourceClip,
   applyTemplateApi,
   detectSilence,
+  extractAudioApi,
   getLibrary,
   getRecipe,
   getFilmstrip,
@@ -122,6 +124,13 @@ type InspectorTab = "motions" | "legenda" | "texto" | "audio" | "midia" | "cor" 
 /** Receita sem ajuste de cor (comparar antes/depois no preview) */
 function withoutColor(recipe: Recipe): Recipe {
   return { ...recipe, sources: recipe.sources.map((s) => ({ ...s, color: null })) };
+}
+
+/** Campo onde o espaço é texto (o atalho de play/pause não vale ali) */
+const NON_TEXT_INPUTS = new Set(["range", "checkbox", "radio", "color", "button", "submit", "reset", "file"]);
+function isTextEntry(el: HTMLElement): boolean {
+  if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+  return el.tagName === "INPUT" && !NON_TEXT_INPUTS.has((el as HTMLInputElement).type);
 }
 
 function readTimelineHeight(): number {
@@ -431,6 +440,29 @@ export const Editor: React.FC<EditorProps> = ({
       } else if (action === "delete") {
         apply(deleteTimelineItems(r, selectionFromKeys(keys)).recipe);
         selectKeys([]);
+      } else if (action === "extractAudio") {
+        const key = keys[0] ?? "";
+        const [kind, id] = [key.slice(0, key.indexOf(":")), key.slice(key.indexOf(":") + 1)];
+        const item = kind === "segment" ? ({ kind: "segment", id } as const) : ({ kind: "overlay", id } as const);
+        const seg = r.timeline.segments.find((s) => s.id === id);
+        const file =
+          kind === "segment"
+            ? r.sources.find((s) => s.id === seg?.sourceId)?.file
+            : r.overlays.find((o) => o.id === id)?.file;
+        if (!file) return;
+        setError(null);
+        extractAudioApi(r.projectId, file)
+          .then((extracted) => {
+            // aplica sobre a receita de agora (edição feita enquanto o servidor extraía não some)
+            const cur = recipeRef.current;
+            const clipId = `aud_${Date.now().toString(36)}`;
+            const next = cur && withExtractedAudio(cur, item, extracted, clipId);
+            if (!next) return;
+            commit(next, false);
+            setDirty(true);
+            selectKeys([`audio:${clipId}`]);
+          })
+          .catch((e) => setError(`Extrair áudio: ${e instanceof Error ? e.message : String(e)}`));
       } else {
         const ids = keys.filter((k) => k.startsWith("motion:")).map((k) => k.slice("motion:".length));
         apply(reviewMotions(r, ids, action === "accept"));
@@ -487,6 +519,15 @@ export const Editor: React.FC<EditorProps> = ({
         return;
       }
       const target = e.target as HTMLElement;
+      // espaço = play/pause também com foco num controle do painel (slider, botão, chave,
+      // lista): sem isso o slider recém-arrastado engolia o espaço e um botão focado
+      // era "clicado" de novo. Só campos de digitar ficam com o espaço.
+      if (e.code === "Space" && !mod && !isTextEntry(target)) {
+        e.preventDefault();
+        if (target !== document.body && target.tagName !== "VIDEO") target.blur();
+        playerRef.current?.toggle();
+        return;
+      }
       if (
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
@@ -554,9 +595,6 @@ export const Editor: React.FC<EditorProps> = ({
         seekFrame(totalFrames - 1);
         return;
       }
-      if (e.code !== "Space") return;
-      e.preventDefault();
-      playerRef.current?.toggle();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -25,6 +25,14 @@ export function isNeutralFraming(f: Framing | null | undefined): boolean {
   return !f || (Math.abs(f.x - 50) < 0.05 && Math.abs(f.y - 50) < 0.05 && Math.abs(f.zoom - 1) < 0.005);
 }
 
+/** Enquadramento efetivo de um trecho: o próprio, senão o da fonte */
+export function segmentFraming(
+  segment: { framing?: Framing | null },
+  source: { framing: Framing | null } | undefined
+): Framing | null {
+  return segment.framing ?? source?.framing ?? null;
+}
+
 /** Estilo CSS do enquadramento para mídia com object-fit cover */
 export function framingStyle(f: Framing | null | undefined): {
   objectPosition: string;

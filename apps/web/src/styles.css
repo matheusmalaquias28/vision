@@ -2026,6 +2026,12 @@ kbd {
   border-color: color-mix(in oklch, var(--trk-audio) 45%, transparent);
 }
 
+/* trecho sem som (áudio extraído para Efeitos ou desligado) */
+.clip-audio.muted {
+  opacity: 0.4;
+  border-style: dashed;
+}
+
 .clip-audio:hover {
   border-color: var(--trk-audio);
 }

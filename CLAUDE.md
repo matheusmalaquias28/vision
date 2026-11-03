@@ -114,7 +114,9 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
 - Ajuste de cor por vídeo bruto: `source.color` (`ColorGradeSchema` em
   `color.ts`: exposure/contrast/saturation/temperature; null = original). O
   render aplica filtro CSS brightness→contrast→saturate + camada soft-light de
-  temperatura isolada no vídeo (`SegmentVideo`): preview = MP4. "Automático" =
+  temperatura isolada no vídeo (`SegmentVideo`): preview = MP4. Nitidez
+  (`sharpness`) = máscara de nitidez em filtro SVG (`sharpenFilter`); modelos
+  e automático não mexem nela. "Automático" =
   `POST /api/projects/:id/color/auto` (ffmpeg signalstats em 7 quadros, faixa
   pc/tv do arquivo → `autoGradeFromStats`, conservador: nunca reduz contraste
   nem saturação); não grava, o editor aplica e o operador salva.
@@ -134,7 +136,13 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   ocupa uma metade e, enquanto está ativo (`activeSplitAt`), o vídeo
   principal vai para a outra metade (não fica escondido atrás). `framing`
   {x,y,zoom} (object-position + scale, só em mídia cortada/cover) existe no
-  overlay e na fonte (vídeo principal, vale em todos os trechos dela).
+  overlay, na fonte (vídeo principal, vale em todos os trechos dela) e no
+  trecho (`segment.framing`, vence o da fonte: `segmentFraming`; dividir/
+  cortar leva para os dois pedaços). Painel do trecho (`SegmentPanel`).
+- Extrair áudio (botão direito num trecho ou overlay de vídeo):
+  `POST /api/projects/:id/extract-audio` (`pipeline/extractAudio.ts`, m4a em
+  `assets/audio-<hash>`) → `withExtractedAudio`: clipe sfx alinhado e o
+  trecho fica `muted` (religa no painel do trecho).
   AbsoluteFill do Remotion fixa height 100%: metade precisa de height "50%".
 - Camadas da timeline (`mediaRules.ts`): áudio só em trilha de áudio
   (Música, Efeitos, Áudio do vídeo), nunca com vídeo/texto; vídeo de overlay

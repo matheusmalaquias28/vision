@@ -74,7 +74,8 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({ recipe, playheadSeconds,
       <Section title="Enquadramento do vídeo">
         <p className="note">
           Escolhe a parte que aparece quando o vídeo é cortado para caber: na metade de um split, ou
-          um vídeo horizontal no quadro vertical. Vale para todos os trechos desse vídeo.
+          um vídeo horizontal no quadro vertical. Vale para todos os trechos desse vídeo, menos os que têm
+          escala própria. Para mexer num pedaço só, clique nele na timeline.
         </p>
         {recipe.sources.length > 1 && (
           <Prop label="Vídeo">

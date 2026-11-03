@@ -13,6 +13,7 @@ import { purgeInfo, rawMissing, scheduleRetention } from "./retention";
 import { autoColorGrades } from "./pipeline/colorStats";
 import { normalizeVideo } from "./pipeline/normalize";
 import { enhanceAudio } from "./pipeline/enhance";
+import { extractAudio, ExtractAudioError } from "./pipeline/extractAudio";
 import { generateNarration } from "./pipeline/narration";
 import { probeVideo } from "./pipeline/probe";
 import { defaultSilenceOptions, suggestCuts } from "./pipeline/silence";
@@ -459,6 +460,27 @@ app.post(
     }
   }
 );
+
+// Extrai o som de um vídeo (clipe, overlay) para um arquivo de áudio; o editor
+// põe o clipe na trilha de Efeitos e silencia o original
+app.post("/api/projects/:id/extract-audio", async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    loadRecipe(id);
+    const file = String(req.body?.file ?? "");
+    if (!file) {
+      res.status(400).json({ error: "campo 'file' é obrigatório" });
+      return;
+    }
+    res.json(await extractAudio(id, file));
+  } catch (err) {
+    if (err instanceof ExtractAudioError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    next(err);
+  }
+});
 
 app.get("/api/projects/:id/assets", (req, res) => {
   const id = String(req.params.id);

@@ -33,6 +33,8 @@ const sameGrade = (a: ColorGrade, b: ColorGrade) =>
     contrast: 1 + a.contrast - b.contrast,
     saturation: 1 + a.saturation - b.saturation,
     temperature: a.temperature - b.temperature,
+    // nitidez fica fora: os modelos e o automático não mexem nela
+    sharpness: 0,
   });
 
 /**
@@ -72,8 +74,10 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({ recipe, playheadSource, 
       onChange({
         ...recipe,
         sources: recipe.sources.map((s) => {
-          const g = grades[s.id]?.grade;
-          return g ? { ...s, color: isNeutralGrade(g) ? null : g } : s;
+          const auto = grades[s.id]?.grade;
+          if (!auto) return s;
+          const g = { ...auto, sharpness: s.color?.sharpness ?? 0 };
+          return { ...s, color: isNeutralGrade(g) ? null : g };
         }),
       });
       setMeasured((m) => {
@@ -140,7 +144,7 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({ recipe, playheadSource, 
               key={id}
               className={`chip ${sameGrade(grade, p.grade) ? "on" : ""}`}
               title={p.hint}
-              onClick={() => setGrades([source.id], p.grade)}
+              onClick={() => setGrades([source.id], { ...p.grade, sharpness: grade.sharpness ?? 0 })}
             >
               {p.label}
             </button>
@@ -166,6 +170,18 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({ recipe, playheadSource, 
           format={(v) => String(Math.round(v * 100))}
           parse={(s) => Number(s) / 100}
           onChange={(v) => patch({ temperature: v })}
+        />
+      </Prop>
+      <Prop label="Nitidez" hint="Realça os detalhes (vídeo um pouco mole/desfocado). Exagerar cria contorno e granulado">
+        <Slider
+          value={grade.sharpness ?? 0}
+          min={0}
+          max={1}
+          step={0.01}
+          unit="%"
+          format={(v) => String(Math.round(v * 100))}
+          parse={(s) => Number(s) / 100}
+          onChange={(v) => patch({ sharpness: v })}
         />
       </Prop>
 

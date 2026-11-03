@@ -14,11 +14,13 @@ export const ColorGradeSchema = z.object({
   saturation: z.number().min(0).max(3).default(1),
   /** Temperatura: -1 frio … 0 original … 1 quente */
   temperature: z.number().min(-1).max(1).default(0),
+  /** Nitidez (máscara de nitidez): 0 = original … 1 = máximo */
+  sharpness: z.number().min(0).max(1).default(0),
 });
 
 export type ColorGrade = z.infer<typeof ColorGradeSchema>;
 
-export const NEUTRAL_GRADE: ColorGrade = { exposure: 1, contrast: 1, saturation: 1, temperature: 0 };
+export const NEUTRAL_GRADE: ColorGrade = { exposure: 1, contrast: 1, saturation: 1, temperature: 0, sharpness: 0 };
 
 export function isNeutralGrade(g: ColorGrade | null | undefined): boolean {
   return (
@@ -26,8 +28,20 @@ export function isNeutralGrade(g: ColorGrade | null | undefined): boolean {
     (Math.abs(g.exposure - 1) < 0.005 &&
       Math.abs(g.contrast - 1) < 0.005 &&
       Math.abs(g.saturation - 1) < 0.005 &&
-      Math.abs(g.temperature) < 0.005)
+      Math.abs(g.temperature) < 0.005 &&
+      (g.sharpness ?? 0) < 0.005)
   );
+}
+
+/**
+ * Nitidez como máscara de nitidez num filtro SVG (CSS não tem "sharpen"):
+ * saída = (1 + k)·original − k·desfocado. null = sem filtro.
+ * Projetos antigos não têm o campo (undefined = 0).
+ */
+export function sharpenFilter(g: ColorGrade | null | undefined): { radius: number; amount: number } | null {
+  const s = g?.sharpness ?? 0;
+  if (s < 0.005) return null;
+  return { radius: 1.2, amount: r2(s * 1.5) };
 }
 
 export type ColorPresetId = "original" | "log" | "vivid" | "soft";
@@ -38,17 +52,17 @@ export const COLOR_PRESETS: Record<ColorPresetId, { label: string; hint: string;
   log: {
     label: "Câmera LOG",
     hint: "Vídeo gravado em perfil LOG/flat (acinzentado, sem cor)",
-    grade: { exposure: 1.2, contrast: 1.7, saturation: 2, temperature: 0 },
+    grade: { exposure: 1.2, contrast: 1.7, saturation: 2, temperature: 0, sharpness: 0 },
   },
   vivid: {
     label: "Mais vivo",
     hint: "Vídeo normal um pouco apagado",
-    grade: { exposure: 1, contrast: 1.12, saturation: 1.25, temperature: 0 },
+    grade: { exposure: 1, contrast: 1.12, saturation: 1.25, temperature: 0, sharpness: 0 },
   },
   soft: {
     label: "Suave",
     hint: "Menos contraste e cor, visual mais leve",
-    grade: { exposure: 1.04, contrast: 0.92, saturation: 0.85, temperature: 0.1 },
+    grade: { exposure: 1.04, contrast: 0.92, saturation: 0.85, temperature: 0.1, sharpness: 0 },
   },
 };
 
@@ -113,5 +127,5 @@ export function autoGradeFromStats(s: ColorStats): ColorGrade {
   const exposure = clamp(k / contrast, 0.5, 2);
   // brilho e contraste também multiplicam o croma por k
   const saturation = clamp(TARGET_SAT / Math.max(0.5, s.satAvg * k), 1, 2.2);
-  return { exposure: r2(exposure), contrast: r2(contrast), saturation: r2(saturation), temperature: 0 };
+  return { exposure: r2(exposure), contrast: r2(contrast), saturation: r2(saturation), temperature: 0, sharpness: 0 };
 }
