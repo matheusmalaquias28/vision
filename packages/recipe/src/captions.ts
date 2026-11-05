@@ -4,9 +4,107 @@ import { isSourceTimeKept, segmentDuration, sourceToOutput } from "./time";
 /** Pausa entre palavras que força um novo bloco de legenda (s) */
 export const DEFAULT_BLOCK_GAP_SECONDS = 0.8;
 
+// ─── Pontuação: o fim de frase fecha o bloco ─────────────────────────
+
+/** Pontuação que fecha frase (pode vir seguida de aspas/parênteses) */
+const SENTENCE_END_RE = /[.?!…]["'”»)\]]*$/;
+/** Abreviação com ponto que NÃO fecha frase ("Dr. Fábio", "art. 5") */
+const ABBREVIATIONS = new Set(["dr", "dra", "sr", "sra", "srta", "prof", "profa", "art", "arts", "pag", "av", "inc", "obs", "exa", "vs"]);
+
+/** Chave para casar palavra e texto: minúsculas, sem acento nem pontuação */
+const wordKey = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "");
+
+/**
+ * Marca `sentenceEnd` nas palavras onde a frase termina. O Whisper devolve as
+ * palavras com tempo SEM pontuação e, à parte, o texto corrido COM pontuação:
+ * aqui os dois são casados na ordem (tolerando palavra que o texto junta ou
+ * separa e trechos que não batem, que se ressincronizam adiante).
+ */
+export function markSentenceEnds(words: Word[], text: string): Word[] {
+  const tokens: { key: string; end: boolean }[] = [];
+  for (const raw of (text ?? "").split(/\s+/)) {
+    if (!raw) continue;
+    const key = wordKey(raw);
+    const punct = SENTENCE_END_RE.test(raw);
+    const end = punct && !(/\.["'”»)\]]*$/.test(raw) && ABBREVIATIONS.has(key));
+    // "..." ou "—" soltos: a pontuação vale para a palavra de antes
+    if (!key) {
+      if (end && tokens.length > 0) tokens[tokens.length - 1].end = true;
+      continue;
+    }
+    tokens.push({ key, end });
+  }
+  const out = words.slice();
+  const mark = (i: number) => {
+    out[i] = { ...out[i], sentenceEnd: true };
+  };
+  let i = 0;
+  let j = 0;
+  /** Parte do token ainda não casada (texto juntou várias palavras num token) */
+  let rest: string | null = null;
+  const LOOK = 5;
+  while (i < words.length && j < tokens.length) {
+    const wk = wordKey(words[i].text);
+    if (!wk) {
+      i++;
+      continue;
+    }
+    const tk: string = rest ?? tokens[j].key;
+    if (wk === tk) {
+      if (tokens[j].end) mark(i);
+      i++;
+      j++;
+      rest = null;
+      continue;
+    }
+    if (tk.startsWith(wk)) {
+      rest = tk.slice(wk.length);
+      i++;
+      continue;
+    }
+    if (rest === null && wk.startsWith(tk)) {
+      // uma palavra = vários tokens ("pra-que" no texto como "pra que")
+      let acc = tk;
+      let k = j;
+      while (acc.length < wk.length && k + 1 < tokens.length && wk.startsWith(acc + tokens[k + 1].key)) {
+        k++;
+        acc += tokens[k].key;
+      }
+      if (acc === wk) {
+        if (tokens[k].end) mark(i);
+        i++;
+        j = k + 1;
+        continue;
+      }
+    }
+    // desencontro: ressincroniza no próximo ponto em que os dois batem
+    rest = null;
+    const t = tokens.slice(j + 1, j + 1 + LOOK).findIndex((x) => x.key === wk);
+    if (t >= 0) {
+      j += t + 1;
+      continue;
+    }
+    const w = words.slice(i + 1, i + 1 + LOOK).findIndex((x) => wordKey(x.text) === tokens[j].key);
+    if (w >= 0) {
+      i += w + 1;
+      continue;
+    }
+    i++;
+    j++;
+  }
+  return out;
+}
+
 /**
  * Agrupa palavras (ordenadas por start) em blocos de legenda.
- * Quebra quando o bloco enche ou quando há uma pausa longa na fala.
+ * Quebra quando o bloco enche, quando há uma pausa longa na fala ou quando a
+ * frase termina (`sentenceEnd`): fim de uma frase e começo da outra nunca
+ * dividem a mesma legenda.
  */
 export function groupWordsIntoBlocks(
   words: Word[],
@@ -34,6 +132,7 @@ export function groupWordsIntoBlocks(
       flush();
     }
     current.push(word);
+    if (word.sentenceEnd) flush();
   }
   flush();
   return blocks;
@@ -128,6 +227,11 @@ function groupWordsAfterCuts(
     }
     phrase.push({ word, kept });
     if (kept) prevKept = word;
+    // fim de frase (pontuação) fecha a frase, mesmo sem pausa
+    if (word.sentenceEnd) {
+      phrases.push(phrase);
+      phrase = [];
+    }
   }
   if (phrase.length > 0) phrases.push(phrase);
 

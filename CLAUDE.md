@@ -113,6 +113,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   box a folga da pílula vale para todas as palavras e entra na paginação).
   Modelos prontos no painel (`CAPTION_MODELS` em `StylePanel.tsx`). Na folga
   depois da última palavra, vale o bloco que começou por último.
+  Pontuação: o Whisper dá as palavras SEM pontuação e o texto corrido COM;
+  `markSentenceEnds` (na transcrição) casa os dois e marca
+  `word.sentenceEnd`. `groupWordsIntoBlocks` e o reagrupar depois dos cortes
+  fecham o bloco no fim de frase: fim de uma e começo da outra nunca na
+  mesma legenda. Transcrição antiga não tem a marca (botão Transcrever refaz).
   Duração do bloco: `start`/`end` opcionais (tempo das palavras; null =
   automático, 1ª palavra → última + 0,3 s), via `captionBlockSpan`. Alças nas
   bordas na timeline (`startCaptionDrag`): esticar por cima do vizinho apara

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CAPTION_HOLD_SECONDS, captionBlockOutputRange, captionBlockSpan, captionHasManualTiming, groupWordsIntoBlocks, keptCaptionWords, regroupBlocks, spreadCollapsedWords } from "../src/captions";
+import { CAPTION_HOLD_SECONDS, markSentenceEnds, captionBlockOutputRange, captionBlockSpan, captionHasManualTiming, groupWordsIntoBlocks, keptCaptionWords, regroupBlocks, spreadCollapsedWords } from "../src/captions";
 import type { CaptionBlock, Segment, Word } from "../src/schema";
 
 const word = (text: string, start: number, end: number): Word => ({
@@ -135,5 +135,51 @@ describe("duração da legenda ajustada à mão", () => {
   it("narração (tempo final) usa as bordas direto", () => {
     const narr: CaptionBlock = { id: "n", sourceId: null, words: [word("a", 4, 5)], end: 6 };
     expect(captionBlockOutputRange([seg("a", "s1", 0, 10)], narr)).toEqual({ start: 4, end: 6 });
+  });
+});
+
+describe("pontuação: fim de frase fecha a legenda", () => {
+  const ws = (s: string) => s.split(" ").map((t, i) => word(t, i * 0.3, i * 0.3 + 0.25));
+  const ends = (words: Word[]) => words.filter((w) => w.sentenceEnd).map((w) => w.text);
+
+  it("casa o texto pontuado do Whisper com as palavras sem pontuação", () => {
+    const words = ws("A pensão alimentícia atrasou Saiba que o não pagamento pode gerar consequências");
+    const marked = markSentenceEnds(words, "A pensão alimentícia atrasou? Saiba que o não pagamento pode gerar consequências.");
+    expect(ends(marked)).toEqual(["atrasou", "consequências"]);
+    // as palavras em si não mudam (texto e tempos)
+    expect(marked.map((w) => [w.text, w.start])).toEqual(words.map((w) => [w.text, w.start]));
+  });
+
+  it("abreviação não fecha frase; reticências e exclamação fecham", () => {
+    expect(ends(markSentenceEnds(ws("o Dr Fábio disse que sim"), "O Dr. Fábio disse que sim."))).toEqual(["sim"]);
+    expect(ends(markSentenceEnds(ws("então tá vamos lá"), "Então... tá! Vamos lá"))).toEqual(["então", "tá"]);
+    expect(ends(markSentenceEnds(ws("ele ficou no carro"), "Ele ficou no carro."))).toEqual(["carro"]);
+  });
+
+  it("se ressincroniza quando texto e palavras não batem 1 a 1", () => {
+    // texto junta/separa palavras e tem um trecho a mais
+    const words = ws("pra que serve isso é o INSS");
+    const marked = markSentenceEnds(words, "Pra-que serve isso, hein? É o INSS.");
+    expect(ends(marked)).toEqual(["INSS"]);
+    const marked2 = markSentenceEnds(ws("bom dia gente hoje vou falar"), "Bom dia, gente. Hoje eu vou falar");
+    expect(ends(marked2)).toEqual(["gente"]);
+    expect(ends(markSentenceEnds(ws("sem texto"), ""))).toEqual([]);
+  });
+
+  it("agrupar nunca junta o fim de uma frase com o começo da outra", () => {
+    const words = markSentenceEnds(ws("Podemos voltar lá tá Não peraí vamos fazer"), "Podemos voltar lá, tá? Não, peraí, vamos fazer.");
+    const blocks = groupWordsIntoBlocks(words, 4);
+    expect(blocks.map((b) => b.words.map((w) => w.text).join(" "))).toEqual(["Podemos voltar lá tá", "Não peraí vamos fazer"]);
+    const two = groupWordsIntoBlocks(markSentenceEnds(ws("é isso Agora o próximo"), "É isso. Agora o próximo"), 4);
+    expect(two.map((b) => b.words.length)).toEqual([2, 3]);
+  });
+
+  it("reagrupar depois dos cortes também respeita o fim de frase", () => {
+    const words = markSentenceEnds(ws("é isso Agora o próximo ponto"), "É isso. Agora o próximo ponto.");
+    const blocks = regroupBlocks([{ id: "x", sourceId: "s", words }], 4, undefined, {
+      segments: [{ id: "a", sourceId: "s", sourceStart: 0, sourceEnd: 10 }],
+      suggestedCuts: [],
+    });
+    expect(blocks.map((b) => b.words.map((w) => w.text).join(" "))).toEqual(["é isso", "Agora o próximo ponto"]);
   });
 });

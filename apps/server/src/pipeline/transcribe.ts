@@ -3,6 +3,7 @@ import path from "node:path";
 import OpenAI from "openai";
 import {
   groupWordsIntoBlocks,
+  markSentenceEnds,
   spreadCollapsedWords,
   type CaptionBlock,
   type Recipe,
@@ -66,7 +67,7 @@ export async function transcribeAudioFile(audioPath: string): Promise<Word[]> {
   });
   const rawWords = (response as unknown as { words?: WhisperWord[] }).words;
   if (!rawWords) return [];
-  return spreadCollapsedWords(
+  const words = spreadCollapsedWords(
     rawWords
       .map((w) => ({
         text: w.word.trim(),
@@ -75,6 +76,8 @@ export async function transcribeAudioFile(audioPath: string): Promise<Word[]> {
       }))
       .filter((w) => w.text.length > 0)
   );
+  // as palavras vêm sem pontuação; o texto corrido tem: marca onde cada frase termina
+  return markSentenceEnds(words, (response as unknown as { text?: string }).text ?? "");
 }
 
 /** Transcreve todas as fontes e grava os blocos (com sourceId) na receita */

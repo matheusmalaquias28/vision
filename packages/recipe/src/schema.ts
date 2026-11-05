@@ -12,6 +12,12 @@ export const WordSchema = z
     text: z.string().min(1),
     start: seconds,
     end: seconds,
+    /**
+     * A frase termina nesta palavra (".", "?", "!" no texto do Whisper, que
+     * devolve as palavras sem pontuação). A legenda nunca junta o fim de uma
+     * frase com o começo da próxima. Ausente em transcrição antiga.
+     */
+    sentenceEnd: z.boolean().optional(),
   })
   .refine((w) => w.end >= w.start, { message: "word: end deve ser >= start" });
 
