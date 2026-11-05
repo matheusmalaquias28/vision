@@ -35,6 +35,8 @@ export interface RenderJob {
   projectId: string;
   status: "queued" | "rendering" | "done" | "error";
   progress: number;
+  /** Na fila: quantos renders vêm antes deste */
+  ahead?: number;
   outputPath?: string;
   error?: string;
 }
@@ -180,7 +182,10 @@ export interface FastPathReport {
   totalMs: number;
   withinTarget: boolean;
   videoSeconds: number;
-  creative: CreativeReport;
+  /** null = o briefing pediu só legenda (planner não rodou) */
+  creative: CreativeReport | null;
+  /** Etapas puladas a pedido do briefing ("sem cortes", "só legenda") */
+  skipped?: { cuts: boolean; creative: boolean; evidence: string[] };
 }
 
 /** Fast Path: transcrição (se faltar) + cortes + 1 chamada criativa */
@@ -328,8 +333,13 @@ export const startRender = (id: string) =>
     json<RenderJob>(r)
   );
 
+/** null = o servidor não conhece o job (reiniciou no meio): o render se perdeu */
 export const getRenderJob = (jobId: string) =>
-  fetch(`/api/render-jobs/${jobId}`).then((r) => json<RenderJob>(r));
+  fetch(`/api/render-jobs/${jobId}`).then((r) => (r.status === 404 ? null : json<RenderJob>(r)));
+
+/** Render ainda na fila ou rodando do projeto (o editor reaberto volta a acompanhar) */
+export const getActiveRenderJob = (projectId: string) =>
+  fetch(`/api/projects/${projectId}/render-job`).then((r) => json<RenderJob | null>(r));
 
 export const getLibrary = () => fetch("/api/library").then((r) => json<Catalog>(r));
 
@@ -459,10 +469,12 @@ export const resyncDemand = (id: string) =>
   postJson(`/api/demands/${encodeURIComponent(id)}/resync`).then((r) => json<Demand>(r));
 
 /** Brutos na ordem da timeline; `briefing` = o do War editado (só vale no Vision) */
-export const uploadDemandVideo = (id: string, index: number, files: File[], briefing?: string) => {
+/** `restart` = recomeçar: o projeto atual do vídeo é apagado e trocado pelo novo */
+export const uploadDemandVideo = (id: string, index: number, files: File[], briefing?: string, restart = false) => {
   const fd = new FormData();
   for (const f of files) fd.append("videos", f);
   if (briefing !== undefined) fd.append("briefing", briefing);
+  if (restart) fd.append("restart", "1");
   return fetch(`/api/demands/${encodeURIComponent(id)}/videos/${index}/project`, {
     method: "POST",
     body: fd,

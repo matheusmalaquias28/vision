@@ -95,6 +95,13 @@ export interface BriefDirectives {
   avoid: MotionKind[];
   /** Elementos pedidos: viram preferência no catálogo, não obrigação */
   wants: ("counter" | "list" | "cta" | "emphasis" | "emoji" | "flash" | "chart" | "screen" | "transition" | "illustration")[];
+  /** "não quero cortes", "sem cortes": a análise automática não corta nada */
+  noCuts: boolean;
+  /**
+   * "somente legenda", "só legenda", "apenas legendar": a análise automática
+   * só transcreve e põe a legenda (sem cortes, motions, imagens nem música)
+   */
+  captionsOnly: boolean;
   /** Trechos do briefing que justificam cada decisão */
   evidence: string[];
 }
@@ -119,8 +126,26 @@ const STYLE_HINTS: [CreativeStyle, RegExp][] = [
 
 export function interpretBriefing(briefing: string): BriefDirectives {
   const text = norm(briefing ?? "");
-  const out: BriefDirectives = { style: null, avoid: [], wants: [], evidence: [] };
+  const out: BriefDirectives = { style: null, avoid: [], wants: [], noCuts: false, captionsOnly: false, evidence: [] };
   if (!text.trim()) return out;
+
+  // edição: "só legenda" vale como "sem cortes" também (nada além da legenda)
+  // ("não só legenda, mas também…" não conta)
+  const onlyCaptions = /(?<!nao\s)\b(?:somente|so|apenas|unicamente|exclusivamente)\s+(?:[^\s,.;]+\s+){0,2}?legend\w*/.exec(text);
+  if (onlyCaptions) {
+    out.captionsOnly = true;
+    out.evidence.push(onlyCaptions[0]);
+  }
+  // mais estrito que `forbids`: "sem enrolação, cortes rápidos" pede cortes
+  const noCuts =
+    /\b(?:sem|nada\s+de|zero|proibido|evit(?:e|ar)|dispensa(?:r)?|nao\s+(?:usar|use|fazer|faca|faz|quero|precisa(?:\s+de)?|pode(?:\s+ter)?|ter|deve(?:\s+ter)?|vai(?:\s+ter)?|e\s+para|e\s+pra))\s+(?:(?:que|nenhum|nenhuma|qualquer|ter|fazer|ser|de|o|os)\s+){0,2}(?:cortar|cortes?|cortem|corta)\b/.exec(text) ??
+    /\bnao\s+(?:cortar|corte|cortes|cortem|corta)\b/.exec(text) ??
+    /\b(?:manter|mantenha|deixar|deixe)\s+(?:o\s+)?(?:video\s+)?(?:inteiro|completo|sem cortes?)\b/.exec(text);
+  if (noCuts) {
+    out.noCuts = true;
+    out.evidence.push(noCuts[0]);
+  }
+  if (out.captionsOnly) out.noCuts = true;
 
   const avoidRules: [MotionKind[], string][] = [
     [["emoji"], String.raw`emoj\w*`],

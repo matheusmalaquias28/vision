@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   getDemand,
   markNotificationsRead,
@@ -25,8 +26,11 @@ interface DemandDetailProps {
   onChanged: () => void;
   onOpenClient: (id: string) => void;
   onOpenProject: (projectId: string) => void;
-  /** cria o projeto do vídeo com os brutos (na ordem) e o briefing editado; erro volta ao painel */
-  onStartVideo: (demand: Demand, index: number, files: File[], briefing: string) => Promise<void>;
+  /**
+   * cria o projeto do vídeo com os brutos (na ordem) e o briefing editado; erro volta ao painel.
+   * `restart` = recomeçar: o projeto atual do vídeo é apagado no servidor
+   */
+  onStartVideo: (demand: Demand, index: number, files: File[], briefing: string, restart: boolean) => Promise<void>;
 }
 
 const ExtLink: React.FC<{ href: string | null; children: React.ReactNode; className?: string }> = ({
@@ -44,6 +48,52 @@ const ExtLink: React.FC<{ href: string | null; children: React.ReactNode; classN
   );
 };
 
+/**
+ * 1ª confirmação de "Recomeçar edição". A 2ª é o envio dos brutos no painel
+ * de começar: a timeline só é apagada no servidor quando o novo projeto existe.
+ */
+const RestartDialog: React.FC<{
+  video: DemandVideo;
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({ video, onCancel, onConfirm }) =>
+  createPortal(
+    <div className="modal-scrim confirm-scrim" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div
+        className="confirm-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="restart-title"
+        aria-describedby="restart-desc"
+      >
+        <span className="confirm-modal-icon">
+          <Icon name="trash" size={18} />
+        </span>
+        <h3 id="restart-title">Recomeçar a edição do vídeo {String(video.index).padStart(2, "0")}?</h3>
+        <p id="restart-desc">
+          A timeline atual será apagada: cortes, legendas, motions, músicas, imagens e renders deste vídeo.
+          Depois você envia os brutos de novo, com o briefing da demanda já preenchido.
+        </p>
+        {video.deliveredAt && (
+          <p className="confirm-modal-note">
+            O vídeo volta a não entregue. O arquivo no Drive fica lá e é substituído na próxima entrega.
+          </p>
+        )}
+        <p className="dd-hint">Nada é apagado até você enviar os novos brutos.</p>
+        <div className="confirm-modal-actions">
+          <button className="sm ghost" autoFocus onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="sm danger" onClick={onConfirm}>
+            <Icon name="refresh" size={13} />
+            Apagar timeline e recomeçar
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+
 const VideoRow: React.FC<{
   video: DemandVideo;
   disabled: boolean;
@@ -52,7 +102,9 @@ const VideoRow: React.FC<{
   onOpen: () => void;
   /** abre o painel de começar (com os brutos soltos na linha, se houver) */
   onStart: (files: File[]) => void;
-}> = ({ video, disabled, starting, onOpen, onStart }) => {
+  /** pede a confirmação de recomeçar (vídeo que já tem projeto) */
+  onRestart: () => void;
+}> = ({ video, disabled, starting, onOpen, onStart, onRestart }) => {
   const [over, setOver] = useState(false);
   const a = video.analysis;
   const analyzing = a?.status === "queued" || a?.status === "running";
@@ -86,7 +138,9 @@ const VideoRow: React.FC<{
         <span className={`dd-video-state ${video.deliveredAt ? "ok" : video.projectId ? "doing" : ""}`}>
           {state}
         </span>
-        {video.deliveredAt && video.driveFileUrl ? (
+        {starting && video.projectId ? (
+          <span className="dd-hint">envie os brutos de novo e confira o briefing abaixo</span>
+        ) : video.deliveredAt && video.driveFileUrl ? (
           <ExtLink href={video.driveFileUrl}>enviado {fmtDateTime(video.deliveredAt)}</ExtLink>
         ) : analyzing ? (
           <span className="dd-hint">{a!.stage}…</span>
@@ -104,10 +158,23 @@ const VideoRow: React.FC<{
         )}
       </span>
       {video.projectId ? (
-        <button className="sm" onClick={onOpen}>
-          <Icon name="film" size={13} />
-          Abrir edição
-        </button>
+        !starting && (
+          <span className="dd-video-actions">
+            <button
+              className="sm ghost"
+              disabled={disabled || analyzing}
+              title={analyzing ? "Espere a análise da IA terminar" : "Apagar a timeline e enviar os brutos de novo"}
+              onClick={onRestart}
+            >
+              <Icon name="refresh" size={13} />
+              Recomeçar
+            </button>
+            <button className="sm" onClick={onOpen}>
+              <Icon name="film" size={13} />
+              Abrir edição
+            </button>
+          </span>
+        )
       ) : (
         !starting && (
           <button className="sm primary" disabled={disabled} onClick={() => onStart([])}>
@@ -141,8 +208,10 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
   const [data, setData] = useState<{ demand: Demand; client: Client | null; events: DemandEvent[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  /** vídeo com o painel de começar aberto (só um por vez) */
-  const [starting, setStarting] = useState<{ index: number; files: File[] } | null>(null);
+  /** vídeo com o painel de começar aberto (só um por vez); restart = recomeçar um que já tem projeto */
+  const [starting, setStarting] = useState<{ index: number; files: File[]; restart: boolean } | null>(null);
+  /** vídeo com a confirmação de recomeçar aberta */
+  const [confirmRestart, setConfirmRestart] = useState<DemandVideo | null>(null);
 
   const load = () =>
     getDemand(demandId)
@@ -162,14 +231,15 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Esc fecha primeiro o painel de começar (enviando, nada fecha)
-      if (starting) {
+      // Esc fecha primeiro a confirmação, depois o painel de começar (enviando, nada fecha)
+      if (confirmRestart) setConfirmRestart(null);
+      else if (starting) {
         if (busy === null) setStarting(null);
       } else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, starting, busy]);
+  }, [onClose, starting, busy, confirmRestart]);
 
   const changeStatus = async (status: string, resync = false) => {
     setSaving(true);
@@ -303,7 +373,7 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
                   </h3>
                   <ul className="dd-videos">
                     {d.videos.map((v) => {
-                      const open = starting?.index === v.index && !v.projectId;
+                      const open = starting?.index === v.index && (!v.projectId || starting.restart);
                       return (
                         <React.Fragment key={v.index}>
                           <VideoRow
@@ -311,16 +381,20 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
                             disabled={busy !== null}
                             starting={open}
                             onOpen={() => v.projectId && onOpenProject(v.projectId)}
-                            onStart={(files) => setStarting({ index: v.index, files })}
+                            onStart={(files) => setStarting({ index: v.index, files, restart: false })}
+                            onRestart={() => setConfirmRestart(v)}
                           />
                           {open && starting && (
                             <StartVideoPanel
                               index={v.index}
+                              restart={starting.restart}
                               warBriefing={d.briefing || d.briefingText || ""}
                               initialFiles={starting.files}
                               busy={busy}
                               onCancel={() => setStarting(null)}
-                              onStart={(files, briefing) => onStartVideo(d, v.index, files, briefing)}
+                              onStart={(files, briefing) =>
+                                onStartVideo(d, v.index, files, briefing, starting.restart)
+                              }
                             />
                           )}
                         </React.Fragment>
@@ -328,6 +402,16 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
                     })}
                   </ul>
                   {busy && <p className="dd-busy">{busy}…</p>}
+                  {confirmRestart && (
+                    <RestartDialog
+                      video={confirmRestart}
+                      onCancel={() => setConfirmRestart(null)}
+                      onConfirm={() => {
+                        setStarting({ index: confirmRestart.index, files: [], restart: true });
+                        setConfirmRestart(null);
+                      }}
+                    />
+                  )}
                 </section>
 
                 <section className="dd-section">

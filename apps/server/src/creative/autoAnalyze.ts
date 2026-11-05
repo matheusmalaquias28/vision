@@ -49,6 +49,11 @@ export function readAnalysis(projectId: string): AnalysisStatus | null {
 const pending = new Set<string>();
 let chain: Promise<void> = Promise.resolve();
 
+/** Na fila ou rodando neste processo (apagar o projeto agora quebraria a fila) */
+export function isAnalyzing(projectId: string): boolean {
+  return pending.has(projectId);
+}
+
 export function startAutoAnalysis(projectId: string): void {
   if (pending.has(projectId)) return;
   pending.add(projectId);

@@ -1,4 +1,12 @@
-import type { CaptionBlock, Recipe, SourceTime, Word } from "@vision/recipe";
+import {
+  captionBlockSpan,
+  captionHasManualTiming,
+  MIN_CAPTION_SECONDS,
+  type CaptionBlock,
+  type Recipe,
+  type SourceTime,
+  type Word,
+} from "@vision/recipe";
 import React, { useEffect, useState } from "react";
 import { Prop, ScrubNumber, Section } from "../ui/controls";
 import { Icon } from "./Icon";
@@ -81,8 +89,11 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
     if (!block) return;
     const minStart = block.words[0].start;
     const delta = Math.max(deltaSeconds, -minStart);
+    const shift = (t: number | null | undefined) => (t == null ? t : round2(Math.max(0, t + delta)));
     replaceBlock({
       ...block,
+      start: shift(block.start),
+      end: shift(block.end),
       words: block.words.map((w) => ({
         ...w,
         start: round2(w.start + delta),
@@ -174,6 +185,54 @@ export const CaptionPanel: React.FC<CaptionPanelProps> = ({
               {block.words[0].start.toFixed(2)}s → {block.words[block.words.length - 1].end.toFixed(2)}s
               {block.sourceId === null ? " · narração" : ""}
             </span>
+          </Prop>
+          <Prop label="Na tela">
+            <ScrubNumber
+              value={round2(captionBlockSpan(block).start)}
+              min={0}
+              step={0.05}
+              pxPerStep={3}
+              onChange={(v) =>
+                replaceBlock({ ...block, start: round2(Math.min(v, captionBlockSpan(block).end - MIN_CAPTION_SECONDS)) })
+              }
+            />
+            <span className="timing">→</span>
+            <ScrubNumber
+              value={round2(captionBlockSpan(block).end)}
+              min={0}
+              step={0.05}
+              pxPerStep={3}
+              onChange={(v) =>
+                replaceBlock({ ...block, end: round2(Math.max(v, captionBlockSpan(block).start + MIN_CAPTION_SECONDS)) })
+              }
+            />
+            <button
+              className="sm"
+              title="Volta a aparecer na 1ª palavra e sumir logo depois da última"
+              disabled={!captionHasManualTiming(block)}
+              onClick={() =>
+                // o vizinho aparado junto (borda colada nesta) volta também, senão sobrava um buraco sem legenda
+                onChange({
+                  ...recipe,
+                  captions: {
+                    ...recipe.captions,
+                    blocks: blocks.map((b) =>
+                      b.id === block.id
+                        ? { ...b, start: null, end: null }
+                        : b.sourceId !== block.sourceId
+                          ? b
+                          : {
+                              ...b,
+                              start: block.end != null && b.start === block.end ? null : b.start,
+                              end: block.start != null && b.end === block.start ? null : b.end,
+                            }
+                    ),
+                  },
+                })
+              }
+            >
+              Automático
+            </button>
           </Prop>
           <Prop label="Deslocar">
             <button className="sm" title="Adiantar 0.1s" onClick={() => shiftBlock(-0.1)}>

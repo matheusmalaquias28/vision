@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionBlockOutputRange, groupWordsIntoBlocks, keptCaptionWords, regroupBlocks, spreadCollapsedWords } from "../src/captions";
+import { CAPTION_HOLD_SECONDS, captionBlockOutputRange, captionBlockSpan, captionHasManualTiming, groupWordsIntoBlocks, keptCaptionWords, regroupBlocks, spreadCollapsedWords } from "../src/captions";
 import type { CaptionBlock, Segment, Word } from "../src/schema";
 
 const word = (text: string, start: number, end: number): Word => ({
@@ -97,5 +97,43 @@ describe("captionBlockOutputRange", () => {
     expect(captionBlockOutputRange([seg("a", "src_02", 5, 9)], block)).toBeNull();
     const narration: CaptionBlock = { ...block, sourceId: null };
     expect(captionBlockOutputRange([], narration)).toEqual({ start: 0.92, end: 2.7 });
+  });
+});
+
+describe("duração da legenda ajustada à mão", () => {
+  const seg = (id: string, sourceId: string, sourceStart: number, sourceEnd: number): Segment => ({ id, sourceId, sourceStart, sourceEnd });
+  const block: CaptionBlock = { id: "cap_01", sourceId: "s1", words: [word("oi", 1, 1.4), word("gente", 1.4, 2)] };
+
+  it("sem ajuste: da 1ª palavra até a folga depois da última", () => {
+    const span = captionBlockSpan(block);
+    expect(span.start).toBe(1);
+    expect(span.end).toBeCloseTo(2 + CAPTION_HOLD_SECONDS, 6);
+    expect(captionHasManualTiming(block)).toBe(false);
+  });
+
+  it("início e fim manuais valem no lugar das palavras", () => {
+    const manual = { ...block, start: 0.5, end: 3.5 };
+    expect(captionBlockSpan(manual)).toEqual({ start: 0.5, end: 3.5 });
+    expect(captionHasManualTiming(manual)).toBe(true);
+    // fim antes do início não deixa o bloco com duração negativa
+    expect(captionBlockSpan({ ...block, start: 2, end: 1 }).end).toBeCloseTo(2.1, 6);
+  });
+
+  it("na timeline, as bordas manuais aparecem no vídeo final", () => {
+    const segments = [seg("a", "s1", 0, 5)];
+    expect(captionBlockOutputRange(segments, { ...block, start: 0.5, end: 3.5 })).toEqual({ start: 0.5, end: 3.5 });
+  });
+
+  it("borda num trecho cortado gruda no trecho mantido mais perto", () => {
+    // 0–0,8 cortado: o bloco puxado para 0,5 começa onde o vídeo volta (0,8)
+    const segments = [seg("a", "s1", 0.8, 5)];
+    const r = captionBlockOutputRange(segments, { ...block, start: 0.5 })!;
+    expect(r.start).toBeCloseTo(0, 6);
+    expect(r.end).toBeCloseTo(2 - 0.8, 6);
+  });
+
+  it("narração (tempo final) usa as bordas direto", () => {
+    const narr: CaptionBlock = { id: "n", sourceId: null, words: [word("a", 4, 5)], end: 6 };
+    expect(captionBlockOutputRange([seg("a", "s1", 0, 10)], narr)).toEqual({ start: 4, end: 6 });
   });
 });

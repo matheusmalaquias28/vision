@@ -33,7 +33,7 @@ import { getFilmstrips } from "./pipeline/filmstrip";
 import { getPreviewProxies, queuePreviewProxy } from "./pipeline/previewProxy";
 import { getThumbnail } from "./pipeline/thumbnail";
 import { getFileWaveform, getWaveforms } from "./pipeline/waveform";
-import { enqueueRender, getJob } from "./render/queue";
+import { activeJobFor, enqueueRender, getJob } from "./render/queue";
 import { cleanupStaleRemotionTemp, warmBundle } from "./render/bundle";
 import { loadCatalog } from "./library/catalog";
 import { applyTemplate, TEMPLATES } from "./templates";
@@ -502,6 +502,11 @@ app.post("/api/projects/:id/render", (req, res) => {
     return;
   }
   res.json(enqueueRender(req.params.id));
+});
+
+/** Render ainda na fila ou rodando deste projeto (null = nenhum): o editor reaberto volta a acompanhar */
+app.get("/api/projects/:id/render-job", (req, res) => {
+  res.json(activeJobFor(req.params.id));
 });
 
 app.get("/api/render-jobs/:jobId", (req, res) => {

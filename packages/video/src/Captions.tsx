@@ -10,6 +10,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import {
+  captionBlockSpan,
   keptCaptionWords,
   outputToSource,
   paginateWords,
@@ -21,8 +22,6 @@ import {
 import { useGoogleFont } from "./fonts";
 import { AtPoint, dragProps } from "./Positioned";
 
-/** Tempo que o bloco continua visível depois da última palavra (s) */
-const BLOCK_HOLD_SECONDS = 0.3;
 
 /**
  * Margem de cada lado da palavra (em). Folga para a palavra falada crescer 8%
@@ -132,14 +131,16 @@ export const Captions: React.FC<{
   // na folga depois da última palavra de um bloco, o próximo já pode ter
   // começado: vale o que começou por último (senão a frase nova ficava
   // escondida até a antiga sair, e chegava atrasada e sem animação de entrada)
-  const startOut = (b: (typeof blocks)[number]) =>
-    b.sourceId === null ? b.words[0].start : (sourceToOutput(recipe.timeline.segments, b.sourceId, b.words[0].start) ?? -Infinity);
+  // (aparece/some em captionBlockSpan: automático ou bordas ajustadas na timeline)
+  const startOut = (b: (typeof blocks)[number]) => {
+    const t = captionBlockSpan(b).start;
+    return b.sourceId === null ? t : (sourceToOutput(recipe.timeline.segments, b.sourceId, t) ?? -Infinity);
+  };
   let block: (typeof blocks)[number] | undefined;
   for (const b of blocks) {
     const t = refTimeFor(b);
     if (t === null) continue;
-    const start = b.words[0].start;
-    const end = b.words[b.words.length - 1].end + BLOCK_HOLD_SECONDS;
+    const { start, end } = captionBlockSpan(b);
     if (t >= start && t <= end && (!block || startOut(b) > startOut(block))) block = b;
   }
   if (!block || !fontReady || hidden) return null;
@@ -157,7 +158,9 @@ export const Captions: React.FC<{
     if (sourceTime >= pages[i][0][0].start) pageIndex = i;
   }
   const lines = pages[pageIndex];
-  const pageStart = lines[0][0].start;
+  const span = captionBlockSpan(block);
+  // 1ª parte de um bloco puxado para antes da fala: entra (e anima) no início dele
+  const pageStart = pageIndex === 0 ? Math.min(lines[0][0].start, span.start) : lines[0][0].start;
   const fontSize = style.fontSizePx;
 
   // animação de entrada: frames desde que esta parte apareceu no vídeo final
@@ -189,10 +192,10 @@ export const Captions: React.FC<{
   // última parte: sai até o fim da folga ou até o próximo bloco começar
   const nextBlockStart = blocks
     .filter((b) => b.sourceId === block!.sourceId && b.words[0].start > block!.words[0].start)
-    .reduce((min, b) => Math.min(min, b.words[0].start), Infinity);
-  const pageEnd = nextPage
-    ? nextPage[0][0].start
-    : Math.min(visibleWords[visibleWords.length - 1].end + BLOCK_HOLD_SECONDS, nextBlockStart);
+    .reduce((min, b) => Math.min(min, captionBlockSpan(b).start), Infinity);
+  // fim ajustado à mão vale como está; no automático, folga depois da última palavra mantida
+  const lastEnd = block.end != null ? span.end : captionBlockSpan({ ...block, words: visibleWords }).end;
+  const pageEnd = nextPage ? Math.min(nextPage[0][0].start, span.end) : Math.min(lastEnd, nextBlockStart);
   const exitSoft = interpolate(sourceTime, [pageEnd - 0.14, pageEnd], [0, 1], { ...clamp, easing: EASE_IN });
   /** Peso do destaque da palavra: acende em ~0,12 s ao ser dita, apaga em ~0,2 s depois */
   const weight = (w: Word) =>

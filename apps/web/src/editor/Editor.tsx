@@ -964,7 +964,8 @@ export const Editor: React.FC<EditorProps> = ({
       const r = await analyzeApi(projectId, cutPace);
       setCreativeReport(r.report.creative);
       setFastPathMs(r.report.totalMs);
-      setTab("motions");
+      // briefing "só legenda": não há motions para revisar
+      setTab(r.report.creative ? "motions" : "legenda");
       return r.recipe;
     });
 

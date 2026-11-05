@@ -210,12 +210,13 @@ export function splitItemAt(recipe: Recipe, key: string, at: number): Recipe {
     const rest = b.words.filter((w) => (w.start + w.end) / 2 >= cut);
     if (first.length === 0 || rest.length === 0) return recipe;
     const taken = new Set(blocks.map((x) => x.id));
-    const second = { ...b, id: freshId(`${b.id}_`, taken), words: rest };
+    // duração ajustada à mão: o início fica no 1º pedaço e o fim no 2º
+    const second = { ...b, id: freshId(`${b.id}_`, taken), words: rest, start: null };
     return {
       ...recipe,
       captions: {
         ...recipe.captions,
-        blocks: blocks.flatMap((x) => (x.id === id ? [{ ...x, words: first }, second] : [x])),
+        blocks: blocks.flatMap((x) => (x.id === id ? [{ ...x, words: first, end: null }, second] : [x])),
       },
     };
   }

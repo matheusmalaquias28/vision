@@ -26,6 +26,7 @@ import {
   type TimelineSelection,
   type TrackId,
   sourceToOutput,
+  outputToSource,
   splitAudioClip,
   lineToVolume,
   volumeToLine,
@@ -651,6 +652,67 @@ export const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener("pointerup", onUp);
   };
 
+  /**
+   * Bordas do bloco de legenda: apara ou estica quanto tempo ele fica na tela
+   * (grava `start`/`end` no tempo das palavras; as palavras seguem a fala e
+   * não mudam de lugar). Na fala contínua um bloco encosta no outro: esticar
+   * por cima do vizinho apara o vizinho (voltar devolve o tempo dele). Não
+   * entra em outro clipe.
+   */
+  const startCaptionDrag = (e: React.PointerEvent, id: string, edge: "start" | "end") => {
+    if (e.button !== 0) return;
+    if (tool === "blade") return bladeItem(e, `caption:${id}`);
+    e.preventDefault();
+    e.stopPropagation();
+    const blocks = recipe.captions.blocks;
+    const b0 = blocks.find((b) => b.id === id);
+    const r0 = b0 ? captionBlockOutputRange(segments, b0) : null;
+    if (!b0 || !r0) return;
+    // vizinho do lado arrastado (mesmo clipe): é ele que cede tempo
+    let neighbor: { id: string; range: { start: number; end: number } } | null = null;
+    for (const b of blocks) {
+      if (b.id === id || b.sourceId !== b0.sourceId) continue;
+      const r = captionBlockOutputRange(segments, b);
+      if (!r) continue;
+      const before = r.start < r0.start;
+      if (edge === "start" && before && (!neighbor || r.start > neighbor.range.start)) neighbor = { id: b.id, range: r };
+      if (edge === "end" && !before && (!neighbor || r.start < neighbor.range.start)) neighbor = { id: b.id, range: r };
+    }
+    const lo = edge === "start" ? (neighbor ? neighbor.range.start + MIN_SEGMENT : 0) : r0.start + MIN_SEGMENT;
+    const hi = edge === "start" ? r0.end - MIN_SEGMENT : neighbor ? neighbor.range.end - MIN_SEGMENT : duration;
+    const toBlockTime = (out: number): number | null => {
+      if (b0.sourceId === null) return out;
+      const src = outputToSource(segments, out);
+      return src && src.sourceId === b0.sourceId ? src.seconds : null;
+    };
+    const startX = e.clientX;
+    const onMove = (ev: PointerEvent) => {
+      const out = clamp((edge === "start" ? r0.start : r0.end) + (ev.clientX - startX) / pxPerSec, lo, hi);
+      const t = toBlockTime(out);
+      if (t === null) return; // passou para outro clipe: fica onde estava
+      // por cima do vizinho: a borda dele anda junto; senão ele fica como era
+      const overlaps =
+        neighbor !== null && (edge === "end" ? out > neighbor.range.start : out < neighbor.range.end);
+      const otherEdge = edge === "end" ? "start" : "end";
+      onChange({
+        ...recipe,
+        captions: {
+          ...recipe.captions,
+          blocks: blocks.map((b) =>
+            b.id === id ? { ...b, [edge]: round2(t) } : overlaps && b.id === neighbor!.id ? { ...b, [otherEdge]: round2(t) } : b
+          ),
+        },
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      onSelectCaption(id);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const moveSegment = (index: number, delta: number) => {
     const target = index + delta;
     if (target < 0 || target >= segments.length) return;
@@ -1172,7 +1234,19 @@ export const Timeline: React.FC<TimelineProps> = ({
                 onClick={() => tool !== "blade" && onSelectCaption(block.id === selectedCaption ? null : block.id)}
                 title={text}
               >
-                {text}
+                <div
+                  className="handle handle-l"
+                  title="Arraste para mudar quando a legenda aparece"
+                  onPointerDown={(e) => startCaptionDrag(e, block.id, "start")}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <span className="cap-blk-text">{text}</span>
+                <div
+                  className="handle handle-r"
+                  title="Arraste para mudar quando a legenda some"
+                  onPointerDown={(e) => startCaptionDrag(e, block.id, "end")}
+                  onClick={(e) => e.stopPropagation()}
+                />
               </div>
             );
           })}

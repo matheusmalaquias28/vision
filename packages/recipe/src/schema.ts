@@ -23,6 +23,13 @@ export const CaptionBlockSchema = z.object({
   id: z.string().min(1),
   sourceId: z.string().min(1).nullable().default(null),
   words: z.array(WordSchema).min(1),
+  /**
+   * Duração ajustada à mão (bordas arrastadas na timeline), no mesmo tempo
+   * das palavras. null/ausente = automático: aparece na 1ª palavra e some
+   * pouco depois da última (render antigo).
+   */
+  start: seconds.nullable().optional(),
+  end: seconds.nullable().optional(),
 });
 
 /**

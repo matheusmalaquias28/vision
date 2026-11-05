@@ -2138,7 +2138,8 @@ kbd {
 
 .clip:hover .handle,
 .ov-blk:hover .handle,
-.mo-blk:hover .handle {
+.mo-blk:hover .handle,
+.cap-blk:hover .handle {
   background: oklch(1 0 0 / 0.14);
 }
 
@@ -2198,6 +2199,13 @@ kbd {
   color: var(--text);
   background: color-mix(in oklch, var(--trk-caption) 32%, var(--n-2));
   border: 1px solid color-mix(in oklch, var(--trk-caption) 60%, transparent);
+}
+
+.cap-blk-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cap-blk.narration {
@@ -4209,8 +4217,101 @@ a.drive-status:hover {
   gap: 8px;
 }
 
+.dd-video-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* recomeçar: o envio apaga a timeline atual */
+.dd-start.restart {
+  border-color: color-mix(in oklch, var(--danger) 55%, var(--line-2));
+}
+
+.dd-video.starting:has(+ .dd-start.restart) {
+  border-color: color-mix(in oklch, var(--danger) 55%, var(--line-2));
+}
+
+.dd-start-warn {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.dd-start.restart .dd-start-actions button.danger:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: oklch(0.7 0.17 22 / 0.45);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dd-start {
+    animation: none;
+  }
+}
+
+/* confirmação por cima do modal da demanda (ação destrutiva) */
+.confirm-scrim {
+  z-index: 60;
+}
+
+.confirm-modal {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  background: var(--n-1);
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  box-shadow: 0 30px 70px oklch(0.04 0.01 265 / 0.7);
+  animation: modal-in 220ms var(--ease);
+}
+
+.confirm-modal-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-modal h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.confirm-modal p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.confirm-modal .confirm-modal-note {
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--n-2);
+  font-size: 12px;
+}
+
+.confirm-modal-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-modal {
     animation: none;
   }
 }

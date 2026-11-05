@@ -436,6 +436,11 @@ program
         `cortes ${(s.cutsMs / 1000).toFixed(1)} s, planner ${(s.plannerMs / 1000).toFixed(1)} s) · vídeo ${report.videoSeconds} s`
     );
     const c = report.creative;
+    if (report.skipped.cuts) console.log(`Cortes pulados: o briefing pede (${report.skipped.evidence.join("; ")})`);
+    if (!c) {
+      console.log("Só legenda: o briefing pede (sem motions, imagens nem música)");
+      process.exit(0);
+    }
     console.log(`Estilo ${c.style} (${c.styleSource}) · ${c.applied}/${c.proposed} aplicados${c.tokens ? ` · tokens ${c.tokens.input}+${c.tokens.output}` : ""}${c.cacheHit ? " · cache" : ""}`);
     process.exit(0);
   });

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { outputDuration, transcriptWords, type CutPace, type Recipe } from "@vision/recipe";
+import { interpretBriefing, outputDuration, transcriptWords, type CutPace, type Recipe } from "@vision/recipe";
 import { repoRoot } from "../paths";
 import { suggestSmartCuts } from "../pipeline/smartCuts";
 import { transcribeProject } from "../pipeline/transcribe";
@@ -25,9 +25,12 @@ export interface FastPathReport {
   totalMs: number;
   withinTarget: boolean;
   videoSeconds: number;
-  creative: CreativeReport;
+  /** null = o briefing pediu só legenda (planner não rodou) */
+  creative: CreativeReport | null;
   /** null = não rodou (já tinha imagem, sem MAGNIFIC_API_KEY ou desligado) */
   images: { added: number; generated: number; errors: string[] } | null;
+  /** Etapas puladas a pedido do briefing ("sem cortes", "só legenda") e o trecho que pediu */
+  skipped: { cuts: boolean; creative: boolean; evidence: string[] };
 }
 
 export async function analyzeAndApply(
@@ -54,21 +57,35 @@ export async function analyzeAndApply(
   const t1 = Date.now();
   if (transcriptWords(recipe).length === 0) throw new Error("Nenhuma fala encontrada no vídeo");
 
+  // o briefing manda: "sem cortes" pula os cortes; "só legenda" pula tudo além da legenda
+  const brief = interpretBriefing(`${recipe.briefing ?? ""}\n${opts.instructions ?? ""}`);
+  const skipped: FastPathReport["skipped"] = { cuts: brief.noCuts, creative: brief.captionsOnly, evidence: brief.evidence };
+  if (brief.noCuts || brief.captionsOnly) {
+    console.log(
+      `Análise ${recipe.projectId}: briefing pede ${brief.captionsOnly ? "só legenda" : "sem cortes"} (${brief.evidence.join("; ")})`
+    );
+  }
+
   // 2. cortes determinísticos (a chamada de IA de retomadas fica opcional, no botão Sugerir cortes)
-  opts.onStage?.("Cortando");
-  recipe = await suggestSmartCuts(recipe, { ai: opts.aiCuts ?? false, pace: opts.pace ?? "normal" });
+  if (!brief.noCuts) {
+    opts.onStage?.("Cortando");
+    recipe = await suggestSmartCuts(recipe, { ai: opts.aiCuts ?? false, pace: opts.pace ?? "normal" });
+  }
   const t2 = Date.now();
 
   // 3. a única chamada criativa
-  opts.onStage?.("Planejando motions");
-  const planned = await planCreative(recipe, { instructions: opts.instructions });
-  recipe = planned.recipe;
+  let planned: Awaited<ReturnType<typeof planCreative>> | null = null;
+  if (!brief.captionsOnly) {
+    opts.onStage?.("Planejando motions");
+    planned = await planCreative(recipe, { instructions: opts.instructions });
+    recipe = planned.recipe;
+  }
   const t3 = Date.now();
 
   // 4. imagens geradas a partir da fala, pendentes já com a imagem. Só uma vez
   // por projeto (rodar de novo não gasta crédito) e só com a Magnific configurada
   let images: FastPathReport["images"] = null;
-  const wantImages = opts.images ?? AUTO_IMAGES;
+  const wantImages = brief.captionsOnly ? 0 : (opts.images ?? AUTO_IMAGES);
   if (wantImages > 0 && illustrationsEnabled() && !recipe.motions.some((m) => m.kind === "illustration")) {
     opts.onStage?.("Gerando imagens");
     try {
@@ -96,8 +113,9 @@ export async function analyzeAndApply(
     totalMs: t4 - t0,
     withinTarget: t4 - t0 <= FAST_PATH_TARGET_MS,
     videoSeconds: Math.round(outputDuration(recipe.timeline.segments) * 10) / 10,
-    creative: planned.report,
+    creative: planned?.report ?? null,
     images,
+    skipped,
   };
   try {
     const file = path.join(repoRoot, "data", "creative-metrics.jsonl");
@@ -108,7 +126,8 @@ export async function analyzeAndApply(
         at: new Date().toISOString(),
         kind: "fast-path",
         projectId: recipe.projectId,
-        jobId: planned.report.jobId,
+        jobId: planned?.report.jobId ?? null,
+        skipped,
         videoSeconds: report.videoSeconds,
         stages: report.stages,
         totalMs: report.totalMs,

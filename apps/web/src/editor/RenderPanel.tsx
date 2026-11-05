@@ -2,6 +2,7 @@ import { outputDuration, placeMotions, type Recipe } from "@vision/recipe";
 import React, { useEffect, useRef, useState } from "react";
 import {
   deliverProject,
+  getActiveRenderJob,
   getRenderJob,
   startRender,
   type ProjectDemand,
@@ -55,12 +56,47 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
     }
   };
   const pollRef = useRef<number | null>(null);
+  const stopPolling = () => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = null;
+  };
 
+  /** Acompanha o job até acabar; job que o servidor esqueceu (reiniciou) vira aviso, não 0% para sempre */
+  const follow = (started: RenderJob) => {
+    stopPolling();
+    setJob(started);
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const j = await getRenderJob(started.id);
+        if (j === null) {
+          stopPolling();
+          setJob(null);
+          setError("O servidor reiniciou e este render se perdeu. Clique em Renderizar de novo.");
+          return;
+        }
+        setJob(j);
+        if (j.status === "done" || j.status === "error") stopPolling();
+      } catch {
+        // erro transitório de rede; tenta de novo no próximo tick
+      }
+    }, 1500);
+  };
+
+  // editor reaberto/recarregado (ou aba trocada) no meio de um render: volta a acompanhar
+  // em vez de mostrar "Renderizar" (o clique de novo enfileirava outro render do mesmo vídeo)
   useEffect(() => {
+    let alive = true;
+    getActiveRenderJob(recipe.projectId)
+      .then((j) => {
+        if (alive && j && !pollRef.current) follow(j);
+      })
+      .catch(() => {});
     return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      alive = false;
+      stopPolling();
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipe.projectId]);
 
   const rendering = job !== null && (job.status === "queued" || job.status === "rendering");
 
@@ -69,19 +105,7 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
     try {
       // garante que o render usa exatamente o que está na tela
       await saveIfDirty();
-      const started = await startRender(recipe.projectId);
-      setJob(started);
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const j = await getRenderJob(started.id);
-          setJob(j);
-          if (j.status === "done" || j.status === "error") {
-            if (pollRef.current) window.clearInterval(pollRef.current);
-          }
-        } catch {
-          // erro transitório de rede; tenta de novo no próximo tick
-        }
-      }, 1500);
+      follow(await startRender(recipe.projectId));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -124,9 +148,22 @@ export const RenderPanel: React.FC<RenderPanelProps> = ({
 
       <button className="primary btn-block" disabled={rendering} onClick={render}>
         <Icon name="export" size={15} />
-        {rendering ? `Renderizando ${progress}%` : dirty ? "Salvar e renderizar" : "Renderizar"}
+        {job?.status === "queued"
+          ? job.ahead
+            ? `Na fila: ${job.ahead} ${job.ahead === 1 ? "render" : "renders"} antes`
+            : "Começando…"
+          : rendering
+            ? `Renderizando ${progress}%`
+            : dirty
+              ? "Salvar e renderizar"
+              : "Renderizar"}
       </button>
-      {rendering && (
+      {job?.status === "queued" && (job.ahead ?? 0) > 0 && (
+        <p className="note">
+          Um render por vez no servidor: este começa sozinho quando os de antes acabarem. Não precisa clicar de novo.
+        </p>
+      )}
+      {job?.status === "rendering" && (
         <div className="progress" aria-label="Progresso do render">
           <span style={{ width: `${progress}%` }} />
         </div>

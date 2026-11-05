@@ -356,19 +356,66 @@ function firstOutputSpan(segments: Segment[], sourceId: string, from: number, to
   return null;
 }
 
+/** Tempo que o bloco continua visível depois da última palavra (s), no automático */
+export const CAPTION_HOLD_SECONDS = 0.3;
+/** Menor duração de um bloco ajustado à mão (s) */
+export const MIN_CAPTION_SECONDS = 0.1;
+
+/**
+ * Quando o bloco aparece e some, no tempo das palavras dele (bruto do clipe;
+ * tempo final na narração). `start`/`end` do bloco = ajuste manual; sem
+ * eles, da 1ª palavra até a folga depois da última (render antigo).
+ */
+export function captionBlockSpan(block: CaptionBlock): { start: number; end: number } {
+  const start = block.start ?? block.words[0].start;
+  const end = block.end ?? block.words[block.words.length - 1].end + CAPTION_HOLD_SECONDS;
+  return { start, end: Math.max(end, start + MIN_CAPTION_SECONDS) };
+}
+
+/** Bloco com a duração ajustada à mão (início e/ou fim) */
+export const captionHasManualTiming = (block: CaptionBlock) => block.start != null || block.end != null;
+
+/**
+ * Instante de um clipe no vídeo final; se caiu num trecho cortado, a borda
+ * do trecho mantido mais perto na direção pedida (é o que o render mostra).
+ */
+function sourceToOutputNear(segments: Segment[], sourceId: string, t: number, toward: "after" | "before"): number | null {
+  const exact = sourceToOutput(segments, sourceId, t);
+  if (exact !== null) return exact;
+  let acc = 0;
+  let best: { out: number; dist: number } | null = null;
+  for (const s of segments) {
+    if (s.sourceId === sourceId) {
+      const dist = toward === "after" ? s.sourceStart - t : t - s.sourceEnd;
+      const out = toward === "after" ? acc : acc + segmentDuration(s);
+      if (dist >= 0 && (!best || dist < best.dist)) best = { out, dist };
+    }
+    acc += segmentDuration(s);
+  }
+  return best?.out ?? null;
+}
+
 /**
  * Trecho do vídeo final ocupado pelo bloco: da primeira à última palavra
- * mantida. null = todas as palavras foram cortadas. Um corte na primeira
- * palavra (muleta "Então") não pode esconder o resto do bloco da timeline.
+ * mantida (ou das bordas ajustadas à mão). null = todas as palavras foram
+ * cortadas. Um corte na primeira palavra (muleta "Então") não pode esconder o
+ * resto do bloco da timeline.
  */
 export function captionBlockOutputRange(segments: Segment[], block: CaptionBlock): { start: number; end: number } | null {
   const words = keptCaptionWords(segments, block);
   if (words.length === 0) return null;
   const first = words[0];
   const last = words[words.length - 1];
-  if (block.sourceId === null) return { start: first.start, end: last.end };
+  if (block.sourceId === null) {
+    const span = captionBlockSpan(block);
+    return { start: block.start != null ? span.start : first.start, end: block.end != null ? span.end : last.end };
+  }
   const a = firstOutputSpan(segments, block.sourceId, first.start, first.end);
   const b = firstOutputSpan(segments, block.sourceId, last.start, last.end);
   if (!a) return null;
-  return { start: a.start, end: Math.max(b?.end ?? a.end, a.end) };
+  let start = a.start;
+  let end = Math.max(b?.end ?? a.end, a.end);
+  if (block.start != null) start = sourceToOutputNear(segments, block.sourceId, block.start, "after") ?? start;
+  if (block.end != null) end = sourceToOutputNear(segments, block.sourceId, block.end, "before") ?? end;
+  return { start, end: Math.max(end, start + 0.01) };
 }

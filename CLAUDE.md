@@ -80,6 +80,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   briefing da demanda + estilos globais. O briefing é o MÍNIMO, não o limite
   (prompt): pedidos e proibições valem, e a IA completa a edição (gancho,
   ênfases, câmera, transições, CTA); sem estilo no briefing prefere dynamic.
+  Exceção lida no código (`interpretBriefing`: `noCuts`, `captionsOnly`):
+  "não quero cortes"/"sem cortes" faz `analyzeAndApply` (análise automática
+  e "Analisar e aplicar") pular os cortes; "somente/só/apenas legenda" pula
+  também planner, imagens e música (só transcrição + legenda). O botão
+  "Cortar" do editor continua cortando (é pedido do operador).
   Docs: `docs/motion-catalog.md` (gerado), `docs/motion-design-guidelines.md`.
 - Música e SFX são `recipe.audioClips` (kind music|sfx, start/duration/offset,
   fades relativos ao clipe); helpers em `audioClips.ts`. `audio.music`/`sfx`
@@ -108,6 +113,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   box a folga da pílula vale para todas as palavras e entra na paginação).
   Modelos prontos no painel (`CAPTION_MODELS` em `StylePanel.tsx`). Na folga
   depois da última palavra, vale o bloco que começou por último.
+  Duração do bloco: `start`/`end` opcionais (tempo das palavras; null =
+  automático, 1ª palavra → última + 0,3 s), via `captionBlockSpan`. Alças nas
+  bordas na timeline (`startCaptionDrag`): esticar por cima do vizinho apara
+  o vizinho; "Na tela"/"Automático" no painel (o automático solta o vizinho
+  aparado junto). Dividir: início no 1º pedaço, fim no 2º.
 - Cor de destaque dos motions: `motion.accentColor` > `recipe.motionStyle.
   accentColor` > `captions.style.highlightColor` (`resolveMotionAccent`); só
   #RRGGBB. "Aplicar a todos" = `applyAccentToAll`. A IA não escolhe cor.
@@ -213,7 +223,12 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   inteira, 12 GB ≈ 1 min; `fs.rmSync` apaga só a junção), CLI apaga no
   `finally` (`releaseBundle`), órfãos (`.vision-owner` com PID morto, ou
   `remotion-*` > 2 h) apagados na subida e no `retention`. Fila = 1 render por
-  vez; render recusa com < 3 GB livres. Nunca chamar `bundle()` direto. Se a
+  vez (`render/queue.ts`): projeto que já espera na fila devolve o mesmo job
+  (a receita é lida quando começa); renderizando, aceita só mais um. O editor
+  mostra "Na fila: N antes" (`ahead`), retoma o job ativo ao reabrir
+  (`GET /api/projects/:id/render-job`) e avisa job perdido (404 = servidor
+  reiniciou) — antes, esperar na fila aparecia como "Renderizando 0%" e o
+  clique de novo enfileirava o mesmo vídeo várias vezes. Render recusa com < 3 GB livres. Nunca chamar `bundle()` direto. Se a
   junção falhar, o bundle é uma CÓPIA de media/ da hora em que nasceu: antes
   de cada render `syncBundleMedia` copia o que a receita usa e é novo
   (`recipeMediaFiles`). Velocidade (`renderJob.ts`, medida NA VPS, 4 vCPU
@@ -328,6 +343,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   `UPLOAD_LIMITS` no navegador e `checkClipUpload` na rota) e o briefing do
   War editável. O editado vai só para `recipe.briefing` desse projeto; a
   demanda e o War não mudam.
+- "Recomeçar" (vídeo que já tem projeto): modal de confirmação → o mesmo
+  `StartVideoPanel` com o briefing da demanda → `restart=1` na rota do
+  projeto. O servidor cria o novo e só então apaga a pasta do antigo
+  (recusa com 409 se a análise ou um render dele está na fila); a entrega
+  volta a pendente e o arquivo do Drive é substituído na próxima.
 - Painel do dia (`#/painel`, SÓ superadmin: link no menu e
   `GET /api/dashboard/day?date=` com 403 para os outros): `buildDayReport`
   em `demands/dashboard.ts`, função pura sem tabela nova. Dia no fuso

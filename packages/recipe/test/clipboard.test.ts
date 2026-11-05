@@ -107,6 +107,17 @@ describe("clipboard", () => {
     const blocks = splitItemAt(r, "caption:b1", 11.9).captions.blocks;
     expect(blocks.map((b) => b.words.map((w) => w.text))).toEqual([["um", "dois"], ["três"]]);
     expect(splitItemAt(r, "caption:b1", 10.5)).toBe(r);
+
+    // duração ajustada à mão: o início fica no 1º pedaço, o fim no 2º
+    const manual = {
+      ...r,
+      captions: { ...r.captions, blocks: r.captions.blocks.map((b) => ({ ...b, start: 12.5, end: 15.5 })) },
+    };
+    const parts = splitItemAt(manual, "caption:b1", 11.9).captions.blocks;
+    expect(parts.map((b) => [b.start, b.end])).toEqual([
+      [12.5, null],
+      [null, 15.5],
+    ]);
   });
 
   it("dividir mantém a entrada no 1º pedaço e a saída no 2º", () => {

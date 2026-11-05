@@ -6,6 +6,8 @@ import { appendClips, ClipDropzone, ClipQueue, type QueuedClip } from "./ClipQue
 
 interface StartVideoPanelProps {
   index: number;
+  /** recomeçar: o envio apaga a timeline atual do vídeo (já confirmado antes) */
+  restart?: boolean;
   /** briefing como veio do War */
   warBriefing: string;
   /** brutos soltos na linha do vídeo antes de o painel abrir */
@@ -26,6 +28,7 @@ const LIMIT_HINT = `até ${formatSeconds(UPLOAD_LIMITS.video.maxSeconds)} e ${fo
  */
 export const StartVideoPanel: React.FC<StartVideoPanelProps> = ({
   index,
+  restart = false,
   warBriefing,
   initialFiles,
   busy,
@@ -71,9 +74,16 @@ export const StartVideoPanel: React.FC<StartVideoPanelProps> = ({
 
   const locked = busy !== null;
   const edited = briefing.trim() !== warBriefing.trim();
+  const action = restart ? "Recomeçar edição" : "Começar edição";
 
   return (
-    <li className="dd-start" aria-label={`Começar edição do vídeo ${index}`}>
+    <li className={`dd-start ${restart ? "restart" : ""}`} aria-label={`${action} do vídeo ${index}`}>
+      {restart && (
+        <p className="dd-start-warn">
+          <Icon name="trash" size={13} />
+          Ao enviar, a timeline atual deste vídeo é apagada e a IA analisa os novos brutos.
+        </p>
+      )}
       <div className="dd-start-step">
         <span className="dd-start-label">
           Clipes brutos <span className="dd-sub">{LIMIT_HINT}</span>
@@ -124,13 +134,17 @@ export const StartVideoPanel: React.FC<StartVideoPanelProps> = ({
         <button className="sm ghost" disabled={locked} onClick={onCancel}>
           Cancelar
         </button>
-        <button className="sm primary" disabled={clips.length === 0 || checking || locked} onClick={start}>
+        <button
+          className={`sm ${restart ? "danger" : "primary"}`}
+          disabled={clips.length === 0 || checking || locked}
+          onClick={start}
+        >
           <Icon name="upload" size={13} />
           {busy
             ? `${busy}…`
             : clips.length > 1
-              ? `Começar edição com ${clips.length} clipes`
-              : "Começar edição"}
+              ? `${action} com ${clips.length} clipes`
+              : action}
         </button>
       </div>
     </li>

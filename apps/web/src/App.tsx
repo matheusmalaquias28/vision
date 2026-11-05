@@ -350,8 +350,8 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               onChanged={refreshBoard}
               onOpenClient={(id) => go(`#/clientes/${encodeURIComponent(id)}`)}
               onOpenProject={(id) => setSelected(id)}
-              onStartVideo={(demand, index, files, briefing) =>
-                openCreated(() => uploadDemandVideo(demand.id, index, files, briefing))
+              onStartVideo={(demand, index, files, briefing, restart) =>
+                openCreated(() => uploadDemandVideo(demand.id, index, files, briefing, restart))
               }
             />
           )}

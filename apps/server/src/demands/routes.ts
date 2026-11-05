@@ -4,7 +4,8 @@ import express from "express";
 import { projectDir, projectsDir, recipePath } from "../paths";
 import { slugify } from "../project";
 import { checkClipUpload, clipUpload, createProjectFromUploads, uploadName } from "../uploads";
-import { readAnalysis, startAutoAnalysis } from "../creative/autoAnalyze";
+import { isAnalyzing, readAnalysis, startAutoAnalysis } from "../creative/autoAnalyze";
+import { isRendering } from "../render/queue";
 import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from "./drive";
 import { AVERAGE_WINDOW_DAYS, buildDayReport, dayOf, shiftDay, type ProjectInfo } from "./dashboard";
 import { getStore } from "./store";
@@ -232,6 +233,11 @@ demandsRouter.post(
  * ordem do formulário. `briefing` = o do War editado no Vision: vale só para
  * este projeto (vai para recipe.briefing) e nunca volta ao War. Sem o campo,
  * usa o do War.
+ *
+ * `restart=1` = "Recomeçar edição": o vídeo que já tem projeto ganha um novo
+ * com os brutos enviados e o antigo (timeline, brutos, renders) é apagado só
+ * depois que o novo existe. A entrega volta a pendente; o arquivo no Drive
+ * fica e é substituído na próxima entrega (mesmo nome).
  */
 demandsRouter.post(
   "/api/demands/:id/videos/:index/project",
@@ -250,9 +256,19 @@ demandsRouter.post(
       res.status(404).json({ error: "vídeo da demanda não encontrado" });
       return;
     }
-    if (video.projectId && fs.existsSync(projectDir(video.projectId))) {
+    const old = video.projectId && fs.existsSync(projectDir(video.projectId)) ? video.projectId : null;
+    if (old && req.body?.restart !== "1") {
       discard();
-      res.status(409).json({ error: "esse vídeo já tem um projeto", projectId: video.projectId });
+      res.status(409).json({ error: "esse vídeo já tem um projeto", projectId: old });
+      return;
+    }
+    // apagar no meio quebraria a fila da análise/render
+    if (old && (isAnalyzing(old) || isRendering(old))) {
+      discard();
+      res.status(409).json({
+        error: `espere ${isAnalyzing(old) ? "a análise da IA" : "o render"} terminar para recomeçar`,
+        projectId: old,
+      });
       return;
     }
     // mesmos limites dos clipes inseridos no editor (UPLOAD_LIMITS)
@@ -270,7 +286,20 @@ demandsRouter.post(
         : demand.briefing || demand.briefingText || "";
     const base = slugify(demand.title || demand.clientName).slice(0, 36);
     const recipe = await createProjectFromUploads(files, `${base}-${pad2(index)}`, briefing);
-    await store.upsertVideo({ ...video, projectId: recipe.projectId, updatedAt: new Date().toISOString() });
+    await store.upsertVideo({
+      ...video,
+      projectId: recipe.projectId,
+      deliveredAt: old ? null : video.deliveredAt,
+      updatedAt: new Date().toISOString(),
+    });
+    if (old) {
+      try {
+        fs.rmSync(projectDir(old), { recursive: true, force: true, maxRetries: 3 });
+      } catch (err) {
+        // arquivo preso (Windows) não derruba o recomeço; o projeto já saiu da demanda
+        console.warn(`Recomeçar: não deu para apagar ${old}:`, err instanceof Error ? err.message : err);
+      }
+    }
     // transcrição, cortes e motions com o briefing já começam no servidor (tudo entra como sugestão)
     startAutoAnalysis(recipe.projectId);
     res.json(recipe);

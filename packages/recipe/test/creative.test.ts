@@ -120,6 +120,24 @@ describe("interpretBriefing", () => {
     expect(interpretBriefing("legendas e música").avoid).toEqual([]);
   });
 
+  it("sem cortes / só legenda: a análise automática respeita", () => {
+    const pedido = interpretBriefing("Não quero cortes, somente legenda.");
+    expect(pedido).toMatchObject({ noCuts: true, captionsOnly: true });
+    for (const t of ["sem cortes", "não cortar nada", "não quero que corte", "manter o vídeo inteiro", "Não precisa cortar"]) {
+      expect(interpretBriefing(t).noCuts, t).toBe(true);
+    }
+    // só legenda implica sem cortes
+    for (const t of ["só legenda", "apenas a legenda", "Somente colocar legendas"]) {
+      expect(interpretBriefing(t), t).toMatchObject({ captionsOnly: true, noCuts: true });
+    }
+    // pedidos que NÃO são isso
+    for (const t of ["sem enrolação, cortes rápidos", "não esquece de cortar as pausas", "legendas e música", "cortes dinâmicos", ""]) {
+      expect(interpretBriefing(t).noCuts, t).toBe(false);
+    }
+    expect(interpretBriefing("não só legenda, quero motions também").captionsOnly).toBe(false);
+    expect(interpretBriefing("sem cortes, mas com motions").captionsOnly).toBe(false);
+  });
+
   it("pedido explícito não vira proibição", () => {
     const d = interpretBriefing("pode usar emojis à vontade");
     expect(d.avoid).not.toContain("emoji");
