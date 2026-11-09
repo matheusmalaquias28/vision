@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { repoRoot } from "../paths";
-import type { Client, Demand, DemandEvent, DemandVideo, Notification, User } from "./types";
+import type { Client, Demand, DemandEvent, DemandVideo, EditActivity, Notification, User, WorkEvent, WorkEventKind } from "./types";
+
+export type NewWorkEvent = Omit<WorkEvent, "id" | "createdAt"> & { createdAt?: string };
 
 /**
  * Persistência de clientes/demandas. Com VISION_DATABASE_URL usa o Postgres
@@ -36,6 +38,16 @@ export interface DemandStore {
   getSetting<T>(key: string): Promise<T | null>;
   setSetting(key: string, value: unknown): Promise<void>;
   deleteSetting(key: string): Promise<void>;
+  /** Soma segundos de edição na hora (teto de 3600 por pessoa/projeto/hora) */
+  addEditSeconds(userId: string, projectId: string, hour: string, seconds: number): Promise<void>;
+  listEditActivity(sinceIso: string): Promise<EditActivity[]>;
+  addWorkEvent(e: NewWorkEvent): Promise<void>;
+  listWorkEvents(sinceIso: string, kind?: WorkEventKind): Promise<WorkEvent[]>;
+  /**
+   * false = o banco ainda não tem as tabelas do painel de desempenho
+   * (bloco novo de db/vision.sql não aplicado): nada é medido, o resto segue.
+   */
+  trackingReady(): boolean;
 }
 
 // ─── Local (JSON) ────────────────────────────────────────────────────
@@ -47,6 +59,8 @@ interface LocalData {
   events: DemandEvent[];
   notifications?: Notification[];
   users?: User[];
+  editActivity?: EditActivity[];
+  workEvents?: WorkEvent[];
   settings: Record<string, unknown>;
 }
 
@@ -168,6 +182,27 @@ class LocalStore implements DemandStore {
   async deleteSetting(key: string) {
     delete this.data.settings[key];
     this.save();
+  }
+  async addEditSeconds(userId: string, projectId: string, hour: string, seconds: number) {
+    const list = (this.data.editActivity ??= []);
+    const row = list.find((a) => a.userId === userId && a.projectId === projectId && a.hour === hour);
+    if (row) row.seconds = Math.min(3600, row.seconds + seconds);
+    else list.push({ userId, projectId, hour, seconds: Math.min(3600, seconds) });
+    this.save();
+  }
+  async listEditActivity(sinceIso: string) {
+    return (this.data.editActivity ?? []).filter((a) => a.hour >= sinceIso);
+  }
+  async addWorkEvent(e: NewWorkEvent) {
+    const list = (this.data.workEvents ??= []);
+    list.push({ ...e, id: (list.at(-1)?.id ?? 0) + 1, createdAt: e.createdAt ?? new Date().toISOString() });
+    this.save();
+  }
+  async listWorkEvents(sinceIso: string, kind?: WorkEventKind) {
+    return (this.data.workEvents ?? []).filter((e) => e.createdAt >= sinceIso && (!kind || e.kind === kind));
+  }
+  trackingReady() {
+    return true;
   }
 }
 
@@ -311,6 +346,60 @@ class PgStore implements DemandStore {
   }
   async deleteSetting(key: string) {
     await this.pool.query("delete from vision.settings where key = $1", [key]);
+  }
+
+  // ─── painel de desempenho (tabelas edit_activity e work_events) ────
+  private trackingMissing = false;
+  /** Tabela ainda não criada (42P01): o painel avisa, o resto do Vision segue */
+  private async tracking<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      const out = await fn();
+      this.trackingMissing = false;
+      return out;
+    } catch (err) {
+      if ((err as { code?: string }).code !== "42P01") throw err;
+      if (!this.trackingMissing) {
+        console.warn("Painel de desempenho: aplique o bloco novo de db/vision.sql (edit_activity, work_events)");
+      }
+      this.trackingMissing = true;
+      return fallback;
+    }
+  }
+  async addEditSeconds(userId: string, projectId: string, hour: string, seconds: number) {
+    await this.tracking(
+      () =>
+        this.pool.query(
+          `insert into vision.edit_activity (user_id, project_id, hour, seconds) values ($1, $2, $3, least(3600, $4::integer))
+           on conflict (user_id, project_id, hour)
+           do update set seconds = least(3600, vision.edit_activity.seconds + excluded.seconds)`,
+          [userId, projectId, hour, Math.round(seconds)]
+        ),
+      null
+    );
+  }
+  listEditActivity(sinceIso: string) {
+    return this.tracking(
+      () => this.rows<EditActivity>("select * from vision.edit_activity where hour >= $1", [sinceIso]),
+      []
+    );
+  }
+  async addWorkEvent(e: NewWorkEvent) {
+    await this.tracking(() => this.insert("work_events", e), null);
+  }
+  listWorkEvents(sinceIso: string, kind?: WorkEventKind) {
+    return this.tracking(
+      () =>
+        kind
+          ? this.rows<WorkEvent>(
+              "select * from vision.work_events where created_at >= $1 and kind = $2 order by id",
+              [sinceIso, kind]
+            )
+          : this.rows<WorkEvent>("select * from vision.work_events where created_at >= $1 order by id", [sinceIso]),
+      []
+    );
+  }
+  trackingReady() {
+    return !this.trackingMissing;
   }
 }
 

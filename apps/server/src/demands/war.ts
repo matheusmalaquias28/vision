@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { slugify } from "../project";
 import { getStore } from "./store";
+import { noteDueDate } from "./tracking";
 import { WAR_VIDEO_STATUSES, type Client, type Demand, type DemandNote } from "./types";
 
 /**
@@ -148,6 +149,7 @@ async function handleDemand(body: Json) {
   };
   await store.upsertDemand(demand);
   await ensureVideos(demand);
+  await noteDueDate(prev, demand);
   await store.addEvent({
     demandId: id,
     direction: "in",

@@ -154,6 +154,32 @@ create table if not exists vision.users (
   updated_at    timestamptz not null default now()
 );
 
+-- painel de desempenho: tempo real de edição (segundos ativos no editor por
+-- pessoa, projeto e hora) e marcos do trabalho (começo, render, entrega, data
+-- de entrega definida). Sem estas tabelas o Vision funciona, só não mede.
+create table if not exists vision.edit_activity (
+  user_id    text not null,
+  project_id text not null,
+  hour       timestamptz not null,        -- começo da hora (UTC)
+  seconds    integer not null default 0,  -- até 3600
+  primary key (user_id, project_id, hour)
+);
+create index if not exists edit_activity_hour_idx on vision.edit_activity (hour);
+
+create table if not exists vision.work_events (
+  id         bigserial primary key,
+  kind       text not null,               -- start | render | deliver | due-date
+  user_id    text,
+  user_name  text,
+  project_id text,
+  demand_id  text,
+  ok         boolean not null default true,
+  seconds    double precision,            -- render: duração
+  detail     text,                        -- due-date: a data; render com erro: o erro
+  created_at timestamptz not null default now()
+);
+create index if not exists work_events_recent_idx on vision.work_events (created_at);
+
 -- 4. Permissões: vision_app lê/grava dados SÓ no schema vision (sem DDL)
 grant usage on schema vision to vision_app;
 grant select, insert, update, delete on all tables in schema vision to vision_app;
@@ -178,7 +204,7 @@ end $$;
 do $$
 declare t text;
 begin
-  foreach t in array array['clients', 'demands', 'demand_videos', 'demand_events', 'notifications', 'settings', 'users'] loop
+  foreach t in array array['clients', 'demands', 'demand_videos', 'demand_events', 'notifications', 'settings', 'users', 'edit_activity', 'work_events'] loop
     execute format('alter table vision.%I enable row level security', t);
     if not exists (
       select 1 from pg_policies where schemaname = 'vision' and tablename = t and policyname = 'vision_app_all'

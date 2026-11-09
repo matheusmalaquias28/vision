@@ -8,6 +8,8 @@ import { isAnalyzing, readAnalysis, startAutoAnalysis } from "../creative/autoAn
 import { isRendering } from "../render/queue";
 import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from "./drive";
 import { AVERAGE_WINDOW_DAYS, buildDayReport, dayOf, shiftDay, type ProjectInfo } from "./dashboard";
+import { buildPerformanceReport, MAX_PERIOD_DAYS, performanceDataSince } from "./performance";
+import { backfillDueDates, recordWork } from "./tracking";
 import { getStore } from "./store";
 import type { Demand, DemandVideo } from "./types";
 import {
@@ -140,6 +142,58 @@ demandsRouter.get(
       warStatuses(),
     ]);
     res.json(buildDayReport({ day, now, statuses, demands, videos, events, projects: projectInfos() }));
+  })
+);
+
+/**
+ * Desempenho por período (só superadmin): tempo real de edição, vídeos
+ * editados/renderizados/entregues, médias, dias mais e menos produtivos e o
+ * tempo de cada demanda (pedido → data definida → entrega).
+ */
+demandsRouter.get(
+  "/api/dashboard/performance",
+  wrap(async (req, res) => {
+    if (req.user?.role !== "superadmin") {
+      res.status(403).json({ error: "só o superadmin vê o painel" });
+      return;
+    }
+    const now = new Date();
+    const today = dayOf(now);
+    const isDay = (v: unknown): v is string => typeof v === "string" && /^d{4}-d{2}-d{2}$/.test(v);
+    let to = isDay(req.query.to) && req.query.to <= today ? req.query.to : today;
+    let from = isDay(req.query.from) ? req.query.from : shiftDay(to, -29);
+    if (from > to) [from, to] = [to, from];
+    if (shiftDay(from, MAX_PERIOD_DAYS - 1) < to) from = shiftDay(to, -(MAX_PERIOD_DAYS - 1));
+    const userId = typeof req.query.user === "string" && req.query.user ? req.query.user : null;
+
+    const store = getStore();
+    const since = `${performanceDataSince(from, to)}T00:00:00Z`;
+    const demands = await store.listDemands();
+    await backfillDueDates(demands).catch((e) => console.warn("Painel: datas antigas:", e));
+    const [videos, activity, work, users, statuses] = await Promise.all([
+      store.listVideos(),
+      store.listEditActivity(since),
+      store.listWorkEvents(since),
+      store.listUsers(),
+      warStatuses(),
+    ]);
+    // a data de entrega pode ter sido definida bem antes do período
+    const dueDates = await store.listWorkEvents("1970-01-01T00:00:00Z", "due-date");
+    res.json(
+      buildPerformanceReport({
+        from,
+        to,
+        now,
+        userId,
+        statuses,
+        demands,
+        videos,
+        activity,
+        work: [...work.filter((w) => w.kind !== "due-date"), ...dueDates],
+        users: users.map((u) => ({ id: u.id, name: u.name })),
+        trackingReady: store.trackingReady(),
+      })
+    );
   })
 );
 
@@ -286,6 +340,13 @@ demandsRouter.post(
         : demand.briefing || demand.briefingText || "";
     const base = slugify(demand.title || demand.clientName).slice(0, 36);
     const recipe = await createProjectFromUploads(files, `${base}-${pad2(index)}`, briefing);
+    void recordWork({
+      kind: "start",
+      userId: req.user?.id ?? null,
+      userName: req.user?.name ?? null,
+      projectId: recipe.projectId,
+      demandId: demand.id,
+    });
     await store.upsertVideo({
       ...video,
       projectId: recipe.projectId,
@@ -410,6 +471,13 @@ demandsRouter.post(
       updatedAt: new Date().toISOString(),
     };
     await store.upsertVideo(updated);
+    await recordWork({
+      kind: "deliver",
+      userId: req.user?.id ?? null,
+      userName: req.user?.name ?? null,
+      projectId,
+      demandId: demand.id,
+    });
     const videos = await store.listVideos(demand.id);
     const delivered = videos.filter((v) => v.deliveredAt).length;
 

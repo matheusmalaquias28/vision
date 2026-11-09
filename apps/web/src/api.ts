@@ -627,3 +627,105 @@ export interface DayReport {
 
 export const getDayReport = (date?: string) =>
   fetch(`/api/dashboard/day${date ? `?date=${date}` : ""}`).then((r) => json<DayReport>(r));
+
+/** Espelho de `PerformanceReport` (apps/server/src/demands/performance.ts) */
+export interface PeriodTotals {
+  editSeconds: number;
+  daysWorked: number;
+  videosEdited: number;
+  rendered: number;
+  renders: number;
+  delivered: number;
+  demandsDelivered: number;
+}
+
+export interface DailyPoint {
+  day: string;
+  weekday: number;
+  editSeconds: number;
+  videosEdited: number;
+  rendered: number;
+  delivered: number;
+  tracked: boolean;
+}
+
+export interface DemandTimeRow {
+  demandId: string;
+  title: string;
+  clientName: string;
+  videoCount: number;
+  requestedAt: string;
+  dateSetAt: string | null;
+  cameWithDate: boolean;
+  dueDate: string | null;
+  deliveredAt: string;
+  leadDays: number;
+  dateSetHours: number | null;
+  editSeconds: number;
+  onTime: boolean | null;
+  lateDays: number;
+}
+
+export interface PerformanceReport {
+  from: string;
+  to: string;
+  days: number;
+  generatedAt: string;
+  userId: string | null;
+  trackingReady: boolean;
+  trackingSince: string | null;
+  editors: { id: string; name: string }[];
+  totals: PeriodTotals;
+  previous: PeriodTotals & { from: string; to: string };
+  perVideo: { avgEditSeconds: number | null; sample: number };
+  weeklyAvg: { editSeconds: number | null; delivered: number | null; weeks: number };
+  daily: DailyPoint[];
+  weekdays: { weekday: number; avgEditSeconds: number | null; avgDelivered: number | null; samples: number }[];
+  best: DailyPoint[];
+  worst: DailyPoint[];
+  heatmap: number[][];
+  weekly: {
+    weekStart: string;
+    editSeconds: number;
+    delivered: number;
+    rendered: number;
+    daysWorked: number;
+    tracked: boolean;
+    complete: boolean;
+  }[];
+  demands: {
+    avgLeadDays: number | null;
+    avgDateSetHours: number | null;
+    dateSetSample: number;
+    onTimeRate: number | null;
+    sample: number;
+    waitingDate: number;
+    oldestWaitingDays: number | null;
+    rows: DemandTimeRow[];
+  };
+  byEditor: {
+    id: string;
+    name: string;
+    editSeconds: number;
+    daysWorked: number;
+    videosEdited: number;
+    rendered: number;
+    delivered: number;
+    avgPerVideoSeconds: number | null;
+  }[];
+}
+
+export const getPerformance = (q: { from: string; to: string; user?: string | null }) => {
+  const p = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.user) p.set("user", q.user);
+  return fetch(`/api/dashboard/performance?${p}`).then((r) => json<PerformanceReport>(r));
+};
+
+/** Batimento do editor (tempo real de edição). keepalive: sai mesmo fechando a aba */
+export const sendEditActivity = (projectId: string, seconds: number) =>
+  fetch(`/api/projects/${encodeURIComponent(projectId)}/activity`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds }),
+    keepalive: true,
+  }).catch(() => undefined);

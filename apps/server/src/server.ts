@@ -34,6 +34,7 @@ import { getPreviewProxies, queuePreviewProxy } from "./pipeline/previewProxy";
 import { getThumbnail } from "./pipeline/thumbnail";
 import { getFileWaveform, getWaveforms } from "./pipeline/waveform";
 import { activeJobFor, enqueueRender, getJob } from "./render/queue";
+import { recordEditSeconds, recordWork } from "./demands/tracking";
 import { cleanupStaleRemotionTemp, warmBundle } from "./render/bundle";
 import { loadCatalog } from "./library/catalog";
 import { applyTemplate, TEMPLATES } from "./templates";
@@ -109,6 +110,7 @@ app.post("/api/projects", upload.array("videos", 20), async (req, res, next) => 
     );
     // transcrição, cortes e motions já começam no servidor (tudo entra como sugestão)
     startAutoAnalysis(recipe.projectId);
+    void recordWork({ kind: "start", userId: req.user?.id ?? null, userName: req.user?.name ?? null, projectId: recipe.projectId });
     res.json(recipe);
   } catch (err) {
     next(err);
@@ -501,7 +503,26 @@ app.post("/api/projects/:id/render", (req, res) => {
     res.status(400).json({ error: "o vídeo bruto deste projeto já foi apagado pela limpeza; não dá para renderizar de novo" });
     return;
   }
-  res.json(enqueueRender(req.params.id));
+  res.json(enqueueRender(req.params.id, req.user && { id: req.user.id, name: req.user.name }));
+});
+
+/**
+ * Batimento do editor (painel de desempenho): segundos em que o editor esteve
+ * aberto, visível e em uso desde o último envio. O servidor limita pelo tempo
+ * real entre batimentos da mesma pessoa.
+ */
+app.post("/api/projects/:id/activity", async (req, res, next) => {
+  try {
+    const seconds = Number(req.body?.seconds);
+    if (!req.user || !fs.existsSync(recipePath(req.params.id))) {
+      res.status(204).end();
+      return;
+    }
+    const counted = await recordEditSeconds(req.user.id, req.params.id, seconds);
+    res.json({ counted });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /** Render ainda na fila ou rodando deste projeto (null = nenhum): o editor reaberto volta a acompanhar */

@@ -363,6 +363,21 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   Vision); abertas, atrasadas e pontos de atenção são sempre "agora" (o
   banco só guarda o estado atual). Médias (prazo criação→último vídeo
   entregue, tempo de edição, % no prazo) nos 30 dias até o dia.
+- Painel → Desempenho (só superadmin; aba padrão, a antiga vira "Hoje"):
+  `GET /api/dashboard/performance?from&to&user` → `buildPerformanceReport`
+  (`demands/performance.ts`, pura, testada). Tempo REAL de edição =
+  batimentos do editor (`useEditTracker`: aba visível + mouse/teclado nos
+  últimos 2 min ou preview tocando; envia a cada 60 s em
+  `POST /api/projects/:id/activity`; o servidor limita pelo tempo entre
+  batimentos da pessoa, `clampBeat`: duas abas não somam em dobro) em
+  `vision.edit_activity` (pessoa × projeto × hora). Marcos em
+  `vision.work_events` (`tracking.ts`, nunca derrubam a ação): start
+  (projeto criado), render (fila, com duração), deliver, due-date (webhook
+  quando a demanda ganha data; demandas antigas: 1º payload com dueDate no
+  histórico, uma vez por processo). Tabelas ausentes (42P01) = painel avisa e
+  o resto segue. Medição só vale daí em diante (`trackingSince`: antes
+  aparece tracejado e fora das médias). Filtro por pessoa: tempo/renders pelo
+  autor; entregas/demandas pelo dono do projeto (quem mais editou).
 - BANCO COMPARTILHADO com outro sistema: o Vision só existe no schema `vision`
   (`db/vision.sql`, aplicado à mão; nunca `supabase db push`) e conecta como
   `vision_app` (`VISION_DATABASE_URL`), que só lê/grava dados nesse schema.

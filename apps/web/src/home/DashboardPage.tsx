@@ -3,6 +3,7 @@ import { getDayReport, type AttentionKind, type DayItem, type DayReport } from "
 import { Icon, type IconName } from "../editor/Icon";
 import { StatusDot } from "./DemandBadges";
 import { statusTone } from "./demandUtil";
+import { PerformancePanel } from "./PerformancePanel";
 
 interface DashboardPageProps {
   onOpenDemand: (id: string) => void;
@@ -98,7 +99,7 @@ const ItemList: React.FC<{
  * edições começadas, entregas, status) e a situação de agora (abertas,
  * atrasadas, pontos de atenção). Médias de prazo: últimos 30 dias.
  */
-export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenDemand }) => {
+const DayPanel: React.FC<DashboardPageProps> = ({ onOpenDemand }) => {
   const [day, setDay] = useState<string | null>(null);
   const [report, setReport] = useState<DayReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,7 +126,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenDemand }) =>
   }, [report?.isToday, report?.day, load]);
 
   if (!report) {
-    return <div className="dash">{error ? <p className="note error">{error}</p> : <p className="dash-empty">Carregando…</p>}</div>;
+    return <div className="dash-day">{error ? <p className="note error">{error}</p> : <p className="dash-empty">Carregando…</p>}</div>;
   }
 
   const k = report.kpis;
@@ -136,7 +137,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenDemand }) =>
   const high = report.attention.filter((a) => a.severity === "high").length;
 
   return (
-    <div className="dash">
+    <div className="dash-day">
       <header className="dash-head">
         <div>
           <h2>Resumo do dia</h2>
@@ -352,6 +353,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenDemand }) =>
           )}
         </section>
       </div>
+    </div>
+  );
+};
+
+type DashTab = "performance" | "day";
+const TAB_KEY = "vision:dash-tab";
+
+function readTab(): DashTab {
+  try {
+    return localStorage.getItem(TAB_KEY) === "day" ? "day" : "performance";
+  } catch {
+    return "performance";
+  }
+}
+
+/**
+ * Painel (só superadmin): Desempenho (período: tempo real de edição, vídeos,
+ * médias, dias e horários, tempo das demandas) e Hoje (operação do dia).
+ */
+export const DashboardPage: React.FC<DashboardPageProps> = ({ onOpenDemand }) => {
+  const [tab, setTab] = useState<DashTab>(readTab);
+  const pick = (t: DashTab) => {
+    setTab(t);
+    try {
+      localStorage.setItem(TAB_KEY, t);
+    } catch {
+      // sem armazenamento: só não lembra a aba
+    }
+  };
+  return (
+    <div className="dash">
+      <nav className="dash-tabs" role="tablist" aria-label="Painel">
+        <button role="tab" aria-selected={tab === "performance"} className={tab === "performance" ? "on" : ""} onClick={() => pick("performance")}>
+          <Icon name="chart" size={15} />
+          Desempenho
+        </button>
+        <button role="tab" aria-selected={tab === "day"} className={tab === "day" ? "on" : ""} onClick={() => pick("day")}>
+          <Icon name="calendar" size={15} />
+          Hoje
+        </button>
+      </nav>
+      {tab === "performance" ? <PerformancePanel onOpenDemand={onOpenDemand} /> : <DayPanel onOpenDemand={onOpenDemand} />}
     </div>
   );
 };

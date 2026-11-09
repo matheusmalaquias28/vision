@@ -126,3 +126,35 @@ export interface User {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Tempo real de edição: segundos ativos (editor aberto, visível e em uso)
+ * somados por pessoa, projeto e hora cheia (instante UTC do começo da hora).
+ */
+export interface EditActivity {
+  userId: string;
+  projectId: string;
+  hour: string;
+  seconds: number;
+}
+
+/**
+ * Marcos do trabalho para o painel de desempenho:
+ * start = edição começou (projeto criado), render = render terminou
+ * (ok/erro, seconds = duração do render), deliver = vídeo enviado ao Drive,
+ * due-date = a demanda ganhou data de entrega (detail = a data).
+ */
+export type WorkEventKind = "start" | "render" | "deliver" | "due-date";
+
+export interface WorkEvent {
+  id: number;
+  kind: WorkEventKind;
+  userId: string | null;
+  userName: string | null;
+  projectId: string | null;
+  demandId: string | null;
+  ok: boolean;
+  seconds: number | null;
+  detail: string | null;
+  createdAt: string;
+}

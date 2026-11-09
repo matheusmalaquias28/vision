@@ -1,5 +1,6 @@
 import { toRecipePath } from "../paths";
 import { loadRecipe } from "../project";
+import { recordWork } from "../demands/tracking";
 import { renderRecipe } from "./renderJob";
 
 export interface RenderJobInfo {
@@ -32,7 +33,7 @@ const active = (j: RenderJobInfo) => j.status === "queued" || j.status === "rend
  * render inteiro do mesmo vídeo, e todo mundo esperava mais. Se ele já está
  * RENDERIZANDO, entra um novo (com as edições feitas depois) — no máximo um.
  */
-export function enqueueRender(projectId: string): RenderJobInfo {
+export function enqueueRender(projectId: string, by?: { id: string; name: string }): RenderJobInfo {
   const waiting = [...jobs.values()].find((j) => j.projectId === projectId && j.status === "queued");
   if (waiting) return withAhead(waiting);
   const id = `job_${boot}_${++counter}`;
@@ -40,6 +41,7 @@ export function enqueueRender(projectId: string): RenderJobInfo {
   jobs.set(id, job);
   chain = chain.then(async () => {
     job.status = "rendering";
+    const startedAt = Date.now();
     try {
       const { outputPath } = await renderRecipe(loadRecipe(projectId), (f) => {
         job.progress = f;
@@ -52,6 +54,16 @@ export function enqueueRender(projectId: string): RenderJobInfo {
       job.error = err instanceof Error ? err.message : String(err);
       console.warn(`Render de ${projectId} falhou:`, job.error);
     }
+    // painel de desempenho: quem renderizou, quando e quanto levou
+    await recordWork({
+      kind: "render",
+      userId: by?.id ?? null,
+      userName: by?.name ?? null,
+      projectId,
+      ok: job.status === "done",
+      seconds: (Date.now() - startedAt) / 1000,
+      detail: job.error ?? null,
+    });
   });
   return withAhead(job);
 }

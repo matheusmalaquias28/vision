@@ -10,6 +10,8 @@ vi.mock("../src/render/renderJob", () => ({
     }),
 }));
 vi.mock("../src/project", () => ({ loadRecipe: (projectId: string) => ({ projectId }) }));
+// o painel de desempenho não grava nada durante o teste
+vi.mock("../src/demands/tracking", () => ({ recordWork: async () => {} }));
 
 const { activeJobFor, enqueueRender, getJob, isRendering } = await import("../src/render/queue");
 const tick = () => new Promise((r) => setTimeout(r, 0));

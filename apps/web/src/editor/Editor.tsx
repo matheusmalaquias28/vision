@@ -89,6 +89,7 @@ import { TranscriptPanel } from "./TranscriptPanel";
 import { Logo } from "../ui/Logo";
 import { DragLayer } from "./DragLayer";
 import { NotificationBell } from "../home/NotificationBell";
+import { useEditTracker } from "./useEditTracker";
 
 /** Passos de desfazer guardados */
 const HISTORY_LIMIT = 100;
@@ -160,6 +161,8 @@ export const Editor: React.FC<EditorProps> = ({
   onOpenProject,
   onHome,
 }) => {
+  // painel de desempenho: tempo real de edição deste projeto
+  useEditTracker(projectId);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [demand, setDemand] = useState<ProjectDemand | null>(null);
   const [creativeReport, setCreativeReport] = useState<CreativeReport | null>(null);
