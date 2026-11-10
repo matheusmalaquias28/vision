@@ -233,7 +233,12 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   mostra "Na fila: N antes" (`ahead`), retoma o job ativo ao reabrir
   (`GET /api/projects/:id/render-job`) e avisa job perdido (404 = servidor
   reiniciou) — antes, esperar na fila aparecia como "Renderizando 0%" e o
-  clique de novo enfileirava o mesmo vídeo várias vezes. Render recusa com < 3 GB livres. Nunca chamar `bundle()` direto. Se a
+  clique de novo enfileirava o mesmo vídeo várias vezes. Render recusa com < 3 GB livres.
+  Chrome que não abre a tempo ("while setting up the headless browser": a VPS
+  chegou a travar por instantes no host do provedor, com o projeto bom):
+  limite de 90 s (`renderTimeoutMs`, `RENDER_TIMEOUT_MS`) em selectComposition
+  e renderMedia e 1 nova tentativa automática (`withBrowserRetry`); erro do
+  projeto não repete; esgotado, a mensagem sai em português. Nunca chamar `bundle()` direto. Se a
   junção falhar, o bundle é uma CÓPIA de media/ da hora em que nasceu: antes
   de cada render `syncBundleMedia` copia o que a receita usa e é novo
   (`recipeMediaFiles`). Velocidade (`renderJob.ts`, medida NA VPS, 4 vCPU

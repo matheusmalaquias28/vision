@@ -49,6 +49,52 @@ export function renderGl(): ChromiumOptions["gl"] {
   return process.platform === "win32" ? "angle" : null;
 }
 
+/**
+ * Limite do Remotion para o Chrome abrir a página e para cada delayRender
+ * (padrão dele: 30 s). Na VPS a máquina chegou a travar por instantes (host do
+ * provedor) e o render caía com "Timed out after 30000ms while setting up the
+ * headless browser" mesmo com o projeto bom. RENDER_TIMEOUT_MS troca.
+ */
+export function renderTimeoutMs(): number {
+  const env = Number(process.env.RENDER_TIMEOUT_MS);
+  if (Number.isFinite(env) && env >= 10_000) return Math.round(env);
+  return 90_000;
+}
+
+/** Falha do Chrome ao abrir (não do projeto): vale tentar de novo */
+export function isBrowserSetupError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /while setting up the headless browser/i.test(msg);
+}
+
+export const BROWSER_SETUP_MESSAGE =
+  "O navegador do render não abriu a tempo (servidor sobrecarregado ou travado por um instante). Tente renderizar de novo em alguns minutos.";
+
+/**
+ * Roda `fn` e, se o Chrome não abriu a tempo, espera e tenta de novo (uma vez,
+ * por padrão). Erro do projeto (mídia faltando, receita inválida) sai na hora.
+ * Esgotadas as tentativas, a falha do Chrome vira mensagem em português.
+ */
+export async function withBrowserRetry<T>(
+  fn: () => Promise<T>,
+  {
+    attempts = 2,
+    waitMs = 5000,
+    onRetry,
+  }: { attempts?: number; waitMs?: number; onRetry?: (attempt: number, err: unknown) => void } = {}
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isBrowserSetupError(err)) throw err;
+      if (attempt >= attempts) throw new Error(BROWSER_SETUP_MESSAGE, { cause: err });
+      onRetry?.(attempt, err);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
 export interface RenderResult {
   outputPath: string;
 }
@@ -103,22 +149,38 @@ export async function renderToFile(
 
   const inputProps = { recipe };
   const chromiumOptions: ChromiumOptions = { gl: renderGl() };
-  const composition = await selectComposition({
-    serveUrl,
-    id: COMPOSITION_ID,
-    inputProps,
-    chromiumOptions,
-  });
+  const timeoutInMilliseconds = renderTimeoutMs();
 
-  await renderMedia({
-    composition,
-    serveUrl,
-    codec: "h264",
-    outputLocation: outputPath,
-    inputProps,
-    concurrency: renderConcurrency(),
-    x264Preset: renderX264Preset(),
-    chromiumOptions,
-    onProgress: ({ progress }) => onProgress?.(progress),
-  });
+  await withBrowserRetry(
+    async () => {
+      const composition = await selectComposition({
+        serveUrl,
+        id: COMPOSITION_ID,
+        inputProps,
+        chromiumOptions,
+        timeoutInMilliseconds,
+      });
+      await renderMedia({
+        composition,
+        serveUrl,
+        codec: "h264",
+        outputLocation: outputPath,
+        inputProps,
+        concurrency: renderConcurrency(),
+        x264Preset: renderX264Preset(),
+        chromiumOptions,
+        timeoutInMilliseconds,
+        onProgress: ({ progress }) => onProgress?.(progress),
+      });
+    },
+    {
+      onRetry: (attempt, err) => {
+        console.warn(
+          `[render ${recipe.projectId}] navegador não abriu a tempo (tentativa ${attempt}), tentando de novo:`,
+          err instanceof Error ? err.message.split("\n")[0] : err
+        );
+        onProgress?.(0);
+      },
+    }
+  );
 }
