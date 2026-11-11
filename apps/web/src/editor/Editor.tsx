@@ -1069,6 +1069,7 @@ export const Editor: React.FC<EditorProps> = ({
             const o: Overlay = {
               id: `ov_${id}`,
               kind: isVideo ? "video" : "image",
+              track: 0,
               text: "",
               file: up.file,
               titleStyle: DEFAULT_TITLE_STYLE,

@@ -279,7 +279,8 @@ export const Overlays: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
   const total = outputDuration(recipe.timeline.segments);
   return (
     <>
-      {recipe.overlays.map((o) => {
+      {/* linha de cima na frente; na mesma linha, a ordem da receita (projeto antigo: tudo linha 0, igual antes) */}
+      {[...recipe.overlays].sort((a, b) => (a.track ?? 0) - (b.track ?? 0)).map((o) => {
         const end = o.end ?? total;
         const durationInFrames = Math.max(1, Math.round((end - o.start) * fps));
         return (

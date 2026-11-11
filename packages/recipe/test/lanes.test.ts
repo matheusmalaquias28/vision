@@ -109,9 +109,50 @@ describe("enforceLanes", () => {
       audioClips: [...before.audioClips, { ...before.audioClips[0], id: "m2", start: 4 }],
     };
     const out = enforceLanes(before, next);
-    expect(out.overlays.find((o) => o.id === "o2")).toMatchObject({ start: 5, end: 8 });
+    // overlay novo em cima de outro sobe de linha (mesmo tempo); música anda
+    expect(out.overlays.find((o) => o.id === "o2")).toMatchObject({ start: 3, end: 6, track: 1 });
     expect(out.audioClips.find((c) => c.id === "m2")?.start).toBe(10);
-    expect(laneSpansFor(out, "overlay:o2")).toEqual([expect.objectContaining({ start: 0, end: 5 })]);
+    expect(laneSpansFor(out, "overlay:o2")).toEqual([]);
+    expect(laneSpansFor(out, "overlay:o1")).toEqual([]);
+  });
+
+  it("overlay que já existe e é arrastado em cima de outro da mesma linha anda no tempo", () => {
+    const base = recipe();
+    const before = parseRecipe({
+      ...base,
+      overlays: [
+        { id: "o1", kind: "image", file: "media/a.png", start: 0, end: 5 },
+        { id: "o2", kind: "image", file: "media/b.png", start: 8, end: 10 },
+      ],
+    });
+    const next: Recipe = { ...before, overlays: before.overlays.map((o) => (o.id === "o2" ? { ...o, start: 4, end: 6 } : o)) };
+    expect(enforceLanes(before, next).overlays.find((o) => o.id === "o2")).toMatchObject({ start: 5, end: 7, track: 0 });
+  });
+
+  it("linhas diferentes convivem; projeto antigo fica todo na linha 0", () => {
+    const base = recipe();
+    const r = parseRecipe({
+      ...base,
+      overlays: [
+        { id: "bg", kind: "video", file: "media/bg.mp4", start: 0, end: 10, layout: "fullscreen" },
+        { id: "tr", kind: "video", file: "media/tr.mp4", start: 4, end: 5, layout: "fullscreen", track: 1 },
+      ],
+    });
+    expect(r.overlays[0].track).toBe(0);
+    expect(laneSpansFor(r, "overlay:bg")).toEqual([]);
+    expect(enforceLanes(null, r).overlays.map((o) => [o.id, o.track, o.start])).toEqual([
+      ["bg", 0, 0],
+      ["tr", 1, 4],
+    ]);
+  });
+
+  it("todas as linhas ocupadas: overlay novo anda no tempo", () => {
+    const base = recipe();
+    const full = [0, 1, 2, 3, 4].map((t) => ({ id: `f${t}`, kind: "image", file: "media/a.png", start: 0, end: 5, track: t }));
+    const before = parseRecipe({ ...base, overlays: full });
+    const novo = parseRecipe({ ...base, overlays: [{ id: "n", kind: "image", file: "media/a.png", start: 2, end: 4 }] }).overlays[0];
+    const out = enforceLanes(before, { ...before, overlays: [...before.overlays, novo] });
+    expect(out.overlays.find((o) => o.id === "n")).toMatchObject({ start: 5, end: 7, track: 0 });
   });
 
   it("texto livre (headline) fica onde está, junto de imagens e de outros textos", () => {

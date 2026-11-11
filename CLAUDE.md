@@ -294,7 +294,13 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   composição e a timeline seguem essa ordem.
 - Uma camada nunca tem dois itens ao mesmo tempo (`lanes.ts`): cada camada
   de motion do registry (câmera, texto, elemento, tela cheia; combo pode ter
-  peças em camadas diferentes), overlays e música. `enforceLanes(antes,
+  peças em camadas diferentes), cada LINHA de overlay de mídia
+  (`overlay.track` 0…`OVERLAY_MAX_TRACK`, padrão 0; a de cima fica na frente
+  no render e no split; fundo + transição em linhas diferentes) e música.
+  Overlay NOVO que cai em cima de outro sobe para a primeira linha livre
+  naquele tempo (só anda no tempo se todas estiverem ocupadas); na timeline
+  arrastar na vertical troca de linha (só para linha livre), sempre com
+  uma linha vazia em cima. `enforceLanes(antes,
   depois)` roda em todo `commit` do editor (antes do som dos motions): item
   novo ou que MUDOU DE LUGAR e caiu em cima de outro vai para o espaço livre
   mais perto (combo anda inteiro); sem espaço, a mudança é desfeita. Item

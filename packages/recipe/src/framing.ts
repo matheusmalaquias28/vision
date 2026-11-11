@@ -60,7 +60,8 @@ export function activeSplitAt(recipe: Recipe, t: number): { overlay: Overlay; ma
   let hit: Overlay | null = null;
   for (const o of recipe.overlays) {
     if (o.kind === "title" || !isSplitLayout(o.layout)) continue;
-    if (t >= o.start && t < (o.end ?? total)) hit = o;
+    // dois splits ao mesmo tempo (linhas diferentes): vale o da linha de cima
+    if (t >= o.start && t < (o.end ?? total) && (!hit || (o.track ?? 0) >= (hit.track ?? 0))) hit = o;
   }
   if (!hit) return null;
   return { overlay: hit, mainHalf: hit.layout === "split-top" ? "bottom" : "top" };

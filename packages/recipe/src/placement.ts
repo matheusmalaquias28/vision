@@ -96,6 +96,7 @@ export function overlayFromAsset(
   return {
     id,
     kind,
+    track: 0,
     text: asset.name,
     file: asset.file,
     titleStyle: DEFAULT_TITLE_STYLE,

@@ -1,7 +1,7 @@
 import { audioClipEnd } from "./audioClips";
 import { MOTION_REGISTRY } from "./motionRegistry";
 import { placeMotions } from "./motions";
-import type { AudioClip, Motion, Overlay, Recipe } from "./schema";
+import { OVERLAY_MAX_TRACK, type AudioClip, type Motion, type Overlay, type Recipe } from "./schema";
 import { outputDuration, outputToSource } from "./time";
 
 /**
@@ -10,7 +10,9 @@ import { outputDuration, outputToSource } from "./time";
  * motion do registry (câmera, texto, elemento, tela cheia — um combo tem
  * peças em camadas diferentes e pode), os overlays de mídia e a música. Efeitos
  * sonoros podem tocar juntos (o som de cada motion acompanha o motion): a
- * timeline só os empilha em sub-linhas. Textos livres (overlay "title":
+ * timeline só os empilha em sub-linhas. Overlays de mídia têm linhas
+ * (`overlay.track`): cada linha é uma camada; fundo e transição podem tocar
+ * juntos em linhas diferentes. Textos livres (overlay "title":
  * headline, aviso) também: uma headline do início ao fim convive com outros
  * textos e com as imagens/vídeos dos overlays.
  */
@@ -36,6 +38,10 @@ export function motionLane(m: Pick<Motion, "kind">): string {
   return `motion:${MOTION_REGISTRY[m.kind].layer}`;
 }
 
+export function overlayLane(o: Pick<Overlay, "track">): string {
+  return `overlay:${o.track ?? 0}`;
+}
+
 /** Itens de todas as camadas com regra (motions não recusados, overlays, música) */
 function laneItems(recipe: Recipe): LaneItem[] {
   const total = outputDuration(recipe.timeline.segments);
@@ -48,7 +54,7 @@ function laneItems(recipe: Recipe): LaneItem[] {
   }));
   for (const o of recipe.overlays) {
     if (o.kind === "title") continue;
-    items.push({ key: `overlay:${o.id}`, lane: "overlay", group: null, start: o.start, end: o.end ?? total });
+    items.push({ key: `overlay:${o.id}`, lane: overlayLane(o), group: null, start: o.start, end: o.end ?? total });
   }
   for (const c of recipe.audioClips) {
     if (c.kind === "music") items.push({ key: `audio:${c.id}`, lane: "music", group: null, start: c.start, end: audioClipEnd(c) });
@@ -143,6 +149,25 @@ export function enforceLanes(prev: Recipe | null, next: Recipe): Recipe {
   if (changed.length === 0) return next;
   const fixed = items.filter((i) => !changed.includes(i));
 
+  // overlay de mídia NOVO (inserido, colado, da IA) que cai em cima de outro
+  // sobe para a primeira linha livre naquele tempo em vez de andar no tempo
+  const retrack = new Map<string, number>();
+  for (const i of changed) {
+    if (!i.key.startsWith("overlay:") || prevItems.has(i.key)) continue;
+    // os já colocados nesta passada guardam a linha nova em `lane`
+    const busy = (lane: string) =>
+      [...fixed, ...changed].some((f) => f !== i && f.lane === lane && overlaps(f, i));
+    if (!busy(i.lane)) continue;
+    const own = Number(i.lane.slice("overlay:".length));
+    for (let t = 0; t <= OVERLAY_MAX_TRACK; t++) {
+      if (t !== own && !busy(`overlay:${t}`)) {
+        retrack.set(i.key, t);
+        i.lane = `overlay:${t}`;
+        break;
+      }
+    }
+  }
+
   // unidades: peças do mesmo combo juntas, o resto sozinho
   const units = new Map<string, LaneItem[]>();
   for (const i of changed) {
@@ -163,7 +188,7 @@ export function enforceLanes(prev: Recipe | null, next: Recipe): Recipe {
       fixed.push({ ...p, start: p.start + d, end: p.end + d });
     }
   }
-  if (shift.size === 0 && revert.size === 0) return next;
+  if (shift.size === 0 && revert.size === 0 && retrack.size === 0) return next;
 
   const segments = next.timeline.segments;
   const motions: Motion[] = [];
@@ -196,8 +221,10 @@ export function enforceLanes(prev: Recipe | null, next: Recipe): Recipe {
       if (old) overlays.push(old);
       continue;
     }
+    const t = retrack.get(key);
+    const o2 = t === undefined ? o : { ...o, track: t };
     const d = shift.get(key);
-    overlays.push(d === undefined ? o : { ...o, start: r2(o.start + d), end: r2((o.end ?? total) + d) });
+    overlays.push(d === undefined ? o2 : { ...o2, start: r2(o.start + d), end: r2((o.end ?? total) + d) });
   }
   const audioClips: AudioClip[] = [];
   for (const c of next.audioClips) {

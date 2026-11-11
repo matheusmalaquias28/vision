@@ -40,6 +40,7 @@ import {
   type Recipe,
   type Segment,
   type VisualLayer,
+  OVERLAY_MAX_TRACK,
 } from "@vision/recipe";
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Kbd, useDismiss } from "../ui/controls";
@@ -618,17 +619,25 @@ export const Timeline: React.FC<TimelineProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
+    const startY = e.clientY;
     const orig = recipe.overlays.map((o) => ({ ...o }));
     const idx = orig.findIndex((o) => o.id === id);
     if (idx < 0) return;
     const o0 = orig[idx];
+    // overlay de mídia sobe/desce de linha arrastando na vertical (texto não tem linha)
+    const isMedia = o0.kind !== "title";
+    const topTrack = Math.min(OVERLAY_MAX_TRACK, overlayRows - 1);
+    const freeIn = (track: number, start: number, end: number) =>
+      !orig.some(
+        (x) => x.id !== id && x.kind !== "title" && x.track === track && x.start < end - 1e-3 && start < (x.end ?? duration) - 1e-3
+      );
     const end0 = o0.end ?? duration;
     const dur0 = Math.max(end0 - o0.start, MIN_SEGMENT);
     // bordas param no overlay vizinho (dois overlays nunca ao mesmo tempo)
     const lim = edgeLimits(laneSpansFor(recipe, `overlay:${id}`), o0.start, end0);
     let moved = false;
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) moved = true;
+      if (Math.abs(ev.clientX - startX) > 3 || Math.abs(ev.clientY - startY) > 3) moved = true;
       const deltaSec = (ev.clientX - startX) / pxPerSec;
       const next = orig.map((o) => ({ ...o }));
       const o = next[idx];
@@ -636,6 +645,12 @@ export const Timeline: React.FC<TimelineProps> = ({
         const start = round2(clamp(o0.start + deltaSec, 0, duration - dur0));
         o.start = start;
         if (o0.end !== null) o.end = round2(start + dur0);
+        if (isMedia) {
+          // linhas desenhadas de cima (maior) para baixo: subir o mouse = linha maior
+          const want = clamp(o0.track - Math.round((ev.clientY - startY) / ROW.overlay), 0, topTrack);
+          // só troca para uma linha livre nesse tempo (senão o item andaria no tempo)
+          if (want !== o0.track && freeIn(want, start, o.end ?? duration)) o.track = want;
+        }
       } else if (mode === "start") {
         o.start = round2(clamp(o0.start + deltaSec, lim.minStart, end0 - MIN_SEGMENT));
       } else {
@@ -961,7 +976,13 @@ export const Timeline: React.FC<TimelineProps> = ({
     ])
   );
   const textRows = Math.max(1, ...[...textRowOf.values()].map((r) => r + 1));
-  const laneHeight = (l: VisualLayer) => (l === "motions" ? ROW.motion * motionRows : LAYER_ROW[l]);
+  // overlays de mídia: uma linha por `track` em uso + uma vazia em cima para
+  // arrastar (fundo embaixo, transição por cima); a de cima fica na frente
+  const usedTracks = Math.max(-1, ...mediaOverlays.map((o) => o.track));
+  const overlayRows = mediaOverlays.length === 0 ? 1 : Math.min(OVERLAY_MAX_TRACK + 1, usedTracks + 2);
+  const overlayRowOf = (o: Overlay) => overlayRows - 1 - o.track;
+  const laneHeight = (l: VisualLayer) =>
+    l === "motions" ? ROW.motion * motionRows : l === "overlays" ? ROW.overlay * overlayRows : LAYER_ROW[l];
   /** Bloco numa sub-linha: posição explícita no lugar do top/bottom fixo do CSS */
   const subRow = (row: number, rowH: number): React.CSSProperties => ({ top: row * rowH + 4, bottom: "auto", height: rowH - 8 });
 
@@ -1300,7 +1321,18 @@ export const Timeline: React.FC<TimelineProps> = ({
 
         {/* overlays de mídia */}
         {head("trk-overlay", "Overlays", mediaOverlays.length, "overlays")}
-        <div className={`tl-lane alt ${laneDrop("overlays")}`} data-track="overlays" onPointerDown={laneDown}>
+        <div
+          className={`tl-lane alt ${laneDrop("overlays")}`}
+          data-track="overlays"
+          onPointerDown={laneDown}
+          style={
+            overlayRows > 1
+              ? {
+                  backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${ROW.overlay - 1}px, var(--line, rgba(255,255,255,0.08)) ${ROW.overlay - 1}px ${ROW.overlay}px)`,
+                }
+              : undefined
+          }
+        >
           {mediaOverlays.length === 0 && <span className="lane-empty">Sem overlays</span>}
           {mediaOverlays.map((o) => {
             const end = o.end ?? duration;
@@ -1309,9 +1341,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                 key={o.id}
                 data-sel={`overlay:${o.id}`}
                 className={`blk ov-blk ${selectedOverlay === o.id ? "selected" : ""} ${inMulti(`overlay:${o.id}`)}`}
-                style={{ left: o.start * pxPerSec, width: Math.max((end - o.start) * pxPerSec, 16) }}
+                style={{
+                  left: o.start * pxPerSec,
+                  width: Math.max((end - o.start) * pxPerSec, 16),
+                  ...(overlayRows > 1 ? subRow(overlayRowOf(o), ROW.overlay) : {}),
+                }}
                 onPointerDown={(e) => startOverlayDrag(e, o.id, "move")}
-                title={o.file ?? ""}
+                title={`${o.file ?? ""} · linha ${o.track + 1}${overlayRows > 1 ? " (arraste para cima/baixo para trocar de linha; a de cima fica na frente)" : ""}`}
               >
                 <Ramps inSec={o.enter?.duration ?? 0} outSec={o.exit?.duration ?? 0} pxPerSec={pxPerSec} />
                 <div className="handle handle-l" onPointerDown={(e) => startOverlayDrag(e, o.id, "start")} />

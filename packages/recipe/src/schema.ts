@@ -266,6 +266,9 @@ export const TitleStyleSchema = z.object({
 export type TitleStyle = z.infer<typeof TitleStyleSchema>;
 export const DEFAULT_TITLE_STYLE: TitleStyle = TitleStyleSchema.parse({});
 
+/** Linhas de overlay de mídia: 0 … OVERLAY_MAX_TRACK */
+export const OVERLAY_MAX_TRACK = 4;
+
 /** Overlays vivem no tempo do VÍDEO FINAL (decoram a edição pronta) */
 export const OverlaySchema = z
   .object({
@@ -289,6 +292,12 @@ export const OverlaySchema = z
     opacity: z.number().min(0).max(1).default(1),
     /** Largura do sticker como fração da largura do quadro */
     scale: z.number().min(0.05).max(1).default(0.4),
+    /**
+     * Linha do overlay de mídia na timeline (0 = de baixo). Cada linha nunca
+     * tem dois ao mesmo tempo; linhas diferentes podem (fundo + transição):
+     * a de cima fica na frente. Ignorado no kind "title".
+     */
+    track: z.number().int().min(0).max(OVERLAY_MAX_TRACK).default(0),
     /** Item da biblioteca de origem (null = upload avulso) */
     assetId: z.string().nullable().default(null),
     /** Duração da mídia; overlay mais longo que isso repete em loop */

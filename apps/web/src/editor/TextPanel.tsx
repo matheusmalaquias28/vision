@@ -75,6 +75,7 @@ export const TextPanel: React.FC<TextPanelProps> = ({ recipe, selectedId, playhe
     const o: Overlay = {
       id: newId(recipe.overlays),
       kind: "title",
+      track: 0,
       text: headline ? "Sua headline aqui" : "TEXTO",
       file: null,
       start,

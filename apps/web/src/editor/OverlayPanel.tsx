@@ -83,6 +83,7 @@ export const OverlayPanel: React.FC<OverlayPanelProps> = ({
       const o: Overlay = {
         id: newId(recipe.overlays),
         kind,
+        track: 0,
         text: "",
         file: uploaded.file,
         start: Math.round(playheadSeconds * 100) / 100,
