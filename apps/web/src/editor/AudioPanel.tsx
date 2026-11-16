@@ -15,7 +15,6 @@ import {
 import React, { useEffect, useState } from "react";
 import {
   enhanceAudioApi,
-  generateNarrationApi,
   listMusic,
   listSfx,
   type MusicTrack,
@@ -60,31 +59,17 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
   const [tried, setTried] = useState<string[]>([]);
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [sfxFiles, setSfxFiles] = useState<MusicTrack[]>([]);
-  const [script, setScript] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selected = recipe.audioClips.find((c) => c.id === selectedClipId) ?? null;
   const musicCount = recipe.audioClips.filter((c) => c.kind === "music").length;
-  const sfxCount = recipe.audioClips.length - musicCount;
+  const sfxCount = recipe.audioClips.filter((c) => c.kind === "sfx").length;
   const noEnhanced = recipe.sources.every((s) => s.enhancedAudio === null);
 
   useEffect(() => {
     listMusic().then(setTracks).catch(() => setTracks([]));
     listSfx().then(setSfxFiles).catch(() => setSfxFiles([]));
   }, []);
-
-  const runServer = async (label: string, fn: () => Promise<Recipe>) => {
-    setBusy(label);
-    setError(null);
-    try {
-      await saveIfDirty();
-      onServerUpdate(await fn());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   /** Tratar: o servidor só gera os arquivos; o resto da edição (inclusive o feito enquanto trata) fica */
   const enhance = async () => {
@@ -163,7 +148,7 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
 
       {selected && (
         <Section
-          title={selected.kind === "music" ? "Música selecionada" : "Efeito selecionado"}
+          title={selected.kind === "music" ? "Música selecionada" : selected.kind === "voice" ? "Narração selecionada" : "Efeito selecionado"}
           actions={selected.status === "pending" ? <span className="pill pending">sugestão</span> : null}
         >
           {selected.kind === "music" && (
@@ -331,15 +316,14 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
         )}
       </Section>
 
-      <Section title="Narração (TTS)" defaultOpen={recipe.audio.narration !== null}>
-        <textarea
-          rows={4}
-          placeholder="Roteiro da narração em pt-BR…"
-          value={script}
-          onChange={(e) => setScript(e.target.value)}
-        />
-        <div className="row">
-          {recipe.audio.narration && (
+      {recipe.audio.narration && (
+        <Section title="Narração antiga">
+          <p className="note">
+            Narração gerada pelo fluxo antigo (fora da timeline). As novas ficam na aba Narração, como clipe na trilha
+            Narração.
+          </p>
+          <div className="row">
+            <span className="spacer" />
             <button
               className="sm danger"
               onClick={() =>
@@ -353,22 +337,11 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({
                 })
               }
             >
-              Remover narração
+              Remover narração antiga
             </button>
-          )}
-          <span className="spacer" />
-          <button
-            className="sm primary"
-            disabled={busy !== null || script.trim().length === 0}
-            onClick={() =>
-              runServer("narration", () => generateNarrationApi(recipe.projectId, script.trim()))
-            }
-          >
-            <Icon name="mic" size={13} />
-            {busy === "narration" ? "Gerando…" : "Gerar narração + legenda"}
-          </button>
-        </div>
-      </Section>
+          </div>
+        </Section>
+      )}
       {error && <p className="note error" style={{ padding: "8px 12px" }}>{error}</p>}
     </>
   );

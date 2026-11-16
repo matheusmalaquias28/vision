@@ -69,6 +69,7 @@ import {
 } from "../api";
 import { Kbd, Select, Tabs, Toggle, useDismiss, useDragScroll } from "../ui/controls";
 import { AudioPanel } from "./AudioPanel";
+import { initialNarrationDraft, NarrationPanel, type NarrationDraft } from "./NarrationPanel";
 import { CaptionPanel } from "./CaptionPanel";
 import { ColorPanel } from "./ColorPanel";
 import { Icon } from "./Icon";
@@ -122,7 +123,7 @@ function readLightPreview(): boolean {
   }
 }
 
-type InspectorTab = "motions" | "legenda" | "texto" | "audio" | "midia" | "cor" | "exportar";
+type InspectorTab = "motions" | "legenda" | "texto" | "audio" | "narracao" | "midia" | "cor" | "exportar";
 
 /** Receita sem ajuste de cor (comparar antes/depois no preview) */
 function withoutColor(recipe: Recipe): Recipe {
@@ -187,6 +188,8 @@ export const Editor: React.FC<EditorProps> = ({
   const [lightPreview, setLightPreview] = useState(readLightPreview);
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [tab, setTab] = useState<InspectorTab>("motions");
+  // aba Narração: roteiro e gerações sobrevivem à troca de aba
+  const [narrationDraft, setNarrationDraft] = useState<NarrationDraft>(initialNarrationDraft);
   const [leftTab, setLeftTab] = useState<"texto" | "biblioteca">("texto");
   const [libraryFilter, setLibraryFilter] = useState<LibraryFilter>("motions");
   /** Segurando "Ver original" no painel de cor */
@@ -210,12 +213,15 @@ export const Editor: React.FC<EditorProps> = ({
   const [sfxAssets, setSfxAssets] = useState<Asset[]>([]);
   /** Músicas da biblioteca com o estilo analisado ("outra música" da IA) */
   const [musicAssets, setMusicAssets] = useState<Asset[]>([]);
+  /** Planos de fundo da biblioteca (fundo atrás das ilustrações) */
+  const [backgroundAssets, setBackgroundAssets] = useState<Asset[]>([]);
   useEffect(() => {
     getLibrary()
       .then((c) => {
         sfxRef.current = c.assets.filter((a) => a.type === "sfx");
         setSfxAssets(sfxRef.current);
         setMusicAssets(c.assets.filter((a) => a.type === "music"));
+        setBackgroundAssets(c.assets.filter((a) => a.type === "background"));
       })
       .catch(() => undefined);
   }, []);
@@ -1410,6 +1416,7 @@ export const Editor: React.FC<EditorProps> = ({
               { id: "legenda", label: "Legenda" },
               { id: "texto", label: "Texto" },
               { id: "audio", label: "Áudio" },
+              { id: "narracao", label: "Narração" },
               { id: "midia", label: "Mídia" },
               { id: "cor", label: "Cor" },
               { id: "exportar", label: "Exportar" },
@@ -1428,6 +1435,7 @@ export const Editor: React.FC<EditorProps> = ({
                   setLibraryFilter("motions");
                 }}
                 sfx={sfxAssets}
+                backgrounds={backgroundAssets}
                 illustrations={illustrations}
                 onGenerateIllustration={generateIllustration}
                 suggestingImages={busy === "imagens"}
@@ -1465,6 +1473,16 @@ export const Editor: React.FC<EditorProps> = ({
                 selectedClipId={selectedAudioClip}
                 onSelectClip={selectAudioClip}
                 musicAssets={musicAssets}
+              />
+            )}
+            {tab === "narracao" && (
+              <NarrationPanel
+                recipe={recipe}
+                playheadSeconds={playheadOutput}
+                draft={narrationDraft}
+                onDraftChange={setNarrationDraft}
+                onChange={update}
+                onSelectClip={selectAudioClip}
               />
             )}
             {tab === "midia" && (

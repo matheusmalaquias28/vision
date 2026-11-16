@@ -20,6 +20,7 @@ export * from "./illustration";
 export * from "./lanes";
 export * from "./mediaRefs";
 export * from "./music";
+export * from "./narration";
 export * from "./schema";
 export * from "./suggestions";
 export * from "./time";

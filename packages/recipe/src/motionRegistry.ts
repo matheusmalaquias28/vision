@@ -1,4 +1,5 @@
 import { MOTION_KINDS, type MotionKind, type MotionOf } from "./schema";
+import { ILLUSTRATION_DEFAULT_BACKGROUND } from "./illustration";
 import { TRANSITION_PRESETS, TRANSITION_STYLES } from "./transitions";
 
 /**
@@ -725,11 +726,11 @@ const transition: MotionManifest<"transition"> = {
 const illustration: MotionManifest<"illustration"> = {
   kind: "illustration",
   usesAccent: true,
-  version: 1,
+  version: 2,
   label: "Ilustração",
   category: "element",
   layer: "text",
-  purpose: "Imagem gerada por IA no estilo colagem de papel (halftone, papel rasgado, marca-texto) que ilustra um ponto-chave da fala, num cartão que entra, se move de leve e sai.",
+  purpose: "Imagem gerada por IA no estilo colagem de papel (halftone, papel rasgado, marca-texto) que ilustra um ponto-chave da fala, num cartão sobre um plano de fundo de tela cheia (cobre o rosto) que entra subindo e sai descendo.",
   useWhen: [
     "ponto-chave concreto que vira imagem: “ameaça por mensagem” → celular com mensagem",
     "conceito abstrato com símbolo claro: justiça → martelo e balança",
@@ -752,12 +753,20 @@ const illustration: MotionManifest<"illustration"> = {
   styles: ["balanced", "educational", "premium", "dynamic"],
   grounding: "none",
   costHint: "high",
-  defaults: () => ({ subject: "balança da justiça e um contrato", label: "", image: null, position: "top", size: 1 }),
+  defaults: () => ({
+    subject: "balança da justiça e um contrato",
+    label: "",
+    image: null,
+    position: "top",
+    size: 1,
+    background: ILLUSTRATION_DEFAULT_BACKGROUND,
+  }),
   fromSlots: (s) =>
     clean({
       subject: str(s.text).slice(0, 300),
       label: str(s.label).slice(0, 40),
       position: pick(s.position, ["top", "center"]),
+      background: ILLUSTRATION_DEFAULT_BACKGROUND,
     }),
 };
 

@@ -58,7 +58,8 @@ export function duplicateAudioClip(clip: AudioClip, newId: string): AudioClip {
 /**
  * Clipe novo solto na timeline em `start` (tempo do vídeo final).
  * Música vai até o fim do vídeo (ou do arquivo, se for mais curto); sem a
- * duração do arquivo, repete em loop como uma trilha de fundo.
+ * duração do arquivo, repete em loop como uma trilha de fundo. Narração
+ * (voice) entra inteira e a 100%: é a voz principal daquele trecho.
  */
 export function createAudioClip(opts: {
   id: string;
@@ -85,7 +86,7 @@ export function createAudioClip(opts: {
     start,
     duration,
     offset: 0,
-    volume: isMusic ? 0.12 : 0.8,
+    volume: isMusic ? 0.12 : opts.kind === "voice" ? 1 : 0.8,
     fadeInSeconds: isMusic ? round3(Math.min(1, duration / 4)) : 0,
     fadeOutSeconds: isMusic ? round3(Math.min(2, duration / 4)) : 0,
     fadeInCurve: "linear",

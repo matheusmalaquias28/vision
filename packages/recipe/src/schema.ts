@@ -171,10 +171,10 @@ export const TimelineSchema = z.object({
 });
 
 /**
- * Clipe de áudio solto na timeline (música ou efeito sonoro). Vive no tempo
+ * Clipe de áudio solto na timeline (música, efeito sonoro ou narração). Vive no tempo
  * do VÍDEO FINAL, como overlays: não acompanha cortes no bruto.
  */
-export const AUDIO_CLIP_KINDS = ["music", "sfx"] as const;
+export const AUDIO_CLIP_KINDS = ["music", "sfx", "voice"] as const;
 export type AudioClipKind = (typeof AUDIO_CLIP_KINDS)[number];
 
 export const AudioClipSchema = z.object({
@@ -603,6 +603,12 @@ export const MotionSchema = z.discriminatedUnion("kind", [
       position: z.enum(["top", "center"]).default("top"),
       /** Tamanho do cartão (1 = 800 px de largura, o padrão antigo) */
       size: z.number().min(0.4).max(1.25).default(1),
+      /**
+       * Plano de fundo em tela cheia atrás do cartão (arquivo da biblioteca),
+       * que entra subindo e sai descendo. Ausente = layout antigo (só o
+       * cartão, projetos salvos renderizam igual); null = sem fundo.
+       */
+      background: z.string().min(1).nullable().optional(),
     }),
   }),
 ]);

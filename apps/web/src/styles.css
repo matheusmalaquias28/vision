@@ -49,6 +49,7 @@
   --trk-text: oklch(0.86 0.02 90);
   --trk-audio: oklch(0.72 0.13 155);
   --trk-sfx: oklch(0.8 0.13 80);
+  --trk-voice: oklch(0.76 0.12 20);
 
   /* motivos de corte sugerido */
   --cut-silence: oklch(0.68 0.18 22);
@@ -1979,6 +1980,19 @@ kbd {
   transition: border-color var(--t-fast) var(--ease);
 }
 
+/* trecho de vídeo: arrastar muda o lugar na sequência */
+.seg-clip {
+  cursor: grab;
+}
+
+.clip.dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+  border-color: var(--text);
+  box-shadow: 0 6px 18px oklch(0 0 0 / 0.45);
+  z-index: 4;
+}
+
 .clip:hover {
   border-color: var(--trk-video);
 }
@@ -2343,6 +2357,7 @@ kbd {
 .trk-video { --trk: var(--trk-video); }
 .trk-video-audio { --trk: var(--trk-audio); }
 .trk-sfx { --trk: var(--trk-sfx); }
+.trk-voice { --trk: var(--trk-voice); }
 .trk-caption { --trk: var(--trk-caption); }
 .trk-motion { --trk: var(--trk-motion); }
 .trk-effect { --trk: var(--trk-effect); }
@@ -2960,6 +2975,15 @@ kbd {
 .aclip.kind-sfx {
   background: color-mix(in oklch, var(--trk-sfx) 20%, var(--n-2));
   border-color: color-mix(in oklch, var(--trk-sfx) 55%, transparent);
+}
+
+.aclip.kind-voice {
+  background: color-mix(in oklch, var(--trk-voice) 20%, var(--n-2));
+  border-color: color-mix(in oklch, var(--trk-voice) 55%, transparent);
+}
+
+.aclip.kind-voice:hover:not(.selected) {
+  border-color: var(--trk-voice);
 }
 
 .aclip.kind-music:hover:not(.selected) {
@@ -6024,6 +6048,89 @@ a.drive-status:hover {
   height: 1px;
   margin: 4px 6px;
   background: var(--line);
+}
+
+/* fundo atrás da ilustração: miniatura do plano de fundo escolhido */
+.illus-bg-thumb {
+  width: 22px;
+  height: 38px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+/* aba Narração: vozes em cartões, gerações para ouvir antes de usar */
+.narr-voices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.narr-voice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  height: auto;
+  padding: 7px 9px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--n-2);
+}
+
+.narr-voice span {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.3;
+}
+
+.narr-voice.on {
+  border-color: var(--trk-voice);
+  background: color-mix(in oklch, var(--trk-voice) 16%, var(--n-2));
+}
+
+.narr-takes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.narr-take {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--n-2);
+}
+
+.narr-take-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.narr-take-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.narr-take audio {
+  width: 100%;
+  height: 32px;
 }
 
 /* texto livre (aba Texto): campo de várias linhas */

@@ -1,5 +1,6 @@
 import {
   applyAccentToAll,
+  ILLUSTRATION_DEFAULT_BACKGROUND,
   interpretBriefing,
   MAX_ILLUSTRATIONS,
   parseChartItems,
@@ -21,6 +22,7 @@ import {
   type ComboId,
   type Motion,
   type MotionKind,
+  type MotionOf,
   type Recipe,
   type SourceTime,
   videoMotionAccent,
@@ -167,6 +169,8 @@ interface MotionPanelProps {
   onOpenLibrary: () => void;
   /** SFX da biblioteca (som dos motions) */
   sfx: Asset[];
+  /** Planos de fundo da biblioteca (fundo atrás das ilustrações) */
+  backgrounds: Asset[];
   /** Geração de imagem das ilustrações, por id do motion */
   illustrations: Record<string, IllustrationJob>;
   onGenerateIllustration: (motionId: string, fresh: boolean) => void;
@@ -191,6 +195,7 @@ export const MotionPanel: React.FC<MotionPanelProps> = ({
   report,
   onOpenLibrary,
   sfx,
+  backgrounds,
   illustrations,
   onGenerateIllustration,
   suggestingImages,
@@ -448,6 +453,13 @@ export const MotionPanel: React.FC<MotionPanelProps> = ({
               }}
             />
           )}
+          {selected.kind === "illustration" && (
+            <IllustrationBackgroundField
+              m={selected}
+              backgrounds={backgrounds}
+              onChange={(background) => patchParams(selected, { background })}
+            />
+          )}
           <MotionSoundField recipe={recipe} motion={selected} sfx={sfx} onChange={onChange} />
 
           {MOTION_REGISTRY[selected.kind].usesAccent && (
@@ -629,6 +641,39 @@ const ImagesSection: React.FC<{
 };
 
 /** Imagem da ilustração: miniatura + gerar (sem imagem, o motion não entra no MP4) */
+/**
+ * Fundo de tela cheia atrás da ilustração: BG-3 por padrão em toda imagem
+ * nova; o editor troca por outro plano de fundo da biblioteca ou tira.
+ */
+const IllustrationBackgroundField: React.FC<{
+  m: MotionOf<"illustration">;
+  backgrounds: Asset[];
+  onChange: (file: string | null) => void;
+}> = ({ m, backgrounds, onChange }) => {
+  const current = m.params.background ?? null;
+  const known = current === null || backgrounds.some((b) => b.file === current);
+  const thumb = backgrounds.find((b) => b.file === current)?.thumb ?? null;
+  return (
+    <Prop label="Fundo" hint="Plano de fundo em tela cheia atrás da imagem; entra subindo e sai descendo">
+      {thumb && <img className="illus-bg-thumb" src={mediaUrl(thumb)} alt="" />}
+      <Select value={current ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Sem fundo</option>
+        {!known && <option value={current!}>{current!.split("/").pop()}</option>}
+        {backgrounds.map((b) => (
+          <option key={b.id} value={b.file}>
+            {b.name}
+          </option>
+        ))}
+      </Select>
+      {current !== ILLUSTRATION_DEFAULT_BACKGROUND && (
+        <button className="sm ghost" title="Volta para o fundo padrão (BG-3)" onClick={() => onChange(ILLUSTRATION_DEFAULT_BACKGROUND)}>
+          Padrão
+        </button>
+      )}
+    </Prop>
+  );
+};
+
 const IllustrationImage: React.FC<{
   m: Extract<Motion, { kind: "illustration" }>;
   job: IllustrationJob | undefined;

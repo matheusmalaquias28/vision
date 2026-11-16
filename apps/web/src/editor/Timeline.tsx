@@ -9,6 +9,7 @@ import {
   motionSummary,
   packRows,
   outputDuration,
+  segmentDuration,
   placeMotions,
   retimeMotion,
   dropTarget,
@@ -64,7 +65,7 @@ const MAX_WAVE_PX = 8000;
 /** Maior canvas de filmstrip; acima disso os frames ficam esticados */
 const MAX_FILM_PX = 16000;
 
-const ROW = { ruler: 26, video: 64, effect: 30, clipAudio: 40, caption: 30, motion: 30, overlay: 30, music: 40, sfx: 34 };
+const ROW = { ruler: 26, video: 64, effect: 30, clipAudio: 40, caption: 30, motion: 30, overlay: 30, music: 40, sfx: 34, voice: 40 };
 
 /** Distância (px) em que bordas arrastadas grudam no playhead e em outras bordas */
 const SNAP_PX = 6;
@@ -420,6 +421,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     dropTrack !== null && (dropTrack === track || (dropTrack === "video" && track === "videoAudio")) ? "drop-target" : "";
   /** Onde a ferramenta de corte cortaria (linha guia sob o cursor) */
   const [bladeAt, setBladeAt] = useState<number | null>(null);
+  /** Trecho de vídeo sendo arrastado para outra posição da sequência */
+  const [draggingSeg, setDraggingSeg] = useState<string | null>(null);
   const fileWaves = useFileWaveforms(recipe.audioClips.map((c) => c.file));
   const pendingScroll = useRef<number | null>(null);
 
@@ -767,12 +770,54 @@ export const Timeline: React.FC<TimelineProps> = ({
     onChange(splitItemAt(recipe, key, bladeTime(e.clientX)));
   };
 
-  /** Clique num trecho de vídeo (ou no áudio dele): corta ou seleciona */
+  /**
+   * Clique num trecho de vídeo (ou no áudio dele): corta, seleciona ou, se
+   * arrastar, muda o trecho de lugar na sequência. Ele entra onde o meio dele
+   * passa do meio do vizinho; o que vive no tempo do bruto (legenda, motions,
+   * cortes) vai junto, e o que vive no tempo final (overlays, áudio) fica.
+   */
   const segmentPointerDown = (e: React.PointerEvent, seg: Segment) => {
     if (e.button !== 0 || e.target !== e.currentTarget) return;
     if (tool === "blade") return bladeSegment(e);
+    e.preventDefault();
     e.stopPropagation();
-    onSelectSegment(seg.id === selectedSegment ? null : seg.id);
+    const startX = e.clientX;
+    const from = segments.findIndex((s) => s.id === seg.id);
+    const others = segments.filter((s) => s.id !== seg.id);
+    const center0 = segmentPositions[from] + segmentDuration(seg) / 2;
+    let moved = false;
+    let at = from;
+    const onMove = (ev: PointerEvent) => {
+      if (!moved && Math.abs(ev.clientX - startX) < 4) return;
+      if (!moved) {
+        moved = true;
+        setDraggingSeg(seg.id);
+      }
+      if (others.length === 0) return;
+      const center = center0 + (ev.clientX - startX) / pxPerSec;
+      let idx = 0;
+      let t = 0;
+      for (const o of others) {
+        const d = segmentDuration(o);
+        if (center <= t + d / 2) break;
+        idx++;
+        t += d;
+      }
+      if (idx === at) return;
+      at = idx;
+      const next = [...others];
+      next.splice(idx, 0, seg);
+      setSegments(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDraggingSeg(null);
+      if (!moved) onSelectSegment(seg.id === selectedSegment ? null : seg.id);
+      else onSelectSegment(seg.id);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   // ─── Clipes de áudio: mover, aparar, selecionar ─────────────────────
@@ -953,6 +998,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const musicClips = recipe.audioClips.filter((c) => c.kind === "music");
   const sfxClips = recipe.audioClips.filter((c) => c.kind === "sfx");
+  const voiceClips = recipe.audioClips.filter((c) => c.kind === "voice");
 
   // motions: uma sub-linha por camada em uso (câmera, texto, elemento, tela
   // cheia) — dentro de cada uma nada se sobrepõe (enforceLanes)
@@ -966,6 +1012,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     packRows(sfxClips.map((c) => ({ id: c.id, start: c.start, end: audioClipEnd(c) }))).map((x) => [x.item.id, x.row])
   );
   const sfxRows = Math.max(1, ...[...sfxRowOf.values()].map((r) => r + 1));
+  // narrações também podem se sobrepor (duas tomadas): descem de sub-linha
+  const voiceRowOf = new Map(
+    packRows(voiceClips.map((c) => ({ id: c.id, start: c.start, end: audioClipEnd(c) }))).map((x) => [x.item.id, x.row])
+  );
+  const voiceRows = Math.max(1, ...[...voiceRowOf.values()].map((r) => r + 1));
   // textos livres ficam fora da regra de camada: os sobrepostos descem de sub-linha
   const titleOverlays = recipe.overlays.filter((o) => o.kind === "title");
   const mediaOverlays = recipe.overlays.filter((o) => o.kind !== "title");
@@ -1021,6 +1072,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           left: c.start * pxPerSec,
           width: Math.max(width, 4),
           ...(c.kind === "sfx" && sfxRows > 1 ? subRow(sfxRowOf.get(c.id) ?? 0, ROW.sfx) : {}),
+          ...(c.kind === "voice" && voiceRows > 1 ? subRow(voiceRowOf.get(c.id) ?? 0, ROW.voice) : {}),
         }}
         title={`${c.status === "pending" ? "Sugestão da IA (só no preview até aceitar) · " : ""}${fileName(c.file)} · ${c.start.toFixed(2)}s → ${audioClipEnd(c).toFixed(2)}s · ${Math.round(c.volume * 100)}%${c.loop ? " · loop" : ""}${c.motionId ? " · som de motion (acompanha o motion)" : ""}`}
         onPointerDown={drag("move")}
@@ -1031,9 +1083,15 @@ export const Timeline: React.FC<TimelineProps> = ({
             sourceStart={c.offset}
             sourceEnd={c.offset + c.duration}
             width={width}
-            height={(c.kind === "music" ? ROW.music : ROW.sfx) - 10}
+            height={ROW[c.kind] - 10}
             loop={c.loop}
-            color={c.kind === "music" ? "oklch(0.86 0.11 155 / 0.75)" : "oklch(0.9 0.12 80 / 0.8)"}
+            color={
+              c.kind === "music"
+                ? "oklch(0.86 0.11 155 / 0.75)"
+                : c.kind === "voice"
+                  ? "oklch(0.86 0.1 20 / 0.8)"
+                  : "oklch(0.9 0.12 80 / 0.8)"
+            }
           />
         )}
         {width > 40 && (
@@ -1184,9 +1242,9 @@ export const Timeline: React.FC<TimelineProps> = ({
               <div
                 key={seg.id}
                 data-sel={`segment:${seg.id}`}
-                className={`clip ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
+                className={`clip seg-clip ${selectedSegment === seg.id ? "selected" : ""} ${draggingSeg === seg.id ? "dragging" : ""} ${inMulti(`segment:${seg.id}`)}`}
                 style={{ left: segmentPositions[i] * pxPerSec, width }}
-                title={`${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
+                title={`${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)${segments.length > 1 ? " · arraste para mudar de lugar" : ""}`}
                 onPointerDown={(e) => segmentPointerDown(e, seg)}
               >
                 {filmstrips?.[seg.sourceId] && (
@@ -1511,6 +1569,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     : [laneHeight(l)]
               ),
               ROW.clipAudio,
+              ROW.voice * voiceRows,
               ROW.music,
               ROW.sfx * sfxRows,
             ]
@@ -1537,7 +1596,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 <div
                   key={seg.id}
                   data-sel={`segment:${seg.id}`}
-                  className={`clip clip-audio ${seg.muted ? "muted" : ""} ${selectedSegment === seg.id ? "selected" : ""} ${inMulti(`segment:${seg.id}`)}`}
+                  className={`clip clip-audio ${seg.muted ? "muted" : ""} ${selectedSegment === seg.id ? "selected" : ""} ${draggingSeg === seg.id ? "dragging" : ""} ${inMulti(`segment:${seg.id}`)}`}
                   style={{ left: segmentPositions[i] * pxPerSec, width }}
                   title={`${seg.muted ? "Sem som (extraído ou desligado) · " : ""}Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
                   onPointerDown={(e) => segmentPointerDown(e, seg)}
@@ -1567,7 +1626,13 @@ export const Timeline: React.FC<TimelineProps> = ({
             })}
           </div>
 
-          {/* música e efeitos: clipes soltos no tempo do vídeo final */}
+          {/* narração, música e efeitos: clipes soltos no tempo do vídeo final */}
+          {head("trk-voice", "Narração", voiceClips.length || "")}
+          <div className="tl-lane alt" data-track="voice" onPointerDown={laneDown}>
+            {voiceClips.length === 0 && <span className="lane-empty">Gere uma narração na aba Narração</span>}
+            {voiceClips.map(renderAudioClip)}
+          </div>
+
           {head(
             "trk-audio",
             "Música",

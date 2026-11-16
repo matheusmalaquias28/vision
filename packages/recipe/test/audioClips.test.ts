@@ -54,4 +54,10 @@ describe("createAudioClip", () => {
     expect(createAudioClip({ id: "c", kind: "sfx", file: "s.wav", start: 59, videoDuration: 60, mediaDurationSeconds: 3 }))
       .toMatchObject({ start: 59, duration: 1, volume: 0.8, loop: false });
   });
+
+  it("narração entra inteira, a 100%, sem fade nem loop, e passa no schema", () => {
+    const voice = createAudioClip({ id: "v", kind: "voice", file: "media/projects/p/assets/narr-1.mp3", start: 4, videoDuration: 60, mediaDurationSeconds: 12.5 });
+    expect(voice).toMatchObject({ kind: "voice", start: 4, duration: 12.5, volume: 1, loop: false, fadeInSeconds: 0, fadeOutSeconds: 0 });
+    expect(AudioClipSchema.parse(voice)).toEqual(voice);
+  });
 });

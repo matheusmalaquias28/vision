@@ -158,9 +158,9 @@ Quebra o quadro do vídeo: tela cheia com fundo animado (papel, grid, pontos ou 
 - **Checagem de fatos:** ≥ 50% das palavras de conteúdo vêm da fala/briefing
 - **Estilos em que combina:** Equilibrado, Dinâmico, Educativo, Premium
 
-### Ilustração — `illustration` (v1, Elementos)
+### Ilustração — `illustration` (v2, Elementos)
 
-Imagem gerada por IA no estilo colagem de papel (halftone, papel rasgado, marca-texto) que ilustra um ponto-chave da fala, num cartão que entra, se move de leve e sai.
+Imagem gerada por IA no estilo colagem de papel (halftone, papel rasgado, marca-texto) que ilustra um ponto-chave da fala, num cartão sobre um plano de fundo de tela cheia (cobre o rosto) que entra subindo e sai descendo.
 
 - **Quando usar:** ponto-chave concreto que vira imagem: “ameaça por mensagem” → celular com mensagem; conceito abstrato com símbolo claro: justiça → martelo e balança; explicar um processo ou documento: contrato, carimbo, mapa
 - **Quando NÃO usar:** mais de 3 no vídeo ou menos de 8 s de outra; nos primeiros 1,5 s quando o rosto é o gancho; assunto que exige pessoa real, marca ou texto legível; tema sensível de forma explícita (violência): use um símbolo

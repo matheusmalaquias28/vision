@@ -86,6 +86,17 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   também planner, imagens e música (só transcrição + legenda). O botão
   "Cortar" do editor continua cortando (é pedido do operador).
   Docs: `docs/motion-catalog.md` (gerado), `docs/motion-design-guidelines.md`.
+- Narração (aba Narração, `NarrationPanel.tsx`, MANUAL, fora da análise
+  automática): roteiro + voz (`NARRATION_VOICES` em `narration.ts` da receita)
+  + tom (direção de fala) + velocidade (atempo no ffmpeg). `POST
+  /api/projects/:id/narration` só gera `assets/narr-<hash>.mp3` (cache pelo
+  pedido; OpenAI `gpt-4o-mini-tts`, `NARRATION_MODEL` troca) e não mexe na
+  receita: o editor ouve na prévia e "Adicionar à timeline" cria um audioClip
+  kind `voice` (trilha Narração) no playhead. `audio.narration` é o fluxo
+  antigo (só renderiza projeto velho e tem botão de remover na aba Áudio).
+- Trechos de vídeo arrastáveis na timeline (`segmentPointerDown`): arrastar
+  muda a ordem na sequência (entra onde o meio passa do meio do vizinho);
+  o que vive no tempo do bruto vai junto, overlays/áudio ficam.
 - Música e SFX são `recipe.audioClips` (kind music|sfx, start/duration/offset,
   fades relativos ao clipe); helpers em `audioClips.ts`. `audio.music`/`sfx`
   antigos são convertidos por `migrateRecipeData`.
@@ -205,6 +216,11 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   sugestão no caminho sai com o combo; aceito/manual nunca sai. Resultado
   (entraram, saíram, recusas) no log do servidor e em `creative-metrics`. Sem `params.image` não entra no MP4 (o Player mostra um
   cartão "ainda não gerada").
+  Fundo: `params.background` (plano de fundo da biblioteca em tela cheia atrás
+  do cartão; fundo + cartão entram subindo e saem descendo). Toda ilustração
+  nova nasce com o BG-3 (`ILLUSTRATION_DEFAULT_BACKGROUND`, via `defaults`/
+  `fromSlots` do registry); o editor troca ou tira no campo "Fundo" do
+  painel. Sem o campo (projeto antigo) = só o cartão, como antes; null = sem fundo.
 - Densidade (`validateComposition`): câmera (zooms, inclusive punch-in),
   transições e ilustrações não contam na cota de motions por janela de 10 s
   (têm regras próprias; a ilustração ainda respeita a camada ocupada).

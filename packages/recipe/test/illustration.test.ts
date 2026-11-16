@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCandidateMotions, interpretBriefing, validateComposition, type RankedCandidate } from "../src/creative";
-import { illustrationPrompt, MAX_ILLUSTRATIONS } from "../src/illustration";
+import { ILLUSTRATION_DEFAULT_BACKGROUND, illustrationPrompt, MAX_ILLUSTRATIONS } from "../src/illustration";
 import { MOTION_REGISTRY } from "../src/motionRegistry";
 import { mergeMotionSuggestions, motionSummary, PUNCH_IN_GROUP } from "../src/motions";
 import { sfxStyleFor } from "../src/motionSfx";
@@ -14,6 +14,17 @@ describe("ilustração gerada", () => {
     expect(p).toMatch(/paper collage/i);
     expect(p).toMatch(/No text/);
     expect(p.endsWith("celular com mensagem de ameaça")).toBe(true);
+  });
+
+  it("fundo: toda ilustração nova nasce com o BG-3; salva sem o campo continua sem fundo", () => {
+    const man = MOTION_REGISTRY.illustration;
+    expect(man.defaults().background).toBe(ILLUSTRATION_DEFAULT_BACKGROUND);
+    expect(man.fromSlots({ text: "balança da justiça" }).background).toBe(ILLUSTRATION_DEFAULT_BACKGROUND);
+    expect(ILLUSTRATION_DEFAULT_BACKGROUND).toMatch(/background_bg-3\.mp4$/);
+    const old = MotionSchema.parse({ ...base, id: "il6", kind: "illustration", sourceTime: 4, params: { subject: "martelo" } });
+    expect(old.kind === "illustration" && old.params.background).toBeUndefined();
+    const none = MotionSchema.parse({ ...base, id: "il7", kind: "illustration", sourceTime: 4, params: { subject: "martelo", background: null } });
+    expect(none.kind === "illustration" && none.params.background).toBeNull();
   });
 
   it("schema: imagem começa vazia e posição no topo; assunto é obrigatório", () => {

@@ -3,14 +3,21 @@ import {
   AbsoluteFill,
   Easing,
   getRemotionEnvironment,
+  Img,
   interpolate,
+  OffthreadVideo,
   random,
   spring,
   useCurrentFrame,
   useDelayRender,
   useVideoConfig,
 } from "remotion";
-import type { CaptionStyle, MotionOf } from "@vision/recipe";
+import {
+  ILLUSTRATION_BG_ENTER_SECONDS,
+  ILLUSTRATION_BG_EXIT_SECONDS,
+  type CaptionStyle,
+  type MotionOf,
+} from "@vision/recipe";
 import { mediaSrc } from "./media";
 import { AtPoint, dragProps } from "./Positioned";
 
@@ -19,6 +26,11 @@ import { AtPoint, dragProps } from "./Positioned";
  * rasgada, fita adesiva e sombra, que entra subindo com giro, flutua de leve
  * enquanto a imagem faz um Ken Burns lento e sai encolhendo. A borda rasgada
  * é sorteada pelo id do motion (estável entre preview e MP4).
+ *
+ * Com `params.background` (toda ilustração nova: BG-3 da biblioteca), um
+ * plano de fundo de tela cheia fica atrás do cartão (a imagem não cobre só
+ * parte do rosto) e os dois entram subindo e saem descendo juntos; o cartão
+ * só flutua. Sem o campo (projetos antigos) fica como sempre foi.
  *
  * Sem imagem ainda (geração pendente/falhou): nada no MP4; no Player do
  * editor, um cartão tracejado avisa que a imagem falta.
@@ -151,12 +163,14 @@ export const IllustrationMotion: React.FC<{ m: MotionOf<"illustration">; style: 
   const kenBurns = interpolate(frame, [0, durationInFrames], [1, 1.07], clamp);
   const marker = interpolate(frame, [10, 24], [0, 1], { ...clamp, easing: Easing.out(Easing.cubic) });
 
-  const y = interpolate(enter, [0, 1], [320, 0]) + driftY - exit * 40;
-  const rot = interpolate(enter, [0, 1], [tilt + 10, tilt]) + sway + exit * 6;
-  const scale = interpolate(enter, [0, 1], [0.82, 1]) * (1 - exit * 0.12);
-  const opacity = Math.min(1, enter * 2.5) * (1 - exit);
+  // com fundo: o cartão vem junto com o fundo (que sobe e desce); sem fundo, entra e sai sozinho
+  const bg = m.params.background ?? null;
+  const y = bg ? driftY : interpolate(enter, [0, 1], [320, 0]) + driftY - exit * 40;
+  const rot = bg ? tilt + sway : interpolate(enter, [0, 1], [tilt + 10, tilt]) + sway + exit * 6;
+  const scale = bg ? 1 : interpolate(enter, [0, 1], [0.82, 1]) * (1 - exit * 0.12);
+  const opacity = bg ? 1 : Math.min(1, enter * 2.5) * (1 - exit);
 
-  return (
+  const card = (
     <Place m={m}>
       {/* tamanho: cresce a partir do topo no layout padrão, do centro quando arrastado */}
       <div style={{ transform: `scale(${m.params.size})`, transformOrigin: m.placement ? "center" : "top center" }}>
@@ -288,5 +302,32 @@ export const IllustrationMotion: React.FC<{ m: MotionOf<"illustration">; style: 
         </div>
       </div>
     </Place>
+  );
+
+  if (!bg) return card;
+  const inF = Math.max(1, Math.round(ILLUSTRATION_BG_ENTER_SECONDS * fps));
+  const outF = Math.max(1, Math.round(ILLUSTRATION_BG_EXIT_SECONDS * fps));
+  const slideIn = interpolate(frame, [0, inF], [100, 0], { ...clamp, easing: Easing.out(Easing.cubic) });
+  const slideOut = interpolate(frame, [durationInFrames - outF, durationInFrames], [0, 100], {
+    ...clamp,
+    easing: Easing.in(Easing.cubic),
+  });
+  return (
+    <AbsoluteFill style={{ transform: `translateY(${slideIn + slideOut}%)` }}>
+      <AbsoluteFill>
+        <BackgroundMedia file={bg} />
+      </AbsoluteFill>
+      {card}
+    </AbsoluteFill>
+  );
+};
+
+/** Plano de fundo da biblioteca (vídeo ou imagem), cobrindo o quadro, sem som */
+const BackgroundMedia: React.FC<{ file: string }> = ({ file }) => {
+  const style: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
+  return /.(mp4|webm|mov|m4v)$/i.test(file) ? (
+    <OffthreadVideo src={mediaSrc(file)} muted pauseWhenBuffering style={style} />
+  ) : (
+    <Img src={mediaSrc(file)} style={style} />
   );
 };

@@ -14,7 +14,7 @@ import { autoColorGrades } from "./pipeline/colorStats";
 import { normalizeVideo } from "./pipeline/normalize";
 import { enhanceAudio } from "./pipeline/enhance";
 import { extractAudio, ExtractAudioError } from "./pipeline/extractAudio";
-import { generateNarration } from "./pipeline/narration";
+import { NarrationError, generateNarrationTake, parseNarrationRequest } from "./pipeline/narration";
 import { probeVideo } from "./pipeline/probe";
 import { defaultSilenceOptions, suggestCuts } from "./pipeline/silence";
 import { planCreative } from "./creative/planner";
@@ -296,17 +296,18 @@ app.post("/api/projects/:id/enhance", async (req, res, next) => {
   }
 });
 
+// Narração (aba Narração): gera para ouvir antes, sem mexer na receita; o
+// editor põe na timeline (trilha Narração) se gostar
 app.post("/api/projects/:id/narration", async (req, res, next) => {
   try {
-    const script = String(req.body?.script ?? "").trim();
-    if (!script) {
-      res.status(400).json({ error: "campo 'script' é obrigatório" });
+    const id = String(req.params.id);
+    loadRecipe(id);
+    res.json(await generateNarrationTake(id, parseNarrationRequest(req.body)));
+  } catch (err) {
+    if (err instanceof NarrationError) {
+      res.status(err.status).json({ error: err.message });
       return;
     }
-    const updated = await generateNarration(loadRecipe(req.params.id), script);
-    saveRecipe(updated);
-    res.json(updated);
-  } catch (err) {
     next(err);
   }
 });

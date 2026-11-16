@@ -10,6 +10,17 @@ export const MAX_ILLUSTRATIONS = 3;
 export const ILLUSTRATION_GAP_SECONDS = 8;
 export const ILLUSTRATION_ASPECT = "1:1";
 export const ILLUSTRATION_RESOLUTION = "1K";
+/**
+ * Fundo de tela cheia atrás da imagem (plano de fundo da biblioteca), para a
+ * imagem não ficar por cima do rosto: toda ilustração nova nasce com ele; o
+ * editor troca por outro ou tira no painel do motion. Entra subindo e sai
+ * descendo junto com a imagem.
+ */
+export const ILLUSTRATION_DEFAULT_BACKGROUND = "media/library/pack-viral/background/background_bg-3.mp4";
+/** Entrada (sobe de baixo) e saída (desce) do fundo com a imagem, em segundos */
+export const ILLUSTRATION_BG_ENTER_SECONDS = 0.45;
+export const ILLUSTRATION_BG_EXIT_SECONDS = 0.35;
+
 /** Muda quando o estilo muda: imagens antigas não são reaproveitadas pelo cache */
 export const ILLUSTRATION_STYLE_VERSION = 1;
 

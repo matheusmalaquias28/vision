@@ -1,4 +1,4 @@
-import type { Catalog, ColorGrade, CutPace, Recipe, Source } from "@vision/recipe";
+import type { Catalog, ColorGrade, CutPace, NarrationRequest, NarrationTake, Recipe, Source } from "@vision/recipe";
 
 export interface ProjectSummary {
   id: string;
@@ -83,12 +83,13 @@ export const enhanceAudioApi = (id: string) =>
     json<Recipe>(r)
   );
 
-export const generateNarrationApi = (id: string, script: string) =>
+/** Gera a narração para ouvir antes (não muda a receita) */
+export const generateNarrationApi = (id: string, req: NarrationRequest) =>
   fetch(`/api/projects/${id}/narration`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ script }),
-  }).then((r) => json<Recipe>(r));
+    body: JSON.stringify(req),
+  }).then((r) => json<NarrationTake>(r));
 
 export const listSfx = () =>
   fetch("/api/sfx").then((r) => json<MusicTrack[]>(r));
