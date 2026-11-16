@@ -421,8 +421,13 @@ export const Timeline: React.FC<TimelineProps> = ({
     dropTrack !== null && (dropTrack === track || (dropTrack === "video" && track === "videoAudio")) ? "drop-target" : "";
   /** Onde a ferramenta de corte cortaria (linha guia sob o cursor) */
   const [bladeAt, setBladeAt] = useState<number | null>(null);
-  /** Trecho de vídeo sendo arrastado para outra posição da sequência */
-  const [draggingSeg, setDraggingSeg] = useState<string | null>(null);
+  /**
+   * Trecho de vídeo sendo arrastado para outra posição da sequência: ele
+   * segue o cursor (`left` em px, semitransparente) e o lugar onde vai cair
+   * fica marcado na trilha enquanto os vizinhos deslizam
+   */
+  const [segDrag, setSegDrag] = useState<{ id: string; left: number } | null>(null);
+  const draggingSeg = segDrag?.id ?? null;
   const fileWaves = useFileWaveforms(recipe.audioClips.map((c) => c.file));
   const pendingScroll = useRef<number | null>(null);
 
@@ -784,17 +789,22 @@ export const Timeline: React.FC<TimelineProps> = ({
     const startX = e.clientX;
     const from = segments.findIndex((s) => s.id === seg.id);
     const others = segments.filter((s) => s.id !== seg.id);
-    const center0 = segmentPositions[from] + segmentDuration(seg) / 2;
+    const dur = segmentDuration(seg);
+    const left0 = segmentPositions[from] * pxPerSec;
+    const maxLeft = Math.max(0, (duration - dur) * pxPerSec);
     let moved = false;
     let at = from;
     const onMove = (ev: PointerEvent) => {
       if (!moved && Math.abs(ev.clientX - startX) < 4) return;
       if (!moved) {
         moved = true;
-        setDraggingSeg(seg.id);
+        document.body.classList.add("dragging-clip");
       }
+      // o clipe fica preso ao cursor (no mesmo ponto em que foi pego)
+      const left = clamp(left0 + ev.clientX - startX, 0, maxLeft);
+      setSegDrag({ id: seg.id, left });
       if (others.length === 0) return;
-      const center = center0 + (ev.clientX - startX) / pxPerSec;
+      const center = left / pxPerSec + dur / 2;
       let idx = 0;
       let t = 0;
       for (const o of others) {
@@ -812,7 +822,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      setDraggingSeg(null);
+      setSegDrag(null);
+      document.body.classList.remove("dragging-clip");
       if (!moved) onSelectSegment(seg.id === selectedSegment ? null : seg.id);
       else onSelectSegment(seg.id);
     };
@@ -1229,13 +1240,27 @@ export const Timeline: React.FC<TimelineProps> = ({
     );
   };
 
+  /** Onde o trecho arrastado vai cair: contorno tracejado no lugar dele na sequência */
+  const segSlotIndex = segDrag ? segments.findIndex((s) => s.id === segDrag.id) : -1;
+  const segSlot =
+    segSlotIndex >= 0 ? (
+      <div
+        className="seg-slot"
+        style={{
+          left: segmentPositions[segSlotIndex] * pxPerSec,
+          width: segmentDuration(segments[segSlotIndex]) * pxPerSec,
+        }}
+      />
+    ) : null;
+
   // trilhas visuais: renderizadas na ordem de layerOrder (a de cima cobre a de baixo)
   const visualLanes: Record<VisualLayer, React.ReactNode> = {
     video: (
       <>
         {/* vídeo */}
         {head("trk-video", "Vídeo", segments.length, "video")}
-        <div className={`tl-lane ${laneDrop("video")}`} data-track="video" onPointerDown={laneDown}>
+        <div className={`tl-lane ${laneDrop("video")} ${segDrag ? "reordering" : ""}`} data-track="video" onPointerDown={laneDown}>
+          {segSlot}
           {segments.map((seg, i) => {
             const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
             return (
@@ -1243,7 +1268,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 key={seg.id}
                 data-sel={`segment:${seg.id}`}
                 className={`clip seg-clip ${selectedSegment === seg.id ? "selected" : ""} ${draggingSeg === seg.id ? "dragging" : ""} ${inMulti(`segment:${seg.id}`)}`}
-                style={{ left: segmentPositions[i] * pxPerSec, width }}
+                style={{ left: segDrag?.id === seg.id ? segDrag.left : segmentPositions[i] * pxPerSec, width }}
                 title={`${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)${segments.length > 1 ? " · arraste para mudar de lugar" : ""}`}
                 onPointerDown={(e) => segmentPointerDown(e, seg)}
               >
@@ -1589,7 +1614,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
           {/* áudio do vídeo: mesmos trechos da trilha de vídeo (cortar um corta o outro) */}
           {head("trk-video-audio", "Áudio do vídeo", recipe.audio.useEnhanced ? "tratado" : "")}
-          <div className={`tl-lane ${laneDrop("videoAudio")}`} data-track="videoAudio" onPointerDown={laneDown}>
+          <div className={`tl-lane ${laneDrop("videoAudio")} ${segDrag ? "reordering" : ""}`} data-track="videoAudio" onPointerDown={laneDown}>
+            {segSlot}
             {segments.map((seg, i) => {
               const width = (seg.sourceEnd - seg.sourceStart) * pxPerSec;
               return (
@@ -1597,7 +1623,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                   key={seg.id}
                   data-sel={`segment:${seg.id}`}
                   className={`clip clip-audio ${seg.muted ? "muted" : ""} ${selectedSegment === seg.id ? "selected" : ""} ${draggingSeg === seg.id ? "dragging" : ""} ${inMulti(`segment:${seg.id}`)}`}
-                  style={{ left: segmentPositions[i] * pxPerSec, width }}
+                  style={{ left: segDrag?.id === seg.id ? segDrag.left : segmentPositions[i] * pxPerSec, width }}
                   title={`${seg.muted ? "Sem som (extraído ou desligado) · " : ""}Áudio de ${sourceLabel(seg.sourceId)} · ${seg.sourceStart.toFixed(2)}s → ${seg.sourceEnd.toFixed(2)}s (bruto)`}
                   onPointerDown={(e) => segmentPointerDown(e, seg)}
                 >

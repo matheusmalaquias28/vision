@@ -1985,12 +1985,37 @@ kbd {
   cursor: grab;
 }
 
+/* arrastando: o clipe vai preso ao cursor, semitransparente, por cima de tudo */
 .clip.dragging {
   cursor: grabbing;
-  opacity: 0.85;
+  opacity: 0.6;
   border-color: var(--text);
-  box-shadow: 0 6px 18px oklch(0 0 0 / 0.45);
-  z-index: 4;
+  box-shadow: 0 8px 22px oklch(0 0 0 / 0.5);
+  transform: translateY(-2px);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* enquanto um trecho é arrastado, os vizinhos deslizam para o lugar novo */
+.tl-lane.reordering .clip:not(.dragging) {
+  transition: left 160ms var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+/* onde o trecho arrastado vai cair */
+.seg-slot {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border: 1.5px dashed color-mix(in oklch, var(--text) 70%, transparent);
+  border-radius: var(--r-sm);
+  background: oklch(1 0 0 / 0.05);
+  pointer-events: none;
+  transition: left 160ms var(--ease), width 160ms var(--ease);
+}
+
+body.dragging-clip,
+body.dragging-clip * {
+  cursor: grabbing !important;
 }
 
 .clip:hover {
