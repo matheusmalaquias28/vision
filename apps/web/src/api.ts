@@ -378,6 +378,27 @@ export interface DemandVideo {
   deliveredAt: string | null;
   /** Análise automática do projeto (só nas respostas de demanda) */
   analysis?: AnalysisStatus | null;
+  /** Pasta do Drive com os clipes deste vídeo (videos[].driveClipes do War); null = demanda antiga */
+  rawLink?: string | null;
+  /** "Vídeo 1" (videos[].titulo do War) */
+  title?: string | null;
+  /** Edição automática pelo Vision (brutos baixados do Drive) */
+  auto?: AutoEdit | null;
+  /** Alguém mudou a receita depois que o Vision terminou */
+  manualEdit?: { firstAt: string; lastAt: string; by: string[] } | null;
+}
+
+export interface AutoEdit {
+  status: "waiting" | "downloading" | "analyzing" | "done" | "error";
+  stage: string;
+  link: string;
+  notBefore: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  attempts: number;
+  files: string[];
+  skipped: { name: string; reason: string }[];
 }
 
 export interface Demand {
@@ -408,6 +429,8 @@ export interface Demand {
   createdAt: string;
   updatedAt: string;
   videos: DemandVideo[];
+  /** edição automática ligada no servidor (VISION_AUTO_EDIT=on) */
+  autoEdit?: boolean;
   started: number;
   delivered: number;
 }
@@ -481,6 +504,10 @@ export const uploadDemandVideo = (id: string, index: number, files: File[], brie
     body: fd,
   }).then((r) => json<Recipe>(r));
 };
+
+/** O Vision baixa os brutos da pasta do vídeo, monta a timeline e analisa (agora, sem esperar) */
+export const prepareDemandVideo = (id: string, index: number) =>
+  postJson(`/api/demands/${encodeURIComponent(id)}/videos/${index}/auto`).then((r) => json<AutoEdit>(r));
 
 export const listClients = () =>
   fetch("/api/clients").then((r) => json<(Client & { stats: ClientStats })[]>(r));

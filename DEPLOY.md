@@ -151,6 +151,8 @@ chmod 600 .env
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth Client do Google Cloud (API do Drive ativada) |
 | `VISION_PUBLIC_URL` | `https://vision.scalecompany.com.br` |
 | `VISION_RETENTION` | `on` (liga a limpeza automática; deixe desligado no computador) |
+| `VISION_AUTO_EDIT` | `on` (o Vision baixa os clipes de cada vídeo do Drive e monta a timeline 10 min depois do pedido; só na VPS) |
+| `VISION_AUTO_EDIT_DELAY_MIN` | opcional, padrão `10`: minutos de espera depois do pedido |
 | `VISION_RAW_RETENTION_DAYS` | opcional, padrão `10`: dias depois da entrega no Drive até apagar o bruto |
 | `VISION_IDLE_RETENTION_DAYS` | opcional, padrão `30`: projeto sem entrega, dias sem edição até apagar o bruto |
 | `VISION_STATUS_ON_DELIVERY` | opcional, padrão `Aprovação do Gestor`: status quando o último vídeo da demanda vai ao Drive (vazio desliga) |

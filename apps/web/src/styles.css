@@ -4169,6 +4169,54 @@ a.drive-status:hover {
   color: var(--ok);
 }
 
+.dd-video-state.err {
+  color: var(--danger);
+}
+
+.dd-video-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.dd-video-title {
+  color: var(--text-3);
+}
+
+/* quem editou: Vision (e se alguém mexeu depois) */
+.dd-vision {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 11.5px;
+}
+
+.dd-vision-chip,
+.dd-vision-manual {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dd-vision-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dd-vision-manual {
+  color: var(--warn);
+}
+
+.dd-vision-manual.none {
+  color: var(--text-4);
+}
+
 .dd-hint {
   color: var(--text-4);
   font-size: 11.5px;

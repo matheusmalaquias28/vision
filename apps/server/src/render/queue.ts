@@ -101,3 +101,9 @@ export function activeJobFor(projectId: string): RenderJobInfo | null {
   for (const j of jobs.values()) if (j.projectId === projectId && active(j)) found = j;
   return found && withAhead(found);
 }
+
+/** Algum render na fila ou em andamento (a edição automática espera: não disputa a CPU) */
+export function renderBusy(): boolean {
+  for (const j of jobs.values()) if (active(j)) return true;
+  return false;
+}

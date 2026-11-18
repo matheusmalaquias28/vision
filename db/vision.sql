@@ -180,6 +180,13 @@ create table if not exists vision.work_events (
 );
 create index if not exists work_events_recent_idx on vision.work_events (created_at);
 
+-- edição automática: o Vision baixa os brutos do Drive de cada vídeo (link do
+-- War), monta a timeline e roda a análise. auto = andamento/resultado;
+-- manual_edit = alguém mudou a receita depois que o Vision terminou. Sem as
+-- colunas o Vision funciona, só não edita sozinho.
+alter table vision.demand_videos add column if not exists auto jsonb;
+alter table vision.demand_videos add column if not exists manual_edit jsonb;
+
 -- 4. Permissões: vision_app lê/grava dados SÓ no schema vision (sem DDL)
 grant usage on schema vision to vision_app;
 grant select, insert, update, delete on all tables in schema vision to vision_app;

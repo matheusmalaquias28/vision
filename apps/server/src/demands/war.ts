@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { slugify } from "../project";
 import { getStore } from "./store";
 import { noteDueDate } from "./tracking";
+import { armFromDemand } from "./autoEdit";
 import { WAR_VIDEO_STATUSES, type Client, type Demand, type DemandNote } from "./types";
 
 /**
@@ -150,6 +151,8 @@ async function handleDemand(body: Json) {
   await store.upsertDemand(demand);
   await ensureVideos(demand);
   await noteDueDate(prev, demand);
+  // link do Drive com os brutos de cada vídeo: o Vision edita sozinho 10 min depois
+  await armFromDemand(demand).catch((e) => console.warn("Edição automática: armar:", e instanceof Error ? e.message : e));
   await store.addEvent({
     demandId: id,
     direction: "in",

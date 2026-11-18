@@ -54,12 +54,19 @@ export function isAnalyzing(projectId: string): boolean {
   return pending.has(projectId);
 }
 
-export function startAutoAnalysis(projectId: string): void {
-  if (pending.has(projectId)) return;
+const running = new Map<string, Promise<void>>();
+
+/**
+ * Põe o projeto na fila da análise. A promessa resolve quando ela termina
+ * (bem ou mal: o resultado fica em analysis.json); nunca rejeita.
+ */
+export function startAutoAnalysis(projectId: string): Promise<void> {
+  const already = running.get(projectId);
+  if (already) return already;
   pending.add(projectId);
   const startedAt = new Date().toISOString();
   write(projectId, { status: "queued", stage: "Na fila", startedAt, finishedAt: null, error: null });
-  chain = chain.then(async () => {
+  const job = chain.then(async () => {
     const stage = (s: string) => write(projectId, { status: "running", stage: s, startedAt, finishedAt: null, error: null });
     try {
       stage("Transcrevendo");
@@ -72,6 +79,10 @@ export function startAutoAnalysis(projectId: string): void {
       write(projectId, { status: "error", stage: "Falhou", startedAt, finishedAt: new Date().toISOString(), error });
     } finally {
       pending.delete(projectId);
+      running.delete(projectId);
     }
   });
+  chain = job;
+  running.set(projectId, job);
+  return job;
 }

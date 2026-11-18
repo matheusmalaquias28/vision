@@ -35,6 +35,7 @@ import { getThumbnail } from "./pipeline/thumbnail";
 import { getFileWaveform, getWaveforms } from "./pipeline/waveform";
 import { activeJobFor, enqueueRender, getJob } from "./render/queue";
 import { recordEditSeconds, recordWork } from "./demands/tracking";
+import { noteProjectWrite, startAutoEditLoop } from "./demands/autoEdit";
 import { cleanupStaleRemotionTemp, warmBundle } from "./render/bundle";
 import { loadCatalog } from "./library/catalog";
 import { applyTemplate, TEMPLATES } from "./templates";
@@ -47,6 +48,22 @@ app.set("trust proxy", "loopback");
 app.use(express.json({ limit: "20mb" }));
 // tudo abaixo (API e arquivos de media/) exige login, menos o webhook do War
 app.use(requireAuth);
+/**
+ * Escrita de um usuário num projeto (salvar a receita, passos do servidor):
+ * se o Vision editou esse vídeo sozinho, registra a alteração manual.
+ * Batimento, render e entrega não mudam a receita.
+ */
+const NOT_EDITS = /^\/(activity|render|deliver|analysis)/;
+app.use("/api/projects/:id", (req, res, next) => {
+  const user = req.user;
+  if (req.method !== "GET" && user && !NOT_EDITS.test(req.path)) {
+    const projectId = String(req.params.id);
+    res.on("finish", () => {
+      if (res.statusCode < 400) void noteProjectWrite(projectId, user.name);
+    });
+  }
+  next();
+});
 app.use(authRouter);
 app.use(usersRouter);
 app.use(demandsRouter);
@@ -109,7 +126,7 @@ app.post("/api/projects", upload.array("videos", 20), async (req, res, next) => 
       (req.body.briefing as string | undefined) ?? ""
     );
     // transcrição, cortes e motions já começam no servidor (tudo entra como sugestão)
-    startAutoAnalysis(recipe.projectId);
+    void startAutoAnalysis(recipe.projectId);
     void recordWork({ kind: "start", userId: req.user?.id ?? null, userName: req.user?.name ?? null, projectId: recipe.projectId });
     res.json(recipe);
   } catch (err) {
@@ -565,6 +582,8 @@ if (!process.env.VERCEL) {
   // o Node corta pedidos com mais de 5 min: upload de bruto grande (até 1 GB) leva mais que isso
   server.requestTimeout = 60 * 60 * 1000;
   scheduleRetention();
+  // demandas com pasta de clipes por vídeo: baixa, monta a timeline e analisa (VISION_AUTO_EDIT=on)
+  startAutoEditLoop();
   // cópias do bundle do Remotion largadas por processos antigos (cada uma leva a pasta media/)
   const { removed, bytes } = cleanupStaleRemotionTemp();
   if (removed > 0) console.log(`Limpeza: ${removed} pasta(s) temporária(s) do Remotion apagada(s), ${Math.round(bytes / 1e6)} MB`);

@@ -10,6 +10,7 @@ import { authUrl, disconnect, driveStatus, handleCallback, uploadToFolder } from
 import { AVERAGE_WINDOW_DAYS, buildDayReport, dayOf, shiftDay, type ProjectInfo } from "./dashboard";
 import { buildPerformanceReport, MAX_PERIOD_DAYS, performanceDataSince } from "./performance";
 import { backfillDueDates, recordWork } from "./tracking";
+import { autoEditEnabled, startAutoEditNow, videoItemsOf } from "./autoEdit";
 import { getStore } from "./store";
 import type { Demand, DemandVideo } from "./types";
 import {
@@ -39,11 +40,19 @@ function deliveryName(demand: Demand, index: number) {
 
 function withProgress(d: Demand, videos: DemandVideo[]) {
   const mine = videos.filter((v) => v.demandId === d.id);
+  // formato novo do War: cada vídeo tem título e pasta de clipes própria
+  const items = videoItemsOf(d);
   return {
     ...d,
     raw: undefined,
     // andamento da análise automática de cada vídeo (lido do projeto)
-    videos: mine.map((v) => ({ ...v, analysis: v.projectId ? readAnalysis(v.projectId) : null })),
+    videos: mine.map((v) => ({
+      ...v,
+      rawLink: items[v.index - 1]?.link ?? null,
+      title: items[v.index - 1]?.title ?? null,
+      analysis: v.projectId ? readAnalysis(v.projectId) : null,
+    })),
+    autoEdit: autoEditEnabled(),
     started: mine.filter((v) => v.projectId).length,
     delivered: mine.filter((v) => v.deliveredAt).length,
   };
@@ -310,6 +319,12 @@ demandsRouter.post(
       res.status(404).json({ error: "vídeo da demanda não encontrado" });
       return;
     }
+    // o Vision está baixando os brutos deste vídeo: o projeto dele chega já já
+    if (!video.projectId && video.auto?.status === "downloading") {
+      discard();
+      res.status(409).json({ error: "o Vision está baixando os brutos deste vídeo; espere ele terminar" });
+      return;
+    }
     const old = video.projectId && fs.existsSync(projectDir(video.projectId)) ? video.projectId : null;
     if (old && req.body?.restart !== "1") {
       discard();
@@ -351,6 +366,9 @@ demandsRouter.post(
       ...video,
       projectId: recipe.projectId,
       deliveredAt: old ? null : video.deliveredAt,
+      // projeto montado à mão: a edição deixa de ser do Vision
+      auto: video.auto === undefined ? undefined : null,
+      manualEdit: video.manualEdit === undefined ? undefined : null,
       updatedAt: new Date().toISOString(),
     });
     if (old) {
@@ -362,8 +380,19 @@ demandsRouter.post(
       }
     }
     // transcrição, cortes e motions com o briefing já começam no servidor (tudo entra como sugestão)
-    startAutoAnalysis(recipe.projectId);
+    void startAutoAnalysis(recipe.projectId);
     res.json(recipe);
+  })
+);
+
+/**
+ * "Preparar agora" / "Tentar de novo": o Vision baixa os brutos do Drive do
+ * vídeo (link do War), monta a timeline e roda a análise, sem esperar os 10 min.
+ */
+demandsRouter.post(
+  "/api/demands/:id/videos/:index/auto",
+  wrap(async (req, res) => {
+    res.json(await startAutoEditNow(String(req.params.id), Number(req.params.index)));
   })
 );
 

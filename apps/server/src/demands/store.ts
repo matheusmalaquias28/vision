@@ -2,7 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { repoRoot } from "../paths";
-import type { Client, Demand, DemandEvent, DemandVideo, EditActivity, Notification, User, WorkEvent, WorkEventKind } from "./types";
+import type {
+  AutoEdit,
+  Client,
+  Demand,
+  DemandEvent,
+  DemandVideo,
+  EditActivity,
+  Notification,
+  User,
+  WorkEvent,
+  WorkEventKind,
+} from "./types";
 
 export type NewWorkEvent = Omit<WorkEvent, "id" | "createdAt"> & { createdAt?: string };
 
@@ -23,6 +34,12 @@ export interface DemandStore {
   listVideos(demandId?: string): Promise<DemandVideo[]>;
   findVideoByProject(projectId: string): Promise<DemandVideo | null>;
   upsertVideo(v: DemandVideo): Promise<void>;
+  /**
+   * Grava a edição automática só se o vídeo ainda não tem projeto e o estado
+   * atual é `expected` (dois processos no mesmo banco nunca pegam o mesmo
+   * vídeo). true = gravou.
+   */
+  claimAutoEdit(demandId: string, index: number, expected: AutoEdit["status"], next: AutoEdit): Promise<boolean>;
   listEvents(demandId: string): Promise<DemandEvent[]>;
   /** Eventos de todas as demandas a partir de um instante (resumo do dia) */
   listEventsSince(sinceIso: string): Promise<DemandEvent[]>;
@@ -128,6 +145,14 @@ class LocalStore implements DemandStore {
   }
   async upsertVideo(v: DemandVideo) {
     this.put(this.data.videos, v, (x) => x.demandId === v.demandId && x.index === v.index);
+  }
+  async claimAutoEdit(demandId: string, index: number, expected: AutoEdit["status"], next: AutoEdit) {
+    const v = this.data.videos.find((x) => x.demandId === demandId && x.index === index);
+    if (!v || v.projectId || v.auto?.status !== expected) return false;
+    v.auto = next;
+    v.updatedAt = new Date().toISOString();
+    this.save();
+    return true;
   }
   async listEvents(demandId: string) {
     return this.data.events.filter((e) => e.demandId === demandId);
@@ -297,8 +322,28 @@ class PgStore implements DemandStore {
       null
     );
   }
-  upsertVideo(v: DemandVideo) {
-    return this.upsert("demand_videos", v, ["demand_id", "index"]);
+  private autoColumnsMissing = false;
+  async upsertVideo(v: DemandVideo) {
+    const { auto, manualEdit, ...base } = v;
+    if (this.autoColumnsMissing) return this.upsert("demand_videos", base, ["demand_id", "index"]);
+    try {
+      await this.upsert("demand_videos", v, ["demand_id", "index"]);
+    } catch (err) {
+      // colunas da edição automática ainda não criadas (42703): o resto da linha grava igual
+      if ((err as { code?: string }).code !== "42703" || (auto === undefined && manualEdit === undefined)) throw err;
+      console.warn("Edição automática: aplique o bloco novo de db/vision.sql (demand_videos.auto, manual_edit)");
+      this.autoColumnsMissing = true;
+      await this.upsert("demand_videos", base, ["demand_id", "index"]);
+    }
+  }
+  async claimAutoEdit(demandId: string, index: number, expected: AutoEdit["status"], next: AutoEdit) {
+    if (this.autoColumnsMissing) return false;
+    const { rowCount } = await this.pool.query(
+      `update vision.demand_videos set auto = $3, updated_at = now()
+       where demand_id = $1 and index = $2 and project_id is null and auto->>'status' = $4`,
+      [demandId, index, JSON.stringify(next), expected]
+    );
+    return rowCount === 1;
   }
   listEvents(demandId: string) {
     return this.rows<DemandEvent>("select * from vision.demand_events where demand_id = $1 order by id", [demandId]);

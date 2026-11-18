@@ -79,6 +79,44 @@ export interface DemandVideo {
   driveFileUrl: string | null;
   deliveredAt: string | null;
   updatedAt: string;
+  /** Edição automática pelo Vision (brutos baixados do Drive do vídeo); null = não houve */
+  auto?: AutoEdit | null;
+  /** Alguém mudou a receita depois que o Vision terminou; null = sem alteração manual */
+  manualEdit?: ManualEdit | null;
+}
+
+/**
+ * Andamento da edição automática de um vídeo da demanda:
+ * waiting (espera notBefore: pedido + 10 min) → downloading (baixa os brutos
+ * do Drive) → analyzing (projeto criado, análise da IA) → done | error.
+ */
+export interface AutoEdit {
+  status: "waiting" | "downloading" | "analyzing" | "done" | "error";
+  /** texto do andamento para a tela */
+  stage: string;
+  /** link do Drive usado (link novo do War rearma um erro) */
+  link: string;
+  /** não começa antes disso */
+  notBefore: string;
+  startedAt: string | null;
+  /** quando o Vision terminou a edição */
+  finishedAt: string | null;
+  error: string | null;
+  /** tentativas (pasta vazia, servidor reiniciou no meio...) */
+  attempts: number;
+  /** brutos usados, na ordem da timeline */
+  files: string[];
+  /** arquivos da pasta que ficaram de fora e por quê */
+  skipped: { name: string; reason: string }[];
+  /** sha1 do recipe.json que o Vision entregou: receita diferente = alteração manual */
+  fingerprint: string | null;
+}
+
+export interface ManualEdit {
+  firstAt: string;
+  lastAt: string;
+  /** quem alterou (nomes, sem repetir) */
+  by: string[];
 }
 
 export interface DemandEvent {

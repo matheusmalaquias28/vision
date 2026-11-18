@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   getDemand,
   markNotificationsRead,
+  prepareDemandVideo,
   resyncDemand,
   setDemandStatus,
   type Client,
@@ -15,7 +16,7 @@ import { Select } from "../ui/controls";
 import { DemandNotes } from "./DemandNotes";
 import { StartVideoPanel } from "./StartVideoPanel";
 import { Avatar, DueDate, PriorityBadge, StatusDot } from "./DemandBadges";
-import { fmtDateTime, instagramLink, safeUrl, statusTone } from "./demandUtil";
+import { fmtDateTime, fmtTime, instagramLink, safeUrl, statusTone } from "./demandUtil";
 
 interface DemandDetailProps {
   demandId: string;
@@ -94,6 +95,32 @@ const RestartDialog: React.FC<{
     document.body
   );
 
+/**
+ * Quem editou: "Editado pelo Vision · 18 nov 14:45" e se alguém mudou a
+ * timeline depois (nomes e quando). Some quando o projeto foi montado à mão.
+ */
+const VisionMark: React.FC<{ video: DemandVideo }> = ({ video }) => {
+  const a = video.auto;
+  if (!a || !video.projectId || !a.finishedAt || (a.status !== "done" && a.status !== "error")) return null;
+  const m = video.manualEdit;
+  return (
+    <span className={`dd-vision ${m ? "manual" : ""}`}>
+      <span className="dd-vision-chip">
+        <Icon name="sparkles" size={11} />
+        {a.status === "done" ? "Editado pelo Vision" : "Montado pelo Vision"} · {fmtDateTime(a.finishedAt)}
+      </span>
+      {m ? (
+        <span className="dd-vision-manual" title={`Primeira alteração: ${fmtDateTime(m.firstAt)}`}>
+          <Icon name="user" size={11} />
+          alterado por {m.by.join(", ")} · última {fmtDateTime(m.lastAt)}
+        </span>
+      ) : (
+        <span className="dd-vision-manual none">sem alteração manual</span>
+      )}
+    </span>
+  );
+};
+
 const VideoRow: React.FC<{
   video: DemandVideo;
   disabled: boolean;
@@ -104,19 +131,47 @@ const VideoRow: React.FC<{
   onStart: (files: File[]) => void;
   /** pede a confirmação de recomeçar (vídeo que já tem projeto) */
   onRestart: () => void;
-}> = ({ video, disabled, starting, onOpen, onStart, onRestart }) => {
+  /** o Vision baixa os clipes da pasta do vídeo e monta a timeline agora */
+  onPrepare: () => void;
+}> = ({ video, disabled, starting, onOpen, onStart, onRestart, onPrepare }) => {
   const [over, setOver] = useState(false);
   const a = video.analysis;
+  const auto = video.auto ?? null;
   const analyzing = a?.status === "queued" || a?.status === "running";
+  // Vision antes de o projeto existir: na fila, baixando ou falhou
+  const visionWaiting = !video.projectId && auto?.status === "waiting";
+  const visionWorking = !video.projectId && auto?.status === "downloading";
+  const visionFailed = !video.projectId && auto?.status === "error";
   const state = video.deliveredAt
     ? "Entregue"
-    : analyzing
-      ? "IA analisando"
-      : video.projectId
-        ? "Em edição"
-        : "Não iniciado";
+    : visionWorking
+      ? "Vision preparando"
+      : visionWaiting
+        ? "Vision na fila"
+        : visionFailed
+          ? "Vision não preparou"
+          : analyzing
+            ? auto && video.projectId
+              ? "Vision editando"
+              : "IA analisando"
+            : video.projectId
+              ? "Em edição"
+              : "Não iniciado";
   // com o painel aberto, os brutos vão para a área dele
-  const takesFiles = !video.projectId && !starting && !disabled;
+  const takesFiles = !video.projectId && !starting && !disabled && !visionWorking;
+  const canPrepare = !video.projectId && !!video.rawLink && !visionWorking;
+  const startsAt =
+    visionWaiting && auto && Date.parse(auto.notBefore) > Date.now() && auto.attempts === 0
+      ? `começa sozinho às ${fmtTime(auto.notBefore)}`
+      : null;
+  const tone = video.deliveredAt
+    ? "ok"
+    : visionFailed
+      ? "err"
+      : video.projectId || visionWorking || visionWaiting
+        ? "doing"
+        : "";
+  const skipped = auto && (visionFailed || (auto.status === "done" && !video.deliveredAt)) ? auto.skipped : [];
   return (
     <li
       className={`dd-video ${over ? "over" : ""} ${starting ? "starting" : ""}`}
@@ -135,26 +190,44 @@ const VideoRow: React.FC<{
     >
       <span className="dd-video-num">{String(video.index).padStart(2, "0")}</span>
       <span className="dd-video-info">
-        <span className={`dd-video-state ${video.deliveredAt ? "ok" : video.projectId ? "doing" : ""}`}>
-          {state}
+        <span className="dd-video-head">
+          <span className={`dd-video-state ${tone}`}>{state}</span>
+          {video.title && <span className="dd-video-title">{video.title}</span>}
+          {video.rawLink && <ExtLink href={video.rawLink}>pasta de clipes</ExtLink>}
         </span>
         {starting && video.projectId ? (
           <span className="dd-hint">envie os brutos de novo e confira o briefing abaixo</span>
         ) : video.deliveredAt && video.driveFileUrl ? (
           <ExtLink href={video.driveFileUrl}>enviado {fmtDateTime(video.deliveredAt)}</ExtLink>
+        ) : visionWorking && auto ? (
+          <span className="dd-hint">{auto.stage}…</span>
+        ) : visionWaiting && auto ? (
+          <span className="dd-hint">{startsAt ?? auto.stage}</span>
+        ) : visionFailed && auto ? (
+          <span className="dd-hint err" title={auto.error ?? ""}>
+            {auto.error ?? auto.stage}
+          </span>
         ) : analyzing ? (
           <span className="dd-hint">{a!.stage}…</span>
         ) : a?.status === "error" && !video.deliveredAt ? (
           <span className="dd-hint err" title={a.error ?? ""}>análise falhou: rode Analisar no editor</span>
-        ) : a?.status === "done" && !video.deliveredAt ? (
+        ) : a?.status === "done" && !video.deliveredAt && !auto ? (
           <span className="dd-hint">sugestões da IA prontas para revisar</span>
         ) : (
           !video.projectId &&
           (starting ? (
             <span className="dd-hint">escolha os brutos e confira o briefing abaixo</span>
+          ) : video.rawLink ? (
+            <span className="dd-hint">o Vision baixa os clipes da pasta e monta a timeline</span>
           ) : (
             <span className="dd-hint">arraste os brutos aqui ou clique em começar</span>
           ))
+        )}
+        {!starting && <VisionMark video={video} />}
+        {skipped.length > 0 && (
+          <span className="dd-hint" title={skipped.map((x) => `${x.name}: ${x.reason}`).join("\n")}>
+            {skipped.length} {skipped.length === 1 ? "arquivo da pasta ficou" : "arquivos da pasta ficaram"} de fora
+          </span>
         )}
       </span>
       {video.projectId ? (
@@ -177,10 +250,28 @@ const VideoRow: React.FC<{
         )
       ) : (
         !starting && (
-          <button className="sm primary" disabled={disabled} onClick={() => onStart([])}>
-            <Icon name="upload" size={13} />
-            Começar edição
-          </button>
+          <span className="dd-video-actions">
+            {canPrepare && (
+              <button
+                className={`sm ${visionFailed || visionWaiting ? "ghost" : "primary"}`}
+                disabled={disabled}
+                title="Baixar os clipes da pasta do Drive, montar a timeline e rodar a análise da IA agora"
+                onClick={onPrepare}
+              >
+                <Icon name={visionFailed ? "refresh" : "sparkles"} size={13} />
+                {visionFailed ? "Tentar de novo" : visionWaiting ? "Preparar agora" : "Preparar com o Vision"}
+              </button>
+            )}
+            <button
+              className={`sm ${canPrepare && !visionFailed && !visionWaiting ? "ghost" : "primary"}`}
+              disabled={disabled || visionWorking}
+              title={visionWorking ? "O Vision está baixando os brutos deste vídeo" : undefined}
+              onClick={() => onStart([])}
+            >
+              <Icon name="upload" size={13} />
+              Começar edição
+            </button>
+          </span>
         )
       )}
     </li>
@@ -351,21 +442,24 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
 
             <div className="dmodal-body">
               <div className="dmodal-main">
-                <a
-                  className={`dd-materials ${safeUrl(d.driveMateriais) ? "" : "disabled"}`}
-                  href={safeUrl(d.driveMateriais) ?? undefined}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  <span className="dd-materials-icon">
-                    <Icon name="folder" size={18} />
-                  </span>
-                  <span>
-                    <strong>Drive de Materiais</strong>
-                    <span>{safeUrl(d.driveMateriais) ? "Onde estão os vídeos brutos" : "Link não informado"}</span>
-                  </span>
-                  <Icon name="external" size={14} />
-                </a>
+                {/* formato novo do War: cada vídeo tem a própria pasta de clipes (na linha dele) */}
+                {!d.videos.some((v) => v.rawLink) && (
+                  <a
+                    className={`dd-materials ${safeUrl(d.driveMateriais) ? "" : "disabled"}`}
+                    href={safeUrl(d.driveMateriais) ?? undefined}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    <span className="dd-materials-icon">
+                      <Icon name="folder" size={18} />
+                    </span>
+                    <span>
+                      <strong>Drive de Materiais</strong>
+                      <span>{safeUrl(d.driveMateriais) ? "Onde estão os vídeos brutos" : "Link não informado"}</span>
+                    </span>
+                    <Icon name="external" size={14} />
+                  </a>
+                )}
 
                 <section className="dd-section">
                   <h3>
@@ -383,6 +477,12 @@ export const DemandDetail: React.FC<DemandDetailProps> = ({
                             onOpen={() => v.projectId && onOpenProject(v.projectId)}
                             onStart={(files) => setStarting({ index: v.index, files, restart: false })}
                             onRestart={() => setConfirmRestart(v)}
+                            onPrepare={() => {
+                              setError(null);
+                              prepareDemandVideo(d.id, v.index)
+                                .then(() => load())
+                                .catch((e: Error) => setError(e.message));
+                            }}
                           />
                           {open && starting && (
                             <StartVideoPanel

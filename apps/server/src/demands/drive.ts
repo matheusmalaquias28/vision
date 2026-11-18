@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { getStore } from "./store";
 
 /**
@@ -161,4 +164,137 @@ export async function uploadToFolder(folderLink: string, name: string, filePath:
   });
   const file = (await done.json()) as { id: string };
   return { id: file.id, url: `https://drive.google.com/file/d/${file.id}/view` };
+}
+
+// ─── Leitura: brutos de cada vídeo ───────────────────────────────────
+
+/** Link do Drive → pasta ou arquivo. Aceita …/folders/<id>, …/file/d/<id>, ?id=<id> ou o id puro (pasta). */
+export function driveRefFrom(link: string): { kind: "folder" | "file"; id: string } | null {
+  const file = link.match(/\/file\/d\/([\w-]{10,})/) ?? link.match(/\/document\/d\/([\w-]{10,})/);
+  if (file) return { kind: "file", id: file[1] };
+  const folder = folderIdFrom(link);
+  return folder ? { kind: "folder", id: folder } : null;
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  /** caminho dentro da pasta do link ("Dia 2/C0003.MP4"): ordena e mostra */
+  path: string;
+  mimeType: string;
+  /** bytes (atalhos e docs do Google não têm) */
+  size: number | null;
+  /** duração que o Drive já leu do vídeo (pode faltar logo depois do upload) */
+  durationSeconds: number | null;
+  modifiedTime: string;
+}
+
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+const FILE_FIELDS = "id,name,mimeType,size,modifiedTime,videoMediaMetadata(durationMillis)";
+
+interface RawFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: string;
+  modifiedTime: string;
+  videoMediaMetadata?: { durationMillis?: string };
+}
+
+const toDriveFile = (f: RawFile, prefix: string): DriveFile => ({
+  id: f.id,
+  name: f.name,
+  path: prefix + f.name,
+  mimeType: f.mimeType,
+  size: f.size ? Number(f.size) : null,
+  durationSeconds: f.videoMediaMetadata?.durationMillis ? Number(f.videoMediaMetadata.durationMillis) / 1000 : null,
+  modifiedTime: f.modifiedTime,
+});
+
+/**
+ * Arquivos do link (pasta com subpastas até 3 níveis, ou um arquivo só).
+ * Pasta inexistente ou sem acesso para a conta conectada = erro claro.
+ */
+export async function listDriveFiles(link: string): Promise<DriveFile[]> {
+  const ref = driveRefFrom(link);
+  if (!ref) throw new Error(`link do Drive inválido: ${link}`);
+  const notFound = (e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/Google Drive 404/.test(msg)) {
+      const s = cachedEmail ? ` (${cachedEmail})` : "";
+      throw new Error(`o Drive não achou o link ou a conta conectada${s} não tem acesso a ele`);
+    }
+    throw e;
+  };
+  if (ref.kind === "file") {
+    const f = (await (
+      await api(
+        `https://www.googleapis.com/drive/v3/files/${ref.id}?${new URLSearchParams({ fields: FILE_FIELDS, supportsAllDrives: "true" })}`
+      ).catch(notFound)
+    ).json()) as RawFile;
+    return [toDriveFile(f, "")];
+  }
+  const out: DriveFile[] = [];
+  const walk = async (folderId: string, prefix: string, depth: number) => {
+    let pageToken: string | undefined;
+    do {
+      const page = (await (
+        await api(
+          `https://www.googleapis.com/drive/v3/files?${new URLSearchParams({
+            q: `'${folderId}' in parents and trashed = false`,
+            fields: `nextPageToken,files(${FILE_FIELDS})`,
+            pageSize: "200",
+            supportsAllDrives: "true",
+            includeItemsFromAllDrives: "true",
+            ...(pageToken ? { pageToken } : {}),
+          })}`
+        ).catch(notFound)
+      ).json()) as { files: RawFile[]; nextPageToken?: string };
+      for (const f of page.files) {
+        if (f.mimeType === FOLDER_MIME) {
+          if (depth < 3) await walk(f.id, `${prefix}${f.name}/`, depth + 1);
+        } else {
+          out.push(toDriveFile(f, prefix));
+        }
+      }
+      pageToken = page.nextPageToken;
+    } while (pageToken);
+  };
+  await walk(ref.id, "", 1);
+  return out;
+}
+
+/** e-mail da conta conectada (só para mensagens de erro) */
+let cachedEmail: string | null = null;
+export async function driveAccount() {
+  const s = await getStore().getSetting<DriveSetting>(SETTING);
+  cachedEmail = s?.email ?? null;
+  return s ? { email: s.email } : null;
+}
+
+/**
+ * Baixa o arquivo direto para o disco (stream: um bruto de 1 GB nunca passa
+ * inteiro pela memória). Arquivo parcial é apagado no erro.
+ */
+export async function downloadDriveFile(fileId: string, dest: string, onBytes?: (bytes: number) => void) {
+  const res = await api(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { signal: AbortSignal.timeout(60 * 60_000) }
+  );
+  if (!res.body) throw new Error("o Drive não devolveu o conteúdo do arquivo");
+  let bytes = 0;
+  const counter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      bytes += chunk.length;
+      onBytes?.(bytes);
+      cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(res.body as unknown as WebReadableStream), counter, fs.createWriteStream(dest));
+  } catch (err) {
+    fs.rmSync(dest, { force: true });
+    throw err;
+  }
+  return bytes;
 }

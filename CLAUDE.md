@@ -380,6 +380,36 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   projeto. O servidor cria o novo e só então apaga a pasta do antigo
   (recusa com 409 se a análise ou um render dele está na fila); a entrega
   volta a pendente e o arquivo do Drive é substituído na próxima.
+- Formato novo do War: `videos: [{ numero, titulo, driveClipes }]` (1–5,
+  `quantidadeVideos` = tamanho; `driveMateriais` vazio). `videos: []` =
+  demanda antiga (`driveMateriais` como antes). Lido do payload guardado
+  (`demand.raw`) por `videoItemsFrom` (`autoEditRules.ts`), sem coluna nova;
+  a tela mostra título e "pasta de clipes" por vídeo.
+- Edição automática (`demands/autoEdit.ts`, SÓ com `VISION_AUTO_EDIT=on`,
+  a VPS; dev no mesmo banco nunca baixa sozinho): o webhook arma
+  (`armAutoEdit`) cada vídeo com pasta e sem projeto para 10 min depois do
+  pedido (`VISION_AUTO_EDIT_DELAY_MIN`). Fila de 1 vídeo por vez, tick de
+  1 min, espera render terminar (`renderBusy`); `claimAutoEdit` (update
+  condicional) impede dois processos no mesmo vídeo. Lê a pasta no Drive
+  (subpastas até 3 níveis), `planClips`: só vídeo, ordem natural do caminho
+  (C0002 antes de C0010), limites do envio manual, máx. 20; pasta vazia ou
+  arquivo mexido há < 3 min = tenta de novo (desiste depois de 12); disco <
+  3× os brutos + 3 GB = espera. Baixa em stream para o tmp, confere a
+  duração, `createProject` com o briefing da demanda, `recordWork` start
+  como "Vision" e espera `startAutoAnalysis` (agora devolve promessa).
+  Estado em `demand_videos.auto` (jsonb: status waiting/downloading/
+  analyzing/done/error, stage, arquivos usados e de fora, `fingerprint` =
+  sha1 do recipe.json entregue); notificação no fim. Reinício: baixando
+  volta para a fila, analisando retoma. "Preparar agora"/"Tentar de novo"
+  na linha do vídeo (`POST /api/demands/:id/videos/:index/auto`; sem a
+  variável roda só aquele vídeo no processo). "Começar edição" à mão vale
+  (recusa só enquanto baixa) e zera `auto`/`manual_edit`.
+  Alteração manual: middleware em `/api/projects/:id` (não-GET, com
+  usuário, fora activity/render/deliver) → `noteProjectWrite`: recipe.json
+  diferente do `fingerprint` = grava `manual_edit` {firstAt, lastAt, by}.
+  A tela mostra "Editado pelo Vision · data" e "sem alteração manual" ou
+  "alterado por X · última data". Colunas ausentes (42703): o resto da
+  linha grava igual e a automação não roda (bloco novo de `db/vision.sql`).
 - Painel do dia (`#/painel`, SÓ superadmin: link no menu e
   `GET /api/dashboard/day?date=` com 403 para os outros): `buildDayReport`
   em `demands/dashboard.ts`, função pura sem tabela nova. Dia no fuso
