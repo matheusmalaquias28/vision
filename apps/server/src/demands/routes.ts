@@ -144,13 +144,31 @@ demandsRouter.get(
     const store = getStore();
     // eventos da janela das médias (+1 dia de folga para o fuso)
     const since = `${shiftDay(day, -AVERAGE_WINDOW_DAYS - 1)}T00:00:00Z`;
-    const [demands, videos, events, statuses] = await Promise.all([
+    // autoria: quem começou (todos os "start") e quem editou (tempo dos últimos 90 dias)
+    const editedSince = `${shiftDay(day, -90)}T00:00:00Z`;
+    const [demands, videos, events, statuses, starts, activity, users] = await Promise.all([
       store.listDemands(),
       store.listVideos(),
       store.listEventsSince(since),
       warStatuses(),
+      store.listWorkEvents("1970-01-01T00:00:00Z", "start"),
+      store.listEditActivity(editedSince),
+      store.listUsers(),
     ]);
-    res.json(buildDayReport({ day, now, statuses, demands, videos, events, projects: projectInfos() }));
+    res.json(
+      buildDayReport({
+        day,
+        now,
+        statuses,
+        demands,
+        videos,
+        events,
+        projects: projectInfos(),
+        starts,
+        activity,
+        users: users.map((u) => ({ id: u.id, name: u.name })),
+      })
+    );
   })
 );
 

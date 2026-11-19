@@ -4,6 +4,7 @@ import { Icon, type IconName } from "../editor/Icon";
 import { StatusDot } from "./DemandBadges";
 import { statusTone } from "./demandUtil";
 import { PerformancePanel } from "./PerformancePanel";
+import { AuthorChip } from "../ui/Avatar";
 
 interface DashboardPageProps {
   onOpenDemand: (id: string) => void;
@@ -86,6 +87,7 @@ const ItemList: React.FC<{
                 </strong>
                 <span>{it.clientName}</span>
               </span>
+              <AuthorChip author={it.author} />
             </button>
           </li>
         ))}

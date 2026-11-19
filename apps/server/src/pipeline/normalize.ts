@@ -16,6 +16,16 @@ import { probeVideo } from "./probe";
 
 const MAX_SIDE = 1920;
 
+/**
+ * x264 do formato de trabalho. Medido num MOV de iPhone (HEVC HLG 1080p,
+ * 13 Mbps, 7 s): superfast/crf 18 saía MAIOR que o original (12,3 × 11,6 MB);
+ * veryfast/crf 20 = 5,5 MB no mesmo tempo, SSIM 0,988 contra o crf 18.
+ */
+const WORK_X264 = ["-preset", "veryfast", "-crf", "20"];
+
+/** Até este bitrate de vídeo, arquivo já no formato de trabalho só troca de recipiente (sem reencodar) */
+const REMUX_MAX_BITRATE = 8_000_000;
+
 export interface VideoFormat {
   codec: string;
   pixFmt: string;
@@ -112,13 +122,43 @@ async function transcode(abs: string, out: string, f: VideoFormat): Promise<void
     "-map", "0:v:0", "-map", "0:a:0?",
     "-vf", isHdr(f) ? hdrToSdrFilter(f, MAX_SIDE) : workingVideoFilter(f, MAX_SIDE),
     ...WORKING_COLOR_TAGS,
-    "-c:v", "libx264", "-preset", "superfast", "-crf", "18",
+    "-c:v", "libx264", ...WORK_X264,
     // keyframe a cada ~2 s: busca rápida no preview
     "-g", "48",
     "-c:a", "aac", "-b:a", "192k",
     "-movflags", "+faststart",
     out,
   ]);
+}
+
+/** Só troca o recipiente para MP4 (mesmos fluxos, sem perda) */
+async function remux(abs: string, out: string): Promise<void> {
+  await runOrThrow(ffmpegPath, [
+    "-y", "-hide_banner", "-loglevel", "error",
+    "-i", abs,
+    "-map", "0:v:0", "-map", "0:a:0?",
+    "-c", "copy",
+    "-movflags", "+faststart",
+    out,
+  ]);
+}
+
+/** Recipiente que não é MP4 (MOV do iPhone/câmera, MKV…): na entrada vira MP4 */
+export function containerReason(abs: string): string | null {
+  const ext = path.extname(abs).toLowerCase();
+  if (ext === ".mp4") return null;
+  return `${ext.slice(1).toUpperCase() || "sem extensão"} → MP4`;
+}
+
+export interface NormalizeOptions {
+  /**
+   * Entrada de vídeo (upload, clipe inserido, edição automática): recipiente
+   * que não é MP4 também converte. Já no formato de trabalho e leve
+   * (≤ `REMUX_MAX_BITRATE`) só troca de caixa; senão reencoda (HDR vira SDR),
+   * o que deixa o MOV do iPhone com menos da metade do tamanho. O render não
+   * passa: projeto antigo com MOV fica como está.
+   */
+  toMp4?: boolean;
 }
 
 export interface NormalizeResult {
@@ -128,22 +168,35 @@ export interface NormalizeResult {
   reason: string | null;
 }
 
+const mb = (abs: string) => (fs.statSync(abs).size / 1e6).toFixed(1);
+
 /**
  * Garante o formato de trabalho no lugar: o original fica ao lado como
  * `original-<nome>` (a limpeza de brutos apaga os dois). Mesmos tempos: a
  * receita continua valendo.
  */
-export async function normalizeVideo(abs: string): Promise<NormalizeResult> {
+export async function normalizeVideo(abs: string, opts: NormalizeOptions = {}): Promise<NormalizeResult> {
   const f = await probeFormat(abs);
-  const reason = normalizeReason(f);
-  if (!reason) return { abs, converted: false, reason: null };
+  const formatWhy = normalizeReason(f);
+  const containerWhy = opts.toMp4 ? containerReason(abs) : null;
+  if (!formatWhy && !containerWhy) return { abs, converted: false, reason: null };
+  const reason = [containerWhy, formatWhy].filter(Boolean).join(", ");
   const dir = path.dirname(abs);
   const ext = path.extname(abs);
   const base = path.basename(abs, ext);
   const tmp = path.join(dir, `.work-${base}.mp4`);
+  const t0 = Date.now();
+  let how = "reencodado";
   try {
-    await transcode(abs, tmp, f);
-    const [before, after] = await Promise.all([probeVideo(abs), probeVideo(tmp)]);
+    const before = await probeVideo(abs);
+    const bitrate = (fs.statSync(abs).size * 8) / before.durationInSeconds;
+    if (!formatWhy && !isHdr(f) && bitrate <= REMUX_MAX_BITRATE) {
+      await remux(abs, tmp);
+      how = "só recipiente";
+    } else {
+      await transcode(abs, tmp, f);
+    }
+    const after = await probeVideo(tmp);
     if (Math.abs(before.durationInSeconds - after.durationInSeconds) > 0.25) {
       throw new Error(`conversão mudou a duração (${before.durationInSeconds}s → ${after.durationInSeconds}s)`);
     }
@@ -156,6 +209,7 @@ export async function normalizeVideo(abs: string): Promise<NormalizeResult> {
     }
     throw err;
   }
+  console.log(`[normalize] ${path.basename(abs)} (${reason}): ${how}, ${mb(abs)} → ${mb(tmp)} MB em ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   fs.renameSync(abs, path.join(dir, `original-${base}${ext}`));
   const finalAbs = path.join(dir, `${base}.mp4`);
   fs.renameSync(tmp, finalAbs);

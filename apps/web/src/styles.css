@@ -6545,6 +6545,69 @@ a.drive-status:hover {
   white-space: nowrap;
 }
 
+/* ─── autoria (quem fez a edição) e avatares ─────────────────────── */
+.avatar {
+  --avatar-h: 210;
+  position: relative;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--avatar-h) 52% 46%);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.author-chip {
+  flex-shrink: 0;
+  max-width: 46%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 2px;
+  border-radius: 999px;
+  background: var(--n-3);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.author-chip.none {
+  padding: 3px 9px;
+  background: none;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.author-chip.vision {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.author-vision-mark {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.author-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.author-more {
+  color: var(--text-3);
+}
+
 .dash-row-idx {
   font-weight: 500;
   color: var(--text-3);
@@ -7642,4 +7705,164 @@ a.drive-status:hover {
     margin-left: 0;
     width: 100%;
   }
+}
+
+/* ─── presença (quem está online, barra superior) ───────────────────── */
+.presence {
+  flex-shrink: 0;
+}
+
+.presence-stack {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+}
+
+.presence-stack:hover {
+  background: var(--n-3);
+}
+
+.presence-stack .presence-face + .presence-face {
+  margin-left: -7px;
+}
+
+.presence-face {
+  box-shadow: 0 0 0 2px var(--n-1);
+  transition: opacity var(--t) var(--ease);
+}
+
+.presence-face.idle {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+.presence-face.same {
+  box-shadow: 0 0 0 2px var(--n-1), 0 0 0 4px var(--warn);
+}
+
+.presence-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-3);
+  box-shadow: 0 0 0 2px var(--n-1);
+}
+
+.presence-face.on .presence-dot {
+  background: var(--ok);
+}
+
+.presence-extra {
+  margin-left: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.presence-alone {
+  padding: 0 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.presence-pop {
+  left: auto;
+  right: 0;
+  width: 320px;
+  padding: 6px;
+}
+
+.presence-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.presence-row .presence-face {
+  box-shadow: 0 0 0 2px var(--n-2);
+}
+
+.presence-row .presence-dot {
+  box-shadow: 0 0 0 2px var(--n-2);
+}
+
+.presence-who {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.presence-who strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.presence-you {
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.presence-same {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.presence-place {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.presence-place {
+  height: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+button.presence-place:hover {
+  border: none;
+  background: none;
+  color: var(--accent);
+}
+
+.presence-label {
+  color: var(--text-3);
+}
+
+.presence-detail {
+  color: var(--text);
+}
+
+.presence-when {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.presence-row.idle .presence-who strong {
+  color: var(--text-2);
 }

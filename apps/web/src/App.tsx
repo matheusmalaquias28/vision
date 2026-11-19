@@ -29,6 +29,7 @@ import { UserMenu } from "./home/UserMenu";
 import { UsersPage } from "./home/UsersPage";
 import { ConfirmButton } from "./ui/ConfirmButton";
 import { UserContext, useCurrentUser } from "./ui/user";
+import { PresenceBar, PresenceProvider, usePresence } from "./ui/presence";
 
 function fmtDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -149,6 +150,14 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const route = parseHash(hash);
+  // onde esta aba está, para a barra de presença dos outros
+  const presence = usePresence(
+    selected
+      ? { view: "editor", projectId: selected }
+      : route.view === "demandas" && route.id
+        ? { view: "demanda", demandId: route.id }
+        : { view: route.view }
+  );
 
   // volta do login do Google: #/demandas?drive=ok|erro&msg=…
   useEffect(() => {
@@ -216,11 +225,16 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   };
 
   if (route.view === "lab") {
-    return <MotionLabPage onBack={() => go("#/demandas")} />;
+    return (
+      <PresenceProvider value={presence}>
+        <MotionLabPage onBack={() => go("#/demandas")} />
+      </PresenceProvider>
+    );
   }
 
   if (selected) {
     return (
+      <PresenceProvider value={presence}>
       <Editor
         key={`${selected}:${reloadKey}`}
         projectId={selected}
@@ -236,12 +250,14 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
           setSelected(null);
         }}
       />
+      </PresenceProvider>
     );
   }
 
   const drive = integrations?.drive;
 
   return (
+    <PresenceProvider value={presence}>
     <div className="home">
       <header className="topbar">
         <span className="brand">
@@ -308,6 +324,7 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               Drive não configurado
             </span>
           ))}
+        <PresenceBar onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)} />
         <NotificationBell onOpenDemand={(id) => go(`#/demandas/${encodeURIComponent(id)}`)} />
         <UserMenu onLogout={onLogout} />
         <a className="lab-link" href="#lab">
@@ -445,6 +462,7 @@ const Workspace: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       </div>
       )}
     </div>
+    </PresenceProvider>
   );
 };
 

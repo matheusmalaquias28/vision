@@ -288,7 +288,12 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   (`pipeline/normalize.ts`; original fica como `original-*`, a limpeza apaga
   os dois). Sem isso o navegador e o render do Remotion decodificam o mesmo
   arquivo com brilho diferente (render saía mais escuro). Celular comum passa
-  direto. HDR (HLG/PQ) fica como está. CLI: `npm run cli -- normalize <id>`.
+  direto. HDR (HLG/PQ) fica como está. Na ENTRADA (`toMp4`: upload, clipe
+  inserido, edição automática) todo recipiente que não é MP4 (MOV do iPhone…)
+  vira MP4: já no formato e ≤ 8 Mbps só troca de caixa, senão reencoda
+  (HDR → SDR; MOV do iPhone 11,6 → 5,5 MB). x264 veryfast/crf 20 (o antigo
+  superfast/crf 18 saía maior que o HEVC original). O render não converte
+  MOV de projeto antigo. CLI: `npm run cli -- normalize <id>`.
 - Posição livre (arrastada no preview): `placement` {x,y} = centro do elemento
   em % da largura/ALTURA, em `captions.style`, overlays e motions (null = layout
   padrão). Render marca o elemento com `data-vision-drag` (`Positioned.tsx`);
@@ -420,6 +425,19 @@ e é planejado DEPOIS dos cortes, sobre o vídeo final.
   Vision); abertas, atrasadas e pontos de atenção são sempre "agora" (o
   banco só guarda o estado atual). Médias (prazo criação→último vídeo
   entregue, tempo de edição, % no prazo) nos 30 dias até o dia.
+- Autoria no painel (Hoje: iniciadas e entregues): `authorResolver` em
+  `dashboard.ts`. Começou = Vision (`video.auto` ou start "Vision" sem
+  usuário) ou a pessoa do evento start; editou = tempo no editor ≥ 1 min
+  (`EDITOR_MIN_SECONDS`, quem mais editou primeiro) + `manualEdit.by`.
+  Projeto de antes do registro mostra "sem registro".
+- Presença (`presence.ts`, ícones na barra do topo da home e do editor,
+  `PresenceBar` em `ui/presence.tsx`): cada aba manda `POST /api/presence`
+  {tabId, view, projectId|demandId, active} a cada 20 s, ao trocar de tela e
+  ao voltar a mexer; resposta = quem está online, onde (título da demanda ·
+  vídeo NN) e se está em uso (aba visível + mouse/teclado em 2 min ou mídia
+  tocando). Só na memória do processo, aba some sem batimento em 90 s ou na
+  hora com `sendBeacon` em `/api/presence/leave`. Todo usuário vê todos; no
+  editor, quem está no mesmo vídeo ganha anel de aviso.
 - Painel → Desempenho (só superadmin; aba padrão, a antiga vira "Hoje"):
   `GET /api/dashboard/performance?from&to&user` → `buildPerformanceReport`
   (`demands/performance.ts`, pura, testada). Tempo REAL de edição =

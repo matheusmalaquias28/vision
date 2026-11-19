@@ -58,8 +58,8 @@ export async function createProject(
     const ext = path.extname(videoAbsPaths[i]).toLowerCase() || ".mp4";
     const copied = path.join(dir, `source-${srcId}${ext}`);
     fs.copyFileSync(videoAbsPaths[i], copied);
-    // arquivo de câmera (10 bits, faixa 0–255…) vira formato de trabalho: preview = render
-    const { abs: destAbs } = await normalizeVideo(copied);
+    // arquivo de câmera (10 bits, faixa 0–255…) vira formato de trabalho (preview = render); MOV vira MP4 mais leve
+    const { abs: destAbs } = await normalizeVideo(copied, { toMp4: true });
     const probe = await probeVideo(destAbs);
     // cópia leve do preview em segundo plano (o editor pega quando ficar pronta)
     queuePreviewProxy(id, destAbs);

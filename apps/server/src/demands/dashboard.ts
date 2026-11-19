@@ -1,4 +1,4 @@
-import type { Demand, DemandEvent, DemandVideo } from "./types";
+import type { Demand, DemandEvent, DemandVideo, EditActivity, WorkEvent } from "./types";
 
 /**
  * Resumo do dia para o superadmin (tela Painel): andamento das demandas,
@@ -60,6 +60,11 @@ export interface DashboardInput {
   /** Eventos desde (pelo menos) o início da janela das médias */
   events: DemandEvent[];
   projects: ProjectInfo[];
+  /** Eventos "start" (quem começou cada projeto); sem eles a autoria vem só do tempo de edição */
+  starts?: WorkEvent[];
+  /** Tempo de edição por pessoa × projeto (quem editou) */
+  activity?: EditActivity[];
+  users?: { id: string; name: string }[];
   tz?: string;
 }
 
@@ -82,6 +87,63 @@ export interface AttentionItem {
   detail: string;
 }
 
+/** Nome com que a edição automática registra o começo (`autoEdit.ts`) */
+export const VISION_AUTHOR = "Vision";
+
+/** Tempo mínimo no editor para a pessoa contar como quem editou (abrir e fechar não conta) */
+export const EDITOR_MIN_SECONDS = 60;
+
+/** Quem fez a edição de um projeto */
+export interface EditAuthor {
+  /** quem montou: o Vision (edição automática) ou a pessoa que subiu os brutos; null = sem registro */
+  startedBy: { kind: "vision" } | { kind: "user"; name: string } | null;
+  /**
+   * Quem mexeu no editor (tempo medido ≥ 1 min ou alteração manual da
+   * receita do Vision), quem mais editou primeiro; sem quem começou
+   */
+  editors: string[];
+}
+
+export interface AuthorInput {
+  starts: WorkEvent[];
+  activity: EditActivity[];
+  users: { id: string; name: string }[];
+}
+
+/** Autoria de cada projeto: começo (Vision ou pessoa) + quem editou depois */
+export function authorResolver({ starts, activity, users }: AuthorInput) {
+  const nameOf = new Map(users.map((u) => [u.id, u.name]));
+  for (const w of starts) if (w.userId && w.userName && !nameOf.has(w.userId)) nameOf.set(w.userId, w.userName);
+  const startOf = new Map<string, WorkEvent>();
+  // o mais recente vale (Recomeçar cria projeto novo, mas um projeto pode ter dois registros)
+  for (const w of [...starts].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    if (w.kind === "start" && w.projectId) startOf.set(w.projectId, w);
+  }
+  const secondsBy = new Map<string, Map<string, number>>();
+  for (const a of activity) {
+    const m = secondsBy.get(a.projectId) ?? new Map<string, number>();
+    m.set(a.userId, (m.get(a.userId) ?? 0) + a.seconds);
+    secondsBy.set(a.projectId, m);
+  }
+  return (projectId: string | null, video?: DemandVideo): EditAuthor => {
+    const start = projectId ? startOf.get(projectId) : undefined;
+    const vision = !!video?.auto || (!!start && !start.userId && start.userName === VISION_AUTHOR);
+    const startedBy: EditAuthor["startedBy"] = vision
+      ? { kind: "vision" }
+      : start?.userName || (start?.userId && nameOf.get(start.userId))
+        ? { kind: "user", name: start.userName || nameOf.get(start.userId!)! }
+        : null;
+    const timed = [...(projectId ? (secondsBy.get(projectId) ?? new Map<string, number>()) : new Map<string, number>())]
+      .filter(([, s]) => s >= EDITOR_MIN_SECONDS)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => nameOf.get(id) ?? "Sem nome");
+    const editors = [...new Set([...timed, ...(video?.manualEdit?.by ?? [])])].filter(
+      (n) => !(startedBy?.kind === "user" && n === startedBy.name)
+    );
+    return { startedBy, editors };
+  };
+}
+
 export interface DayItem {
   demandId: string | null;
   title: string;
@@ -89,6 +151,7 @@ export interface DayItem {
   /** vídeo NN da demanda (null = projeto avulso) */
   index: number | null;
   at: string;
+  author: EditAuthor;
 }
 
 export interface DayReport {
@@ -133,6 +196,7 @@ export function buildDayReport(input: DashboardInput): DayReport {
   const on = (iso: string | null | undefined, d = day) => !!iso && dayOf(iso, tz) === d;
   const byId = new Map(demands.map((d) => [d.id, d]));
   const projectById = new Map(projects.map((p) => [p.id, p]));
+  const authorOf = authorResolver({ starts: input.starts ?? [], activity: input.activity ?? [], users: input.users ?? [] });
   const videosOf = (id: string) => videos.filter((v) => v.demandId === id);
   const created = (d: Demand) => d.warCreatedAt ?? d.createdAt;
   const done = (d: Demand) => isDoneStatus(d.status, statuses);
@@ -161,6 +225,7 @@ export function buildDayReport(input: DashboardInput): DayReport {
         clientName: d?.clientName ?? "Projeto avulso",
         index: v?.index ?? null,
         at: p.createdAt,
+        author: authorOf(p.id, v),
       };
     })
     .sort((a, b) => a.at.localeCompare(b.at));
@@ -175,6 +240,7 @@ export function buildDayReport(input: DashboardInput): DayReport {
         clientName: d?.clientName ?? "",
         index: v.index,
         at: v.deliveredAt!,
+        author: authorOf(v.projectId, v),
       };
     })
     .sort((a, b) => a.at.localeCompare(b.at));

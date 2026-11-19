@@ -612,12 +612,19 @@ export type AttentionKind =
   | "analysis-error"
   | "unanswered";
 
+/** Espelho de `EditAuthor` (apps/server/src/demands/dashboard.ts) */
+export interface EditAuthor {
+  startedBy: { kind: "vision" } | { kind: "user"; name: string } | null;
+  editors: string[];
+}
+
 export interface DayItem {
   demandId: string | null;
   title: string;
   clientName: string;
   index: number | null;
   at: string;
+  author: EditAuthor;
 }
 
 /** Espelho de `DayReport` (apps/server/src/demands/dashboard.ts) */
@@ -757,3 +764,47 @@ export const sendEditActivity = (projectId: string, seconds: number) =>
     body: JSON.stringify({ seconds }),
     keepalive: true,
   }).catch(() => undefined);
+
+// ─── presença (barra superior) ───────────────────────────────────────
+
+/** Espelho de `PresenceView`/`PresenceUser` (apps/server/src/presence.ts) */
+export type PresenceView = "painel" | "demandas" | "demanda" | "clientes" | "projetos" | "usuarios" | "editor" | "lab";
+
+export interface PresenceWhere {
+  view: PresenceView;
+  projectId?: string | null;
+  demandId?: string | null;
+}
+
+export interface PresencePlace {
+  view: PresenceView;
+  label: string;
+  detail: string | null;
+  projectId: string | null;
+  demandId: string | null;
+  active: boolean;
+  since: string;
+}
+
+export interface PresenceUser {
+  userId: string;
+  name: string;
+  active: boolean;
+  lastActiveAt: string | null;
+  places: PresencePlace[];
+}
+
+export const sendPresence = (beat: PresenceWhere & { tabId: string; active: boolean }) =>
+  fetch("/api/presence", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(beat),
+  }).then((r) => json<{ me: string; users: PresenceUser[] }>(r));
+
+/** Aba fechando: sendBeacon sobrevive ao fechamento */
+export const leavePresence = (tabId: string) => {
+  const body = new Blob([JSON.stringify({ tabId })], { type: "application/json" });
+  if (!navigator.sendBeacon?.("/api/presence/leave", body)) {
+    void fetch("/api/presence/leave", { method: "POST", body, headers: { "Content-Type": "application/json" }, keepalive: true }).catch(() => undefined);
+  }
+};

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ffmpegPath, runOrThrow } from "../src/pipeline/ffbin";
-import { normalizeReason, normalizeVideo, originalsOf, probeFormat, type VideoFormat } from "../src/pipeline/normalize";
+import { containerReason, normalizeReason, normalizeVideo, originalsOf, probeFormat, type VideoFormat } from "../src/pipeline/normalize";
 
 const phone: VideoFormat = { codec: "h264", pixFmt: "yuv420p", range: "tv", matrix: "bt709", transfer: "bt709", width: 1080, height: 1920, audioCodec: "aac" };
 
@@ -62,5 +62,47 @@ describe("formato de trabalho", () => {
     const f = await probeFormat(r.abs);
     expect(f).toMatchObject({ codec: "h264", pixFmt: "yuv420p", range: "tv", matrix: "bt709", transfer: "bt709", width: 1080, height: 1920 });
     expect(normalizeReason(f)).toBeNull();
+  }, 120_000);
+
+  it("só MP4 passa direto como recipiente na entrada", () => {
+    expect(containerReason("/x/source-src_01.mp4")).toBeNull();
+    expect(containerReason("/x/source-src_01.MOV")).toBe("MOV → MP4");
+    expect(containerReason("/x/source-src_01.mkv")).toBe("MKV → MP4");
+  });
+
+  it("MOV leve já no formato de trabalho troca só de recipiente; sem toMp4 fica como está", async () => {
+    const src = path.join(dir, "source-src_mov.mov");
+    await runOrThrow(ffmpegPath, [
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=2",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+      "-pix_fmt", "yuv420p", "-c:v", "libx264", "-b:v", "2M", "-c:a", "aac",
+      src,
+    ]);
+    expect((await normalizeVideo(src)).converted).toBe(false);
+    const r = await normalizeVideo(src, { toMp4: true });
+    expect(r).toMatchObject({ converted: true, reason: "MOV → MP4" });
+    expect(path.basename(r.abs)).toBe("source-src_mov.mp4");
+    expect(await probeFormat(r.abs)).toMatchObject({ codec: "h264", width: 1280, height: 720, audioCodec: "aac" });
+    expect(originalsOf(r.abs).map((p) => path.basename(p))).toEqual(["original-source-src_mov.mov"]);
+    expect((await normalizeVideo(r.abs, { toMp4: true })).converted).toBe(false);
+  }, 60_000);
+
+  it("MOV HDR 1080p (iPhone) com toMp4 vira MP4 SDR; sem toMp4 continua intocado", async () => {
+    const src = path.join(dir, "source-src_iphone.mov");
+    await runOrThrow(ffmpegPath, [
+      "-y", "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "testsrc2=size=1080x1920:rate=30:duration=1",
+      "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+      "-pix_fmt", "yuv420p10le", "-c:v", "libx265", "-x265-params", "log-level=error:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+      "-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc",
+      "-c:a", "aac",
+      src,
+    ]);
+    expect((await normalizeVideo(src)).converted).toBe(false);
+    const r = await normalizeVideo(src, { toMp4: true });
+    expect(r.converted).toBe(true);
+    expect(path.extname(r.abs)).toBe(".mp4");
+    expect(await probeFormat(r.abs)).toMatchObject({ codec: "h264", pixFmt: "yuv420p", transfer: "bt709", width: 1080, height: 1920 });
   }, 120_000);
 });

@@ -89,6 +89,7 @@ import { Timeline, type TimelineItemAction, type TimelineTool } from "./Timeline
 import { TranscriptPanel } from "./TranscriptPanel";
 import { Logo } from "../ui/Logo";
 import { DragLayer } from "./DragLayer";
+import { PresenceBar } from "../ui/presence";
 import { NotificationBell } from "../home/NotificationBell";
 import { useEditTracker } from "./useEditTracker";
 
@@ -1337,6 +1338,12 @@ export const Editor: React.FC<EditorProps> = ({
         >
           <Icon name="redo" size={16} />
         </button>
+        <PresenceBar
+          onOpenDemand={(id) => {
+            window.location.hash = `#/demandas/${encodeURIComponent(id)}`;
+            onHome();
+          }}
+        />
         <NotificationBell
           onOpenDemand={(id) => {
             window.location.hash = `#/demandas/${encodeURIComponent(id)}`;

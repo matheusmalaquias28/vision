@@ -8,6 +8,7 @@ import { loadRecipe, saveRecipe, slugify } from "./project";
 import { checkClipUpload, clipUpload, createProjectFromUploads, upload, uploadName } from "./uploads";
 import { demandsRouter } from "./demands/routes";
 import { authRouter, requireAuth } from "./auth";
+import { presenceRouter } from "./presence";
 import { usersRouter } from "./users";
 import { purgeInfo, rawMissing, scheduleRetention } from "./retention";
 import { autoColorGrades } from "./pipeline/colorStats";
@@ -67,6 +68,7 @@ app.use("/api/projects/:id", (req, res, next) => {
 app.use(authRouter);
 app.use(usersRouter);
 app.use(demandsRouter);
+app.use(presenceRouter);
 // Serve media/ na raiz (mesma convenção do staticFile() do Remotion). Cache:
 // cópia leve do preview tem carimbo no nome (nunca muda) e a biblioteca é
 // importada uma vez; o resto (brutos, áudio tratado) revalida a cada uso.
@@ -456,7 +458,7 @@ app.post(
       const copied = path.join(projectDir(id), `source-${srcId}${ext}`);
       fs.copyFileSync(req.file.path, copied);
       fs.rmSync(req.file.path, { force: true });
-      const { abs: destAbs } = await normalizeVideo(copied);
+      const { abs: destAbs } = await normalizeVideo(copied, { toMp4: true });
       const probe = await probeVideo(destAbs);
       // cópia leve do preview já começa (o Player pega quando ficar pronta)
       queuePreviewProxy(id, destAbs);
